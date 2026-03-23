@@ -58,21 +58,21 @@ struct NewWorkspaceView: View {
                     .padding(20)
                 }
             }
-            .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+            .navigationBarHidden(true)
+            .safeAreaInset(edge: .top) {
+                HStack {
                     Text("new workspace")
                         .font(.system(size: 20, weight: .bold, design: .monospaced))
                         .foregroundColor(TarsyTheme.accentAmber)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
+                    Spacer()
                     Button("cancel") { dismiss() }
                         .font(TarsyTheme.monoFontSmall)
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 12)
+                .background(TarsyTheme.backgroundPrimary)
             }
-            .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
         }
         .onAppear { scanRepos() }
     }
