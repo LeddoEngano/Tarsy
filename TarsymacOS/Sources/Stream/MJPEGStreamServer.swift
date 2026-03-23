@@ -37,11 +37,18 @@ actor MJPEGStreamServer {
         print("[MJPEG] Stopped")
     }
 
+    private var jpegQuality: CGFloat = 0.6
+    private var maxFrameSize: Int = 200_000
+
+    func setQuality(jpegQuality: CGFloat, maxFrameSize: Int) {
+        self.jpegQuality = jpegQuality
+        self.maxFrameSize = maxFrameSize
+    }
+
     func sendFrame(_ cgImage: CGImage) {
         guard !connections.isEmpty else { return }
-        guard let jpegData = jpegEncode(cgImage, quality: 0.3) else { return }
-        // Skip frames that are too large for VPN
-        guard jpegData.count < 50_000 else { return }
+        guard let jpegData = jpegEncode(cgImage, quality: jpegQuality) else { return }
+        guard jpegData.count < maxFrameSize else { return }
 
         let header = "--\(boundary)\r\nContent-Type: image/jpeg\r\nContent-Length: \(jpegData.count)\r\n\r\n"
         guard let headerData = header.data(using: .ascii) else { return }
@@ -52,21 +59,12 @@ actor MJPEGStreamServer {
         frameData.append("\r\n".data(using: .ascii)!)
 
         for (id, connection) in connections {
-            // Send in smaller chunks to avoid VPN fragmentation issues
-            let chunkSize = 8192
-            var offset = 0
-            while offset < frameData.count {
-                let end = min(offset + chunkSize, frameData.count)
-                let chunk = frameData[offset..<end]
-                let isLast = end == frameData.count
-                connection.send(content: chunk, isComplete: isLast, completion: .contentProcessed { [weak self] error in
-                    if let error {
-                        print("[MJPEG] Send error for \(id): \(error)")
-                        Task { await self?.removeConnection(id) }
-                    }
-                })
-                offset = end
-            }
+            connection.send(content: frameData, completion: .contentProcessed { [weak self] error in
+                if let error {
+                    print("[MJPEG] Send error for \(id): \(error)")
+                    Task { await self?.removeConnection(id) }
+                }
+            })
         }
     }
 

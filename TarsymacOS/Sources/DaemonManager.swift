@@ -721,6 +721,24 @@ class DaemonManager: ObservableObject {
                 log("streamStart: MJPEG server started on port 8643")
             }
 
+            // Detect if connection is local WiFi or Tailscale VPN
+            let isLocalConnection = !(packet.payload?["ip"]?.hasPrefix("100.") ?? true)
+            let fps: Int
+            let scale: CGFloat
+            if isLocalConnection {
+                // Local WiFi — high quality
+                fps = 15
+                scale = 0.7
+                await mjpegServer?.setQuality(jpegQuality: 0.65, maxFrameSize: 500_000)
+                log("streamStart: local WiFi — high quality (15fps, 0.7x, q0.65)")
+            } else {
+                // Tailscale VPN — lower quality to avoid fragmentation
+                fps = 5
+                scale = 0.4
+                await mjpegServer?.setQuality(jpegQuality: 0.35, maxFrameSize: 80_000)
+                log("streamStart: Tailscale VPN — low quality (5fps, 0.4x, q0.35)")
+            }
+
             // Wire screen capture to MJPEG
             screenCapture.onFrame = { [weak self] cgImage in
                 Task {
@@ -728,7 +746,7 @@ class DaemonManager: ObservableObject {
                 }
             }
 
-            try await screenCapture.startCapture(window: window, fps: 3, scale: 0.35)
+            try await screenCapture.startCapture(window: window, fps: fps, scale: scale)
             log("streamStart: capture started")
 
             let streamPort: UInt16 = 8643

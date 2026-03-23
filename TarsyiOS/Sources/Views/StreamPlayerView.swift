@@ -14,7 +14,7 @@ class MJPEGStreamViewModel: ObservableObject {
     private let jpegStart = Data([0xFF, 0xD8])
     private let jpegEnd = Data([0xFF, 0xD9])
     private var lastFrameTime: CFAbsoluteTime = 0
-    private let minFrameInterval: CFAbsoluteTime = 1.0 / 6.0 // Max 6 fps to keep UI responsive
+    private let minFrameInterval: CFAbsoluteTime = 1.0 / 15.0 // Max 15 fps
     private let processingQueue = DispatchQueue(label: "mjpeg.processing", qos: .userInitiated)
 
     func connect(host: String, port: UInt16) {
@@ -480,10 +480,13 @@ struct StreamPlayerView: View {
     private func startStream() {
         isActive = true
 
-        // Build payload with streamUrl if available
+        // Build payload with streamUrl and connection IP
         var payload: [String: String] = ["stack": workspace.stack.rawValue]
         if let url = workspace.streamUrl, !url.isEmpty {
             payload["streamUrl"] = url
+        }
+        if let ip = machineService.bestIP {
+            payload["ip"] = ip // So Mac knows if we're local or VPN
         }
 
         // Send stream:start via WebSocket — Mac will start capture + MJPEG server
