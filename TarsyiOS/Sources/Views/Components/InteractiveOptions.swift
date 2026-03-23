@@ -34,9 +34,16 @@ struct MultiQuestionFormView: View {
     let onSubmit: ([String: String]) -> Void
 
     @State private var answers: [Int: String] = [:] // questionIndex -> selected option
+    @State private var customInputs: [Int: String] = [:] // questionIndex -> custom text
+    @State private var showCustomInput: [Int: Bool] = [:] // questionIndex -> is "other" selected
 
     private var allAnswered: Bool {
-        questions.indices.allSatisfy { answers[$0] != nil }
+        questions.indices.allSatisfy { index in
+            if showCustomInput[index] == true {
+                return !(customInputs[index] ?? "").isEmpty
+            }
+            return answers[index] != nil
+        }
     }
 
     var body: some View {
@@ -77,8 +84,11 @@ struct MultiQuestionFormView: View {
             // Options
             VStack(spacing: 4) {
                 ForEach(Array(question.options.enumerated()), id: \.offset) { optIndex, option in
-                    let isSelected = answers[index] == option
-                    Button(action: { answers[index] = option }) {
+                    let isSelected = answers[index] == option && showCustomInput[index] != true
+                    Button(action: {
+                        answers[index] = option
+                        showCustomInput[index] = false
+                    }) {
                         HStack(spacing: 8) {
                             Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                                 .font(.system(size: 14))
@@ -100,6 +110,51 @@ struct MultiQuestionFormView: View {
                         )
                     }
                 }
+
+                // "Other" option with text input
+                let isOtherSelected = showCustomInput[index] == true
+                Button(action: {
+                    showCustomInput[index] = true
+                    answers[index] = nil
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: isOtherSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 14))
+                            .foregroundColor(isOtherSelected ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
+
+                        Text("Other...")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(isOtherSelected ? TarsyTheme.accentAmber.opacity(0.1) : TarsyTheme.backgroundTertiary)
+                    .cornerRadius(6)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(isOtherSelected ? TarsyTheme.accentAmber : Color.clear, lineWidth: 1)
+                    )
+                }
+
+                if isOtherSelected {
+                    TextField("", text: Binding(
+                        get: { customInputs[index] ?? "" },
+                        set: { customInputs[index] = $0 }
+                    ), prompt: Text("type your answer...").foregroundColor(TarsyTheme.textSecondary.opacity(0.5)))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textPrimary)
+                        .padding(10)
+                        .background(TarsyTheme.backgroundPrimary)
+                        .cornerRadius(6)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(TarsyTheme.accentAmber.opacity(0.5), lineWidth: 1)
+                        )
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                }
             }
         }
         .padding(10)
@@ -110,7 +165,9 @@ struct MultiQuestionFormView: View {
     private func submit() {
         var result: [String: String] = [:]
         for (index, question) in questions.enumerated() {
-            if let answer = answers[index] {
+            if showCustomInput[index] == true {
+                result[question.question] = customInputs[index] ?? ""
+            } else if let answer = answers[index] {
                 result[question.question] = answer
             }
         }
