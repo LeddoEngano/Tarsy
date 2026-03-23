@@ -15,6 +15,7 @@ struct WorkspaceView: View {
     @State private var messageText = ""
     @State private var isStreamActive = false
     @State private var isAgentThinking = false
+    @State private var agentActivity: String? = nil // Current tool use activity
     @StateObject private var chatService = ChatService()
 
     private var currentTab: TerminalTab {
@@ -133,8 +134,11 @@ struct WorkspaceView: View {
                             .id(message.id)
                     }
 
-                    // Thinking indicator
-                    if isAgentThinking {
+                    // Agent activity / thinking indicator
+                    if let activity = agentActivity {
+                        AgentActivityView(text: activity)
+                            .id("activity")
+                    } else if isAgentThinking {
                         ThinkingIndicator()
                             .id("thinking")
                     }
@@ -175,6 +179,9 @@ struct WorkspaceView: View {
             .onChange(of: isAgentThinking) { _, _ in
                 scrollToBottom(proxy)
             }
+            .onChange(of: agentActivity) { _, _ in
+                scrollToBottom(proxy)
+            }
         }
     }
 
@@ -184,6 +191,8 @@ struct WorkspaceView: View {
                 proxy.scrollTo("interactive-questions", anchor: .bottom)
             } else if interactiveOptions != nil {
                 proxy.scrollTo("interactive-options", anchor: .bottom)
+            } else if agentActivity != nil {
+                proxy.scrollTo("activity", anchor: .bottom)
             } else if isAgentThinking {
                 proxy.scrollTo("thinking", anchor: .bottom)
             } else if let last = chatService.messages.last {
@@ -403,10 +412,23 @@ struct WorkspaceView: View {
                 case .claudeOutput:
                     isAgentThinking = false
                     if let output = packet.payload?["output"] {
-                        chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
+                        if output.hasPrefix("🔧") {
+                            // Tool use activity — show as status, not in chat bubble
+                            let clean = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                            agentActivity = clean
+                        } else if output.hasPrefix("📋") {
+                            // Question prefix — show in chat
+                            agentActivity = nil
+                            chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
+                        } else {
+                            // Regular text response — show in chat bubble
+                            agentActivity = nil
+                            chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
+                        }
                     }
                 case .claudeComplete:
                     isAgentThinking = false
+                    agentActivity = nil
                     await chatService.saveLastAssistantMessage()
                 case .claudeCreate:
                     if let sessionId = packet.payload?["sessionId"] {

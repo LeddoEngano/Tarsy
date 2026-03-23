@@ -6,7 +6,6 @@ struct ThinkingIndicator: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Animated dots
             HStack(spacing: 4) {
                 ForEach(0..<3) { index in
                     Circle()
@@ -21,9 +20,8 @@ struct ThinkingIndicator: View {
                 .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(TarsyTheme.textSecondary)
         }
-        .padding(10)
-        .background(TarsyTheme.backgroundSecondary)
-        .cornerRadius(10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {
             timer = Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { _ in
@@ -33,5 +31,30 @@ struct ThinkingIndicator: View {
         .onDisappear {
             timer?.invalidate()
         }
+    }
+}
+
+struct AgentActivityView: View {
+    let text: String
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(TarsyTheme.accentAmber)
+                .frame(width: 6, height: 6)
+                .opacity(pulse ? 1.0 : 0.4)
+                .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
+
+            Text(text)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(TarsyTheme.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear { pulse = true }
     }
 }
