@@ -50,7 +50,7 @@ class TailscaleManager: ObservableObject {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: brew)
-        process.arguments = ["install", "--cask", "tailscale"]
+        process.arguments = ["install", "--cask", "tailscale-app"]
 
         var env = ProcessInfo.processInfo.environment
         env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
@@ -61,13 +61,13 @@ class TailscaleManager: ObservableObject {
         process.standardOutput = outputPipe
         process.standardError = errorPipe
 
-        var allOutput = ""
+        let outputAccumulator = OutputAccumulator()
 
         // Read stdout in real-time
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            allOutput += text
+            outputAccumulator.append(text)
             Task { @MainActor in
                 self?.appendLog(text)
                 self?.updateProgress(from: text)
@@ -79,7 +79,7 @@ class TailscaleManager: ObservableObject {
         errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            allOutput += text
+            outputAccumulator.append(text)
             Task { @MainActor in
                 self?.appendLog(text)
                 self?.updateProgress(from: text)
@@ -97,22 +97,29 @@ class TailscaleManager: ObservableObject {
             }
         }
 
+        // Give pipes a moment to flush remaining data
+        try? await Task.sleep(nanoseconds: 500_000_000)
+
         outputPipe.fileHandleForReading.readabilityHandler = nil
         errorPipe.fileHandleForReading.readabilityHandler = nil
 
         // Check if Tailscale.app exists regardless of exit code
-        // (brew sometimes returns non-zero for warnings/caveats)
+        // (brew returns non-zero for caveats like kernel extension warnings)
         let appInstalled = FileManager.default.fileExists(atPath: "/Applications/Tailscale.app")
+        let caskInstalled = FileManager.default.fileExists(atPath: "/opt/homebrew/Caskroom/tailscale-app")
 
-        if appInstalled {
+        if appInstalled || caskInstalled {
             installProgress = 1.0
             appendLog("\n✓ Tailscale installed successfully!\n")
-            appendLog("→ Please open Tailscale from Applications and sign in.\n")
+            appendLog("→ Opening Tailscale — please sign in.\n")
 
-            // Try to open Tailscale app
-            NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Tailscale.app"))
-        } else if process.terminationStatus != 0 {
-            throw TailscaleError.installFailed(allOutput)
+            // Open Tailscale app
+            if appInstalled {
+                NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Tailscale.app"))
+            }
+        } else {
+            let output = outputAccumulator.value
+            throw TailscaleError.installFailed(output.isEmpty ? "Installation failed with exit code \(process.terminationStatus)" : output)
         }
     }
 
@@ -202,5 +209,23 @@ class TailscaleManager: ObservableObject {
             case .noIP: return "Could not get Tailscale IP. Open Tailscale app and sign in first."
             }
         }
+    }
+}
+
+// Thread-safe string accumulator for pipe output
+private class OutputAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value = ""
+
+    var value: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return _value
+    }
+
+    func append(_ text: String) {
+        lock.lock()
+        _value += text
+        lock.unlock()
     }
 }
