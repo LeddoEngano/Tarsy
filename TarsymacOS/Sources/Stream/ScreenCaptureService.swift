@@ -86,7 +86,7 @@ class ScreenCaptureService: NSObject, ObservableObject {
         selectedWindow = window
         let filter = SCContentFilter(desktopIndependentWindow: window)
 
-        let titleBarHeight: CGFloat = cropTitleBar ? 28 : 0
+        let titleBarHeight: CGFloat = cropTitleBar ? 52 : 0  // Title bar + toolbar in Simulator
         let contentHeight = window.frame.height - titleBarHeight
 
         let config = SCStreamConfiguration()

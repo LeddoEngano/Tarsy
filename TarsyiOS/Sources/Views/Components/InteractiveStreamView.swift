@@ -25,33 +25,33 @@ struct InteractiveStreamView: View {
             // Stream + controls — respects safe area naturally
             VStack(spacing: 0) {
                 // Top bar — always visible
-                HStack {
+                HStack(spacing: 0) {
+                    // FPS — fixed width so it doesn't push buttons
                     Text("\(viewModel.fps) fps")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.6))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.black.opacity(0.5))
-                        .cornerRadius(4)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
+                        .frame(width: 50, alignment: .leading)
 
                     Spacer()
 
-                    // Simulator device buttons
-                    HStack(spacing: 16) {
+                    // Simulator device buttons — centered
+                    HStack(spacing: 20) {
                         deviceButton(icon: "house.fill", action: "home")
-                        deviceButton(icon: "rectangle.dashed.and.arrow.up", action: "screenshot")
+                        deviceButton(icon: "camera.shutter.button", action: "screenshot")
                         deviceButton(icon: "rotate.right", action: "rotate_right")
                     }
 
                     Spacer()
 
+                    // Close button — fixed width to match FPS
                     Button(action: onClose) {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.title2)
-                            .foregroundColor(.white.opacity(0.7))
+                            .font(.system(size: 22))
+                            .foregroundColor(.white.opacity(0.6))
                     }
+                    .frame(width: 50, alignment: .trailing)
                 }
-                .padding(.horizontal)
+                .padding(.horizontal, 12)
                 .padding(.top, 4)
 
                 // Stream image — takes remaining space
@@ -78,17 +78,15 @@ struct InteractiveStreamView: View {
                     }
                 }
 
-                // Hint bar — always visible
+                // Hint bar — at the very bottom
                 HStack(spacing: 12) {
-                    hintLabel(icon: "hand.tap", text: "tap = click")
-                    hintLabel(icon: "hand.draw", text: "drag = scroll")
-                    hintLabel(icon: "hand.tap.fill", text: "hold = right-click")
+                    hintLabel(icon: "hand.tap", text: "tap")
+                    hintLabel(icon: "hand.draw", text: "scroll")
+                    hintLabel(icon: "hand.tap.fill", text: "hold")
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-                .background(.black.opacity(0.6))
-                .cornerRadius(12)
-                .padding(.bottom, 4)
+                .padding(.vertical, 6)
+                .padding(.bottom, 0)
             }
         }
         .statusBarHidden()

@@ -13,6 +13,8 @@ class RemoteInputService {
     private var simulatorScreenHeight: CGFloat = 874
     private var simulatorWindowHeight: CGFloat = 0
 
+    private let simulatorCropHeight: CGFloat = 52 // Must match ScreenCaptureService
+
     // Browser/desktop state
     private var windowFocused = false
 
