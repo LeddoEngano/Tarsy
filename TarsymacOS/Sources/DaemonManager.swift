@@ -15,6 +15,8 @@ class DaemonManager: ObservableObject {
     private let tailscale = TailscaleManager()
     private let terminalManager = TerminalSessionManager()
     private var orchestrator: WorkspaceOrchestrator?
+    private let screenCapture = ScreenCaptureService()
+    private var mjpegServer: MJPEGStreamServer?
     private var heartbeatTimer: Timer?
 
     func start() async {
@@ -126,6 +128,10 @@ class DaemonManager: ObservableObject {
             await handleTerminalInput(clientId: clientId, packet: packet)
         case .terminalClose:
             await handleTerminalClose(clientId: clientId, packet: packet)
+        case .streamStart:
+            await handleStreamStart(clientId: clientId, packet: packet)
+        case .streamStop:
+            await handleStreamStop(clientId: clientId, packet: packet)
         default:
             await wsServer?.send(
                 WSPacket(action: .error, payload: ["message": "Unknown action: \(packet.action.rawValue)"]),
@@ -238,6 +244,65 @@ class DaemonManager: ObservableObject {
         await terminalManager.closeSession(sessionId)
         await wsServer?.send(
             WSPacket(action: .terminalClose, payload: ["sessionId": sessionId], id: packet.id),
+            to: clientId
+        )
+    }
+
+    // MARK: - Stream
+
+    private func handleStreamStart(clientId: String, packet: WSPacket) async {
+        let stack = packet.payload?["stack"] ?? "web"
+
+        // Find the right window for this stack
+        guard let window = await screenCapture.findWindow(forStack: stack) else {
+            await wsServer?.send(
+                WSPacket(action: .error, payload: ["message": "No matching window found for stack: \(stack)"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        do {
+            // Start MJPEG server if not running
+            if mjpegServer == nil {
+                mjpegServer = MJPEGStreamServer()
+                try await mjpegServer?.start()
+            }
+
+            // Wire screen capture to MJPEG
+            screenCapture.onFrame = { [weak self] cgImage in
+                Task {
+                    await self?.mjpegServer?.sendFrame(cgImage)
+                }
+            }
+
+            try await screenCapture.startCapture(window: window, fps: 10, scale: 0.5)
+
+            let streamPort: UInt16 = 8643
+            await wsServer?.send(
+                WSPacket(action: .streamStart, payload: [
+                    "port": "\(streamPort)",
+                    "window": window.title ?? "unknown",
+                    "width": "\(Int(window.frame.width))",
+                    "height": "\(Int(window.frame.height))"
+                ], id: packet.id),
+                to: clientId
+            )
+        } catch {
+            await wsServer?.send(
+                WSPacket(action: .error, payload: ["message": "Stream failed: \(error.localizedDescription)"], id: packet.id),
+                to: clientId
+            )
+        }
+    }
+
+    private func handleStreamStop(clientId: String, packet: WSPacket) async {
+        await screenCapture.stopCapture()
+        await mjpegServer?.stop()
+        mjpegServer = nil
+
+        await wsServer?.send(
+            WSPacket(action: .streamStop, id: packet.id),
             to: clientId
         )
     }

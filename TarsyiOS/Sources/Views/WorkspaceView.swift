@@ -19,7 +19,7 @@ struct WorkspaceView: View {
 
             VStack(spacing: 0) {
                 // Stream area
-                StreamView(isActive: $isStreamActive, workspace: workspace)
+                StreamPlayerView(workspace: workspace, isActive: $isStreamActive)
                     .frame(maxWidth: .infinity)
                     .frame(height: UIScreen.main.bounds.height * 0.4)
 
@@ -177,45 +177,3 @@ struct MessageBubble: View {
     }
 }
 
-struct StreamView: View {
-    @Binding var isActive: Bool
-    let workspace: Workspace
-
-    var body: some View {
-        ZStack {
-            TarsyTheme.backgroundSecondary
-
-            if isActive {
-                // TODO: WebRTC stream view
-                Text("stream active")
-                    .font(TarsyTheme.monoFont)
-                    .foregroundColor(TarsyTheme.textSecondary)
-            } else {
-                VStack(spacing: 12) {
-                    Image(systemName: "eye")
-                        .font(.system(size: 40))
-                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
-
-                    Text("stream offline")
-                        .font(TarsyTheme.monoFont)
-                        .foregroundColor(TarsyTheme.textSecondary)
-
-                    Button(action: { isActive = true }) {
-                        Text("start stream")
-                            .font(TarsyTheme.monoFontSmall)
-                            .foregroundColor(TarsyTheme.accentAmber)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(TarsyTheme.accentAmber, lineWidth: 1)
-                            )
-                    }
-                }
-            }
-        }
-        .cornerRadius(12)
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
-    }
-}

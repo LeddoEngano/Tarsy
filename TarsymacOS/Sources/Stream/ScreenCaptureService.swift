@@ -1,0 +1,105 @@
+import Foundation
+import ScreenCaptureKit
+import CoreGraphics
+import CoreImage
+
+@MainActor
+class ScreenCaptureService: NSObject, ObservableObject {
+    @Published var isCapturing = false
+    @Published var availableWindows: [SCWindow] = []
+    @Published var selectedWindow: SCWindow?
+
+    private var stream: SCStream?
+    private var streamOutput: StreamOutput?
+
+    var onFrame: ((CGImage) -> Void)?
+
+    func refreshWindows() async {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            availableWindows = content.windows.filter { window in
+                guard let title = window.title, !title.isEmpty else { return false }
+                guard window.frame.width > 100, window.frame.height > 100 else { return false }
+                return true
+            }
+        } catch {
+            print("[ScreenCapture] Failed to get windows: \(error)")
+        }
+    }
+
+    func findWindow(forStack stack: String) async -> SCWindow? {
+        await refreshWindows()
+
+        let targetApps: [String]
+        switch stack {
+        case "web":
+            targetApps = ["Google Chrome", "Safari", "Firefox", "Arc", "Microsoft Edge", "Brave Browser"]
+        case "mobile":
+            targetApps = ["Simulator", "Xcode Previews"]
+        case "backend":
+            targetApps = ["Terminal", "iTerm2", "Warp", "Alacritty", "kitty", "Ghostty", "cmux"]
+        default:
+            targetApps = ["Google Chrome", "Safari", "Simulator", "Terminal"]
+        }
+
+        for appName in targetApps {
+            if let window = availableWindows.first(where: {
+                $0.owningApplication?.applicationName == appName
+            }) {
+                return window
+            }
+        }
+
+        return availableWindows.first
+    }
+
+    func startCapture(window: SCWindow, fps: Int = 10, scale: CGFloat = 0.5) async throws {
+        selectedWindow = window
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+
+        let config = SCStreamConfiguration()
+        config.width = Int(window.frame.width * scale)
+        config.height = Int(window.frame.height * scale)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+        config.queueDepth = 3
+        config.showsCursor = true
+
+        streamOutput = StreamOutput { [weak self] image in
+            self?.onFrame?(image)
+        }
+
+        stream = SCStream(filter: filter, configuration: config, delegate: nil)
+        try stream?.addStreamOutput(streamOutput!, type: .screen, sampleHandlerQueue: .global(qos: .userInteractive))
+        try await stream?.startCapture()
+        isCapturing = true
+        print("[ScreenCapture] Started capturing: \(window.title ?? "unknown")")
+    }
+
+    func stopCapture() async {
+        try? await stream?.stopCapture()
+        stream = nil
+        streamOutput = nil
+        isCapturing = false
+        selectedWindow = nil
+        print("[ScreenCapture] Stopped")
+    }
+}
+
+private class StreamOutput: NSObject, SCStreamOutput {
+    let handler: (CGImage) -> Void
+
+    init(handler: @escaping (CGImage) -> Void) {
+        self.handler = handler
+    }
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen,
+              let imageBuffer = sampleBuffer.imageBuffer else { return }
+
+        let ciImage = CIImage(cvPixelBuffer: imageBuffer)
+        let context = CIContext()
+        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return }
+
+        handler(cgImage)
+    }
+}
