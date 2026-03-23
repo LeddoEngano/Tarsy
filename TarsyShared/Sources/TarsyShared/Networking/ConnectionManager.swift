@@ -55,7 +55,11 @@ public class ConnectionManager: ObservableObject {
 
     public func send(_ packet: WSPacket) {
         guard let connection,
-              let data = try? packet.encode() else { return }
+              let data = try? packet.encode() else {
+            print("[WS] Send failed: connection=\(self.connection != nil), action=\(packet.action.rawValue)")
+            return
+        }
+        print("[WS] Sending: \(packet.action.rawValue)")
 
         let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
         let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])

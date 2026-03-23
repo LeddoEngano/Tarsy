@@ -183,15 +183,17 @@ struct WorkspaceView: View {
         Task {
             await chatService.addMessage(msg)
 
+            print("[Chat] sendMessage: tab=\(currentTab.type), sessionId=\(currentTab.sessionId ?? "nil"), connected=\(connectionManager.isConnected), path=\(workspace.localPath)")
+
             if currentTab.type == .claude {
                 if let sessionId = currentTab.sessionId {
-                    // Send to existing Claude session
+                    print("[Chat] Sending claudeMessage to session \(sessionId)")
                     connectionManager.send(WSPacket(
                         action: .claudeMessage,
                         payload: ["sessionId": sessionId, "message": text]
                     ))
                 } else {
-                    // Create new Claude session
+                    print("[Chat] Sending claudeCreate with path=\(workspace.localPath)")
                     connectionManager.send(WSPacket(
                         action: .claudeCreate,
                         payload: [
