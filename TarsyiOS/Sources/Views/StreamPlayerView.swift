@@ -250,17 +250,12 @@ struct StreamPlayerView: View {
         connectionManager.send(WSPacket(action: .streamStart, payload: ["stack": workspace.stack.rawValue]))
 
         // Listen for stream:start response which confirms server is ready
-        let previousHandler = connectionManager.onPacketReceived
-        connectionManager.onPacketReceived = { packet in
+        connectionManager.addListener("stream") { [self] packet in
             if packet.action == .streamStart, let port = packet.payload?["port"] {
-                // Server is ready, connect MJPEG client
-                if let ip = self.machineService.bestIP {
-                    self.viewModel.connect(host: ip, port: UInt16(port) ?? 8643)
+                if let ip = machineService.bestIP {
+                    viewModel.connect(host: ip, port: UInt16(port) ?? 8643)
                 }
-                // Restore handler
-                self.connectionManager.onPacketReceived = previousHandler
-            } else {
-                previousHandler?(packet)
+                connectionManager.removeListener("stream")
             }
         }
 

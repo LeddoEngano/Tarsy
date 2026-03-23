@@ -78,6 +78,9 @@ struct WorkspaceView: View {
             await chatService.loadMessages(workspaceId: workspace.id, tabId: currentTab.id)
             setupOutputHandler()
         }
+        .onDisappear {
+            cleanupHandler()
+        }
     }
 
     // MARK: - Tab Bar
@@ -239,7 +242,7 @@ struct WorkspaceView: View {
     }
 
     private func setupOutputHandler() {
-        connectionManager.onPacketReceived = { [self] packet in
+        connectionManager.addListener("workspace-\(workspace.id)") { [self] packet in
             Task { @MainActor in
                 switch packet.action {
                 case .claudeOutput:
@@ -251,6 +254,7 @@ struct WorkspaceView: View {
                 case .claudeCreate:
                     if let sessionId = packet.payload?["sessionId"] {
                         tabs[selectedTabIndex].sessionId = sessionId
+                        // Send the initial message now that we have a session
                     }
                 case .openclawOutput:
                     if let output = packet.payload?["output"] {
@@ -267,6 +271,10 @@ struct WorkspaceView: View {
                 }
             }
         }
+    }
+
+    private func cleanupHandler() {
+        connectionManager.removeListener("workspace-\(workspace.id)")
     }
 }
 

@@ -19,8 +19,18 @@ public class ConnectionManager: ObservableObject {
     private let maxReconnectAttempts = 10
 
     public var onPacketReceived: ((WSPacket) -> Void)?
+    private var packetListeners: [String: (WSPacket) -> Void] = [:]
 
     public init() {}
+
+    /// Add a named listener for packets. Multiple listeners can coexist.
+    public func addListener(_ id: String, handler: @escaping (WSPacket) -> Void) {
+        packetListeners[id] = handler
+    }
+
+    public func removeListener(_ id: String) {
+        packetListeners.removeValue(forKey: id)
+    }
 
     public func connect(to host: String, port: UInt16, token: String) {
         self.host = host
@@ -142,13 +152,19 @@ public class ConnectionManager: ObservableObject {
             }
         case .error:
             let msg = packet.payload?["message"] ?? ""
-            // Ignore harmless "Unknown action" errors for internal actions
             if !msg.contains("Unknown action") {
                 errorMessage = msg
             }
-            onPacketReceived?(packet)
+            notifyListeners(packet)
         default:
-            onPacketReceived?(packet)
+            notifyListeners(packet)
+        }
+    }
+
+    private func notifyListeners(_ packet: WSPacket) {
+        onPacketReceived?(packet)
+        for (_, listener) in packetListeners {
+            listener(packet)
         }
     }
 
