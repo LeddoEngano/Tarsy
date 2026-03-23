@@ -193,7 +193,7 @@ struct OnboardingWindow: View {
     // MARK: - Tailscale Step
 
     private var tailscaleStep: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             Spacer()
 
             Image(systemName: "network")
@@ -209,29 +209,86 @@ struct OnboardingWindow: View {
                 .foregroundColor(Color(hex: "a89e91"))
                 .multilineTextAlignment(.center)
 
-            // Status
-            HStack(spacing: 8) {
-                statusIcon
-                Text(daemonManager.tailscaleStatus)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(Color(hex: "a89e91"))
-            }
-            .padding(12)
-            .background(Color(hex: "2a2a2a"))
-            .cornerRadius(8)
+            // Install progress
+            if daemonManager.tailscale.isInstalling {
+                VStack(spacing: 10) {
+                    // Progress bar
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("installing tailscale...")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(Color(hex: "d4a574"))
+                            Spacer()
+                            Text("\(Int(daemonManager.tailscale.installProgress * 100))%")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(Color(hex: "a89e91"))
+                        }
 
-            if let ip = daemonManager.tailscaleIP {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color(hex: "2a2a2a"))
+                                    .frame(height: 6)
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(Color(hex: "d4a574"))
+                                    .frame(width: geo.size.width * daemonManager.tailscale.installProgress, height: 6)
+                                    .animation(.easeInOut(duration: 0.3), value: daemonManager.tailscale.installProgress)
+                            }
+                        }
+                        .frame(height: 6)
+                    }
+                    .padding(.horizontal, 40)
+
+                    // Live log output
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            Text(daemonManager.tailscale.installLog)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(Color(hex: "7a8b6f"))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                                .id("logBottom")
+                        }
+                        .frame(maxWidth: 380, maxHeight: 120)
+                        .background(Color(hex: "1a1a1a"))
+                        .cornerRadius(8)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Color(hex: "2a2a2a"), lineWidth: 1)
+                        )
+                        .onChange(of: daemonManager.tailscale.installLog) { _, _ in
+                            proxy.scrollTo("logBottom", anchor: .bottom)
+                        }
+                    }
+                }
+            } else {
+                // Status display
                 HStack(spacing: 8) {
-                    Text("your tailscale ip:")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Color(hex: "6b6b6b"))
-                    Text(ip)
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundColor(Color(hex: "7a8b6f"))
-                        .textSelection(.enabled)
+                    statusIcon
+                    Text(daemonManager.tailscaleStatus)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(Color(hex: "a89e91"))
+                        .lineLimit(2)
+                }
+                .padding(12)
+                .frame(maxWidth: 380)
+                .background(Color(hex: "2a2a2a"))
+                .cornerRadius(8)
+
+                if let ip = daemonManager.tailscaleIP {
+                    HStack(spacing: 8) {
+                        Text("your tailscale ip:")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(hex: "6b6b6b"))
+                        Text(ip)
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .foregroundColor(Color(hex: "7a8b6f"))
+                            .textSelection(.enabled)
+                    }
                 }
             }
 
+            // Action buttons
             if daemonManager.tailscaleIP != nil {
                 Button(action: { step = .ready }) {
                     Text("continue")
@@ -243,22 +300,49 @@ struct OnboardingWindow: View {
                         .cornerRadius(8)
                 }
                 .buttonStyle(.plain)
-            } else if daemonManager.tailscaleStatus.contains("not") || daemonManager.tailscaleStatus.contains("install") {
-                Button(action: {
-                    Task { await daemonManager.start() }
-                }) {
-                    Text("install tailscale")
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundColor(Color(hex: "1a1a1a"))
-                        .frame(maxWidth: 200)
-                        .padding(12)
-                        .background(Color(hex: "d4a574"))
-                        .cornerRadius(8)
+            } else if !daemonManager.tailscale.isInstalling {
+                VStack(spacing: 8) {
+                    if daemonManager.tailscaleStatus.contains("not installed") {
+                        Button(action: {
+                            Task { await daemonManager.installTailscale() }
+                        }) {
+                            Text("install tailscale")
+                                .font(.system(size: 14, design: .monospaced))
+                                .foregroundColor(Color(hex: "1a1a1a"))
+                                .frame(maxWidth: 200)
+                                .padding(12)
+                                .background(Color(hex: "d4a574"))
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                    } else if daemonManager.tailscaleStatus.contains("installed") || daemonManager.tailscaleStatus.contains("open") {
+                        Text("open the Tailscale app and sign in,\nthen click refresh below")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(Color(hex: "6b6b6b"))
+                            .multilineTextAlignment(.center)
+
+                        Button(action: {
+                            Task { await daemonManager.refreshTailscale() }
+                        }) {
+                            Text("refresh status")
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(Color(hex: "d4a574"))
+                                .frame(maxWidth: 200)
+                                .padding(10)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Color(hex: "d4a574"), lineWidth: 1)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .buttonStyle(.plain)
             }
 
             Spacer()
+        }
+        .task {
+            await daemonManager.setupTailscale()
         }
     }
 
@@ -267,12 +351,15 @@ struct OnboardingWindow: View {
         if daemonManager.tailscaleIP != nil {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(Color(hex: "7a8b6f"))
-        } else if daemonManager.tailscaleStatus.contains("install") {
-            ProgressView()
-                .controlSize(.small)
+        } else if daemonManager.tailscaleStatus.contains("installed") {
+            Image(systemName: "app.badge")
+                .foregroundColor(Color(hex: "d4a574"))
+        } else if daemonManager.tailscaleStatus.contains("not installed") {
+            Image(systemName: "arrow.down.circle")
+                .foregroundColor(Color(hex: "d4a574"))
         } else {
             Image(systemName: "exclamationmark.triangle")
-                .foregroundColor(Color(hex: "d4a574"))
+                .foregroundColor(Color(hex: "c4704b"))
         }
     }
 

@@ -1,6 +1,12 @@
 import Foundation
+import AppKit
 
-class TailscaleManager {
+@MainActor
+class TailscaleManager: ObservableObject {
+    @Published var installProgress: Double = 0
+    @Published var installLog: String = ""
+    @Published var isInstalling = false
+
     enum TailscaleStatus {
         case notInstalled
         case installed
@@ -9,37 +15,104 @@ class TailscaleManager {
     }
 
     func checkStatus() async -> TailscaleStatus {
-        // Check if tailscale CLI exists
         let cliPath = findTailscaleCLI()
-        guard let cli = cliPath else {
+        let appExists = FileManager.default.fileExists(atPath: "/Applications/Tailscale.app")
+
+        if cliPath == nil && !appExists {
             return .notInstalled
         }
 
-        // Check if running and get IP
-        do {
-            let ip = try await getTailscaleIP(cli: cli)
-            return .running(ip: ip)
-        } catch {
-            return .installed
+        // App installed but CLI might not be in PATH
+        if let cli = cliPath {
+            do {
+                let ip = try await getTailscaleIP(cli: cli)
+                return .running(ip: ip)
+            } catch {
+                return .installed
+            }
         }
+
+        return .installed
     }
 
-    func install() async throws {
+    func install(onOutput: @escaping (String) -> Void) async throws {
+        isInstalling = true
+        installProgress = 0
+        installLog = ""
+
+        defer { isInstalling = false }
+
+        // Find brew
+        let brewPath = findBrew()
+        guard let brew = brewPath else {
+            throw TailscaleError.installFailed("Homebrew not found. Install it from https://brew.sh")
+        }
+
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
+        process.executableURL = URL(fileURLWithPath: brew)
         process.arguments = ["install", "--cask", "tailscale"]
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        var env = ProcessInfo.processInfo.environment
+        env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
+        process.environment = env
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+
+        var allOutput = ""
+
+        // Read stdout in real-time
+        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            allOutput += text
+            Task { @MainActor in
+                self?.appendLog(text)
+                self?.updateProgress(from: text)
+                onOutput(text)
+            }
+        }
+
+        // Read stderr in real-time (brew writes progress here)
+        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            allOutput += text
+            Task { @MainActor in
+                self?.appendLog(text)
+                self?.updateProgress(from: text)
+                onOutput(text)
+            }
+        }
 
         try process.run()
-        process.waitUntilExit()
 
-        if process.terminationStatus != 0 {
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw TailscaleError.installFailed(output)
+        // Wait on background thread
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                process.waitUntilExit()
+                continuation.resume()
+            }
+        }
+
+        outputPipe.fileHandleForReading.readabilityHandler = nil
+        errorPipe.fileHandleForReading.readabilityHandler = nil
+
+        // Check if Tailscale.app exists regardless of exit code
+        // (brew sometimes returns non-zero for warnings/caveats)
+        let appInstalled = FileManager.default.fileExists(atPath: "/Applications/Tailscale.app")
+
+        if appInstalled {
+            installProgress = 1.0
+            appendLog("\n✓ Tailscale installed successfully!\n")
+            appendLog("→ Please open Tailscale from Applications and sign in.\n")
+
+            // Try to open Tailscale app
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Tailscale.app"))
+        } else if process.terminationStatus != 0 {
+            throw TailscaleError.installFailed(allOutput)
         }
     }
 
@@ -58,7 +131,13 @@ class TailscaleManager {
         process.standardError = Pipe()
 
         try process.run()
-        process.waitUntilExit()
+
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                process.waitUntilExit()
+                continuation.resume()
+            }
+        }
 
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let ip = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -67,6 +146,39 @@ class TailscaleManager {
         }
 
         return ip
+    }
+
+    // MARK: - Private
+
+    private func appendLog(_ text: String) {
+        installLog += text
+    }
+
+    private func updateProgress(from text: String) {
+        let lower = text.lowercased()
+        if lower.contains("downloading") || lower.contains("fetching") {
+            installProgress = max(installProgress, 0.2)
+        }
+        if lower.contains("downloaded") {
+            installProgress = max(installProgress, 0.5)
+        }
+        if lower.contains("installing") || lower.contains("cask") {
+            installProgress = max(installProgress, 0.6)
+        }
+        if lower.contains("linking") || lower.contains("moving") {
+            installProgress = max(installProgress, 0.8)
+        }
+        if lower.contains("caveats") || lower.contains("installed") {
+            installProgress = max(installProgress, 0.9)
+        }
+    }
+
+    private func findBrew() -> String? {
+        let paths = [
+            "/opt/homebrew/bin/brew",
+            "/usr/local/bin/brew"
+        ]
+        return paths.first { FileManager.default.fileExists(atPath: $0) }
     }
 
     private func findTailscaleCLI() -> String? {
@@ -86,8 +198,8 @@ class TailscaleManager {
         var errorDescription: String? {
             switch self {
             case .notInstalled: return "Tailscale is not installed"
-            case .installFailed(let msg): return "Failed to install Tailscale: \(msg)"
-            case .noIP: return "Could not get Tailscale IP. Is Tailscale running?"
+            case .installFailed(let msg): return "Install failed: \(msg)"
+            case .noIP: return "Could not get Tailscale IP. Open Tailscale app and sign in first."
             }
         }
     }

@@ -12,7 +12,7 @@ class DaemonManager: ObservableObject {
     @Published var machineId: UUID?
 
     private var wsServer: WebSocketServer?
-    private let tailscale = TailscaleManager()
+    let tailscale = TailscaleManager()
     private let terminalManager = TerminalSessionManager()
     private var orchestrator: WorkspaceOrchestrator?
     private let screenCapture = ScreenCaptureService()
@@ -51,25 +51,39 @@ class DaemonManager: ObservableObject {
 
     // MARK: - Tailscale
 
-    private func setupTailscale() async {
+    func setupTailscale() async {
         let status = await tailscale.checkStatus()
         switch status {
         case .notInstalled:
-            tailscaleStatus = "installing..."
-            do {
-                try await tailscale.install()
-                tailscaleStatus = "installed - please open Tailscale app and sign in"
-            } catch {
-                tailscaleStatus = "install failed: \(error.localizedDescription)"
-            }
+            tailscaleStatus = "not installed"
         case .installed:
-            tailscaleStatus = "installed - not running"
+            tailscaleStatus = "installed - open Tailscale app and sign in"
         case .running(let ip):
             tailscaleIP = ip
             tailscaleStatus = "connected (\(ip))"
         case .error(let msg):
             tailscaleStatus = "error: \(msg)"
         }
+    }
+
+    func installTailscale() async {
+        tailscaleStatus = "installing..."
+        do {
+            try await tailscale.install { [weak self] output in
+                Task { @MainActor in
+                    self?.tailscaleStatus = "installing..."
+                }
+            }
+            tailscaleStatus = "installed - open Tailscale app and sign in"
+            // Re-check after install
+            await setupTailscale()
+        } catch {
+            tailscaleStatus = error.localizedDescription
+        }
+    }
+
+    func refreshTailscale() async {
+        await setupTailscale()
     }
 
     // MARK: - WebSocket Server
