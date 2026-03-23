@@ -229,11 +229,9 @@ class RemoteInputService {
         case "siri":
             runIdb(["ui", "button", "SIRI"])
         case "rotate_left":
-            // Send Cmd+Left to Simulator app
-            sendSimulatorShortcut(keyCode: 0x7B, modifiers: .maskCommand) // Left arrow
+            rotateSimulator(direction: "left")
         case "rotate_right":
-            // Send Cmd+Right to Simulator app
-            sendSimulatorShortcut(keyCode: 0x7C, modifiers: .maskCommand) // Right arrow
+            rotateSimulator(direction: "right")
         case "screenshot":
             takeSimulatorScreenshot()
         default:
@@ -241,21 +239,23 @@ class RemoteInputService {
         }
     }
 
-    private func sendSimulatorShortcut(keyCode: CGKeyCode, modifiers: CGEventFlags) {
-        inputQueue.async { [self] in
-            // Focus Simulator first
-            if let app = NSRunningApplication(processIdentifier: ownerPid) {
-                app.activate()
+    private func rotateSimulator(direction: String) {
+        idbQueue.async {
+            let keyChar = direction == "left" ? (UnicodeScalar(0x2190)!) : (UnicodeScalar(0x2192)!) // ← or →
+            let script = """
+            tell application "System Events"
+                tell process "Simulator"
+                    keystroke (ASCII character \(direction == "left" ? 28 : 29)) using command down
+                end tell
+            end tell
+            """
+            if let appleScript = NSAppleScript(source: script) {
+                var error: NSDictionary?
+                appleScript.executeAndReturnError(&error)
+                if let err = error {
+                    print("[RemoteInput] Rotate failed: \(err)")
+                }
             }
-            usleep(100_000)
-
-            let down = CGEvent(keyboardEventSource: eventSource, virtualKey: keyCode, keyDown: true)
-            down?.flags = modifiers
-            down?.post(tap: .cghidEventTap)
-            usleep(30_000)
-            let up = CGEvent(keyboardEventSource: eventSource, virtualKey: keyCode, keyDown: false)
-            up?.flags = modifiers
-            up?.post(tap: .cghidEventTap)
         }
     }
 
@@ -299,25 +299,13 @@ class RemoteInputService {
     // MARK: - idb Commands (Simulator)
 
     /// Convert stream-relative coords (0-1) to device screen coords (points) for idb.
-    /// The stream captures the full Simulator window which includes a ~28pt title bar.
-    /// We need to subtract the title bar portion from Y before mapping to device coords.
+    /// The stream is now cropped to exclude the Simulator title bar,
+    /// so relative coords map directly to device screen.
     private func streamToDeviceCoords(relativeX: CGFloat, relativeY: CGFloat) -> (x: Int, y: Int) {
         let rx = max(0, min(1, relativeX))
-
-        // Get current window height to calculate title bar ratio
-        let titleBarRatio: CGFloat
-        if let frame = getCurrentWindowFrame(), frame.height > 0 {
-            // Title bar is ~28pt on macOS
-            titleBarRatio = 28.0 / frame.height
-        } else {
-            titleBarRatio = 0.0375 // fallback: 28/746
-        }
-
-        // Adjust Y: remove title bar portion, remap to device screen
-        let adjustedY = max(0, min(1, (relativeY - titleBarRatio) / (1.0 - titleBarRatio)))
-
+        let ry = max(0, min(1, relativeY))
         let x = Int(rx * simulatorScreenWidth)
-        let y = Int(adjustedY * simulatorScreenHeight)
+        let y = Int(ry * simulatorScreenHeight)
         return (x, y)
     }
 

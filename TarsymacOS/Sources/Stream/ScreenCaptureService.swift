@@ -77,7 +77,7 @@ class ScreenCaptureService: NSObject, ObservableObject {
         return availableWindows.first
     }
 
-    func startCapture(window: SCWindow, fps: Int = 10, scale: CGFloat = 0.5) async throws {
+    func startCapture(window: SCWindow, fps: Int = 10, scale: CGFloat = 0.5, cropTitleBar: Bool = false) async throws {
         // If already capturing, just stop the old stream first without destroying everything
         if isCapturing {
             try? await stream?.stopCapture()
@@ -86,12 +86,25 @@ class ScreenCaptureService: NSObject, ObservableObject {
         selectedWindow = window
         let filter = SCContentFilter(desktopIndependentWindow: window)
 
+        let titleBarHeight: CGFloat = cropTitleBar ? 28 : 0
+        let contentHeight = window.frame.height - titleBarHeight
+
         let config = SCStreamConfiguration()
         config.width = Int(window.frame.width * scale)
-        config.height = Int(window.frame.height * scale)
+        config.height = Int(contentHeight * scale)
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = 3
         config.showsCursor = true
+
+        // Crop out title bar by setting sourceRect
+        if cropTitleBar {
+            config.sourceRect = CGRect(
+                x: 0,
+                y: titleBarHeight,
+                width: window.frame.width,
+                height: contentHeight
+            )
+        }
 
         // Reuse stream output if possible
         if streamOutput == nil {

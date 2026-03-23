@@ -810,11 +810,10 @@ class DaemonManager: ObservableObject {
                 }
             }
 
-            try await screenCapture.startCapture(window: window, fps: fps, scale: scale)
-
-            // Set target window for remote input
             let ownerApp = window.owningApplication?.applicationName ?? ""
             let isSimulator = ownerApp == "Simulator"
+
+            try await screenCapture.startCapture(window: window, fps: fps, scale: scale, cropTitleBar: isSimulator)
             let pid = window.owningApplication?.processID ?? 0
             remoteInput.setTargetWindow(
                 frame: window.frame,

@@ -39,7 +39,7 @@ struct InteractiveStreamView: View {
                     // Simulator device buttons
                     HStack(spacing: 16) {
                         deviceButton(icon: "house.fill", action: "home")
-                        deviceButton(icon: "camera.fill", action: "screenshot")
+                        deviceButton(icon: "rectangle.dashed.and.arrow.up", action: "screenshot")
                         deviceButton(icon: "rotate.right", action: "rotate_right")
                     }
 
