@@ -373,10 +373,11 @@ struct OnboardingWindow: View {
 
     @State private var hasScreenRecording = false
     @State private var hasAccessibility = false
+    @State private var hasFilesAccess = false
     @State private var isCheckingPermissions = false
 
     private var allPermissionsGranted: Bool {
-        hasScreenRecording && hasAccessibility
+        hasScreenRecording && hasAccessibility && hasFilesAccess
     }
 
     private var permissionsStep: some View {
@@ -409,6 +410,13 @@ struct OnboardingWindow: View {
                     description: "control windows and detect running apps",
                     granted: hasAccessibility,
                     settingsKey: "Privacy_Accessibility"
+                )
+
+                permissionRow(
+                    name: "files and folders",
+                    description: "scan your projects to find repos",
+                    granted: hasFilesAccess,
+                    settingsKey: "Privacy_FilesAndFolders"
                 )
             }
             .padding(.horizontal, 24)
@@ -501,8 +509,8 @@ struct OnboardingWindow: View {
     private func checkPermissions() {
         isCheckingPermissions = true
 
-        // Check Screen Recording - try to get shareable content
         Task {
+            // Check Screen Recording
             do {
                 let _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 hasScreenRecording = true
@@ -513,8 +521,42 @@ struct OnboardingWindow: View {
             // Check Accessibility
             hasAccessibility = AXIsProcessTrusted()
 
+            // Check Files and Folders — pre-access all scan directories
+            // This triggers the permission dialog once for each directory
+            // After granting, macOS remembers and won't ask again
+            hasFilesAccess = preAccessDirectories()
+
             isCheckingPermissions = false
         }
+    }
+
+    private func preAccessDirectories() -> Bool {
+        let fm = FileManager.default
+        let dirs = [
+            NSHomeDirectory() + "/Desktop",
+            NSHomeDirectory() + "/Documents",
+            NSHomeDirectory() + "/Projects",
+            NSHomeDirectory() + "/Developer",
+            NSHomeDirectory() + "/Code",
+            NSHomeDirectory() + "/repos",
+            NSHomeDirectory() + "/dev",
+            NSHomeDirectory() + "/work",
+            NSHomeDirectory() + "/src",
+            NSHomeDirectory()
+        ]
+
+        var accessCount = 0
+        for dir in dirs {
+            if fm.fileExists(atPath: dir) {
+                // Try to list contents — this triggers the permission dialog
+                if let _ = try? fm.contentsOfDirectory(atPath: dir) {
+                    accessCount += 1
+                }
+            }
+        }
+
+        // Consider it granted if we can access at least Desktop and home
+        return accessCount >= 2
     }
 
     private func openSettings(_ key: String) {
