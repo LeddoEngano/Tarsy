@@ -1,5 +1,6 @@
 import SwiftUI
 import TarsyShared
+import ScreenCaptureKit
 
 struct OnboardingWindow: View {
     @EnvironmentObject var authManager: AuthManager
@@ -12,6 +13,7 @@ struct OnboardingWindow: View {
     enum OnboardingStep {
         case login
         case tailscale
+        case permissions
         case ready
     }
 
@@ -37,6 +39,8 @@ struct OnboardingWindow: View {
                         loginStep
                     case .tailscale:
                         tailscaleStep
+                    case .permissions:
+                        permissionsStep
                     case .ready:
                         readyStep
                     }
@@ -88,14 +92,16 @@ struct OnboardingWindow: View {
     // MARK: - Steps Indicator
 
     private var stepsIndicator: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 10) {
             stepDot(label: "1. login", active: step == .login, done: step != .login)
             stepLine(done: step != .login)
-            stepDot(label: "2. tailscale", active: step == .tailscale, done: step == .ready)
+            stepDot(label: "2. tailscale", active: step == .tailscale, done: step == .permissions || step == .ready)
+            stepLine(done: step == .permissions || step == .ready)
+            stepDot(label: "3. permissions", active: step == .permissions, done: step == .ready)
             stepLine(done: step == .ready)
-            stepDot(label: "3. ready", active: step == .ready, done: false)
+            stepDot(label: "4. ready", active: step == .ready, done: false)
         }
-        .padding(.horizontal, 40)
+        .padding(.horizontal, 24)
     }
 
     @ViewBuilder
@@ -290,7 +296,7 @@ struct OnboardingWindow: View {
 
             // Action buttons
             if daemonManager.tailscaleIP != nil {
-                Button(action: { step = .ready }) {
+                Button(action: { step = .permissions }) {
                     Text("continue")
                         .font(.system(size: 14, design: .monospaced))
                         .foregroundColor(Color(hex: "1a1a1a"))
@@ -360,6 +366,160 @@ struct OnboardingWindow: View {
         } else {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundColor(Color(hex: "c4704b"))
+        }
+    }
+
+    // MARK: - Permissions Step
+
+    @State private var hasScreenRecording = false
+    @State private var hasAccessibility = false
+    @State private var isCheckingPermissions = false
+
+    private var allPermissionsGranted: Bool {
+        hasScreenRecording && hasAccessibility
+    }
+
+    private var permissionsStep: some View {
+        VStack(spacing: 16) {
+            Spacer()
+
+            Image(systemName: "lock.shield")
+                .font(.system(size: 36))
+                .foregroundColor(Color(hex: "d4a574"))
+
+            Text("permissions")
+                .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                .foregroundColor(Color(hex: "e8e0d4"))
+
+            Text("tarsy needs these permissions\nto capture your screen and control windows")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Color(hex: "a89e91"))
+                .multilineTextAlignment(.center)
+
+            VStack(spacing: 10) {
+                permissionRow(
+                    name: "screen recording",
+                    description: "stream your browser/simulator to iphone",
+                    granted: hasScreenRecording,
+                    settingsKey: "Privacy_ScreenCapture"
+                )
+
+                permissionRow(
+                    name: "accessibility",
+                    description: "control windows and detect running apps",
+                    granted: hasAccessibility,
+                    settingsKey: "Privacy_Accessibility"
+                )
+            }
+            .padding(.horizontal, 24)
+
+            HStack(spacing: 12) {
+                Button(action: { checkPermissions() }) {
+                    HStack(spacing: 6) {
+                        if isCheckingPermissions {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                        Text("refresh")
+                            .font(.system(size: 13, design: .monospaced))
+                    }
+                    .foregroundColor(Color(hex: "d4a574"))
+                    .frame(maxWidth: 120)
+                    .padding(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color(hex: "d4a574"), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                if allPermissionsGranted {
+                    Button(action: { step = .ready }) {
+                        Text("continue")
+                            .font(.system(size: 14, design: .monospaced))
+                            .foregroundColor(Color(hex: "1a1a1a"))
+                            .frame(maxWidth: 120)
+                            .padding(10)
+                            .background(Color(hex: "d4a574"))
+                            .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            if !allPermissionsGranted {
+                Text("grant permissions above, then click refresh")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Color(hex: "6b6b6b"))
+            }
+
+            Spacer()
+        }
+        .task {
+            checkPermissions()
+        }
+    }
+
+    @ViewBuilder
+    private func permissionRow(name: String, description: String, granted: Bool, settingsKey: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: granted ? "checkmark.circle.fill" : "xmark.circle")
+                .font(.system(size: 18))
+                .foregroundColor(granted ? Color(hex: "7a8b6f") : Color(hex: "c4704b"))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundColor(Color(hex: "e8e0d4"))
+                Text(description)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Color(hex: "6b6b6b"))
+            }
+
+            Spacer()
+
+            if !granted {
+                Button(action: { openSettings(settingsKey) }) {
+                    Text("open settings")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Color(hex: "d4a574"))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(Color(hex: "d4a574"), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .background(Color(hex: "2a2a2a"))
+        .cornerRadius(8)
+    }
+
+    private func checkPermissions() {
+        isCheckingPermissions = true
+
+        // Check Screen Recording - try to get shareable content
+        Task {
+            do {
+                let _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                hasScreenRecording = true
+            } catch {
+                hasScreenRecording = false
+            }
+
+            // Check Accessibility
+            hasAccessibility = AXIsProcessTrusted()
+
+            isCheckingPermissions = false
+        }
+    }
+
+    private func openSettings(_ key: String) {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(key)") {
+            NSWorkspace.shared.open(url)
         }
     }
 
