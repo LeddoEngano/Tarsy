@@ -120,6 +120,8 @@ struct WorkspaceView: View {
 
     // MARK: - Chat Area
 
+    @State private var interactiveOptions: [InteractiveOption]? = nil
+
     private var chatArea: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -128,15 +130,78 @@ struct WorkspaceView: View {
                         MessageBubble(message: message)
                             .id(message.id)
                     }
+
+                    // Interactive options from Claude CLI
+                    if let options = interactiveOptions {
+                        InteractiveOptionsView(options: options) { selected in
+                            sendInteractiveChoice(selected)
+                        }
+                        .id("interactive-options")
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
                 }
                 .padding(12)
             }
             .onChange(of: chatService.messages.count) { _, _ in
-                if let last = chatService.messages.last {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(last.id, anchor: .bottom)
-                    }
-                }
+                scrollToBottom(proxy)
+                checkForInteractivePrompt()
+            }
+            .onChange(of: interactiveOptions?.count) { _, _ in
+                scrollToBottom(proxy)
+            }
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy) {
+        if interactiveOptions != nil {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo("interactive-options", anchor: .bottom)
+            }
+        } else if let last = chatService.messages.last {
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo(last.id, anchor: .bottom)
+            }
+        }
+    }
+
+    private func checkForInteractivePrompt() {
+        guard let lastMessage = chatService.messages.last,
+              lastMessage.role == .assistant else {
+            interactiveOptions = nil
+            return
+        }
+
+        // Check the last part of the message for interactive prompts
+        let lines = lastMessage.content.components(separatedBy: "\n")
+        let lastLines = lines.suffix(5).joined(separator: "\n")
+
+        if let options = InteractiveParser.parse(lastLines) {
+            withAnimation { interactiveOptions = options }
+        } else {
+            interactiveOptions = nil
+        }
+    }
+
+    private func sendInteractiveChoice(_ option: InteractiveOption) {
+        withAnimation { interactiveOptions = nil }
+
+        // Add as user message in chat
+        let msg = ChatMessage(
+            workspaceId: workspace.id,
+            tabId: currentTab.id,
+            role: .user,
+            content: option.label
+        )
+
+        Task {
+            await chatService.addMessage(msg)
+
+            // Send the value to the Claude CLI via terminal
+            if let sessionId = currentTab.sessionId {
+                connectionManager.send(WSPacket(
+                    action: .claudeMessage,
+                    payload: ["sessionId": sessionId, "message": option.value]
+                ))
             }
         }
     }
