@@ -66,18 +66,27 @@ class TailscaleManager: ObservableObject {
         )
 
         installProgress = 0.5
-        appendLog("→ Download complete. Installing (admin password required)...\n")
-        onOutput("→ Installing (admin password required)...\n")
+        appendLog("→ Download complete. Installing...\n")
+        onOutput("→ Installing...\n")
 
-        // Step 2: Install via osascript with admin privileges
-        // This shows the native macOS password dialog
-        let script = """
-        do shell script "HOMEBREW_NO_AUTO_UPDATE=1 \(brew) install --cask tailscale-app 2>&1" with administrator privileges
+        // Step 2: Find the downloaded .pkg in the Caskroom and install it directly
+        // Using osascript "do shell script ... with administrator privileges" runs
+        // only the installer as admin (not brew itself, which refuses to run as root)
+        let pkgPath = try await findDownloadedPkg()
+
+        appendLog("→ Found package: \(pkgPath)\n")
+        appendLog("→ macOS will ask for your password...\n")
+        onOutput("→ macOS will ask for your password...\n")
+
+        installProgress = 0.6
+
+        let installScript = """
+        do shell script "/usr/sbin/installer -pkg \\\"\(pkgPath)\\\" -target / 2>&1" with administrator privileges
         """
 
         let installResult = try await runProcess(
             executable: "/usr/bin/osascript",
-            arguments: ["-e", script],
+            arguments: ["-e", installScript],
             onOutput: { [weak self] text in
                 Task { @MainActor in
                     self?.appendLog(text)
@@ -143,6 +152,34 @@ class TailscaleManager: ObservableObject {
 
     private func appendLog(_ text: String) {
         installLog += text
+    }
+
+    private func findDownloadedPkg() async throws -> String {
+        // brew fetch downloads to the cache, then stages in Caskroom
+        let caskroomPath = "/opt/homebrew/Caskroom/tailscale-app"
+        let cachePath = NSHomeDirectory() + "/Library/Caches/Homebrew/downloads"
+
+        // Check Caskroom first
+        if FileManager.default.fileExists(atPath: caskroomPath) {
+            let contents = try FileManager.default.contentsOfDirectory(atPath: caskroomPath)
+            for version in contents {
+                let versionDir = "\(caskroomPath)/\(version)"
+                let pkgs = try? FileManager.default.contentsOfDirectory(atPath: versionDir)
+                if let pkg = pkgs?.first(where: { $0.hasSuffix(".pkg") }) {
+                    return "\(versionDir)/\(pkg)"
+                }
+            }
+        }
+
+        // Check brew cache
+        if FileManager.default.fileExists(atPath: cachePath) {
+            let contents = try FileManager.default.contentsOfDirectory(atPath: cachePath)
+            if let pkg = contents.first(where: { $0.lowercased().contains("tailscale") && $0.hasSuffix(".pkg") }) {
+                return "\(cachePath)/\(pkg)"
+            }
+        }
+
+        throw TailscaleError.installFailed("Could not find downloaded Tailscale package. Try running: brew install --cask tailscale-app in Terminal.")
     }
 
     private func updateProgress(from text: String) {
