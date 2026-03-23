@@ -1,5 +1,7 @@
 import SwiftUI
 import TarsyShared
+import PhotosUI
+import UniformTypeIdentifiers
 
 struct WorkspaceView: View {
     let workspace: Workspace
@@ -274,27 +276,72 @@ struct WorkspaceView: View {
 
     // MARK: - Input Bar
 
+    @State private var showAttachmentPicker = false
+    @State private var showPhotoPicker = false
+    @State private var showFilePicker = false
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+
     private var inputBar: some View {
         HStack(spacing: 8) {
-            TextField("", text: $messageText, prompt: Text("send a command...").foregroundColor(TarsyTheme.textSecondary))
-                .textFieldStyle(.plain)
-                .font(TarsyTheme.monoFont)
-                .foregroundColor(TarsyTheme.textPrimary)
-                .padding(12)
-                .background(TarsyTheme.backgroundSecondary)
-                .cornerRadius(8)
-                .focused($isInputFocused)
-                .onSubmit { sendMessage() }
-
-            Button(action: { sendMessage() }) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
-                    .foregroundColor(messageText.isEmpty ? TarsyTheme.textSecondary : TarsyTheme.accentAmber)
+            // Attachment button
+            Button(action: { showAttachmentPicker.toggle() }) {
+                Image(systemName: "plus.circle.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(TarsyTheme.textSecondary)
             }
-            .disabled(messageText.isEmpty)
+
+            // Input field with send button inside
+            HStack(spacing: 0) {
+                TextField("", text: $messageText, prompt: Text("send a command...").foregroundColor(TarsyTheme.textSecondary.opacity(0.5)))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 14, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .padding(.leading, 16)
+                    .padding(.vertical, 10)
+                    .focused($isInputFocused)
+                    .onSubmit { sendMessage() }
+
+                // Send button inside the field
+                Button(action: { sendMessage() }) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(messageText.isEmpty ? TarsyTheme.textSecondary : TarsyTheme.backgroundPrimary)
+                        .frame(width: 30, height: 30)
+                        .background(messageText.isEmpty ? Color.clear : TarsyTheme.accentAmber)
+                        .cornerRadius(15)
+                }
+                .disabled(messageText.isEmpty)
+                .padding(.trailing, 4)
+            }
+            .background(TarsyTheme.backgroundSecondary)
+            .cornerRadius(22)
         }
-        .padding(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background(TarsyTheme.backgroundPrimary)
+        .confirmationDialog("Attach", isPresented: $showAttachmentPicker) {
+            Button("Photo Library") { showPhotoPicker = true }
+            Button("Camera") { /* TODO: camera */ }
+            Button("File") { showFilePicker = true }
+            Button("Cancel", role: .cancel) {}
+        }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $selectedPhotoItem, matching: .images)
+        .onChange(of: selectedPhotoItem) { _, item in
+            if let item {
+                Task {
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        let sizeKB = data.count / 1024
+                        messageText += " [image: \(sizeKB)KB]"
+                        // TODO: Upload image to Mac via WebSocket
+                    }
+                }
+            }
+        }
+        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.item]) { result in
+            if case .success(let url) = result {
+                messageText += " [file: \(url.lastPathComponent)]"
+            }
+        }
     }
 
     // MARK: - Actions
