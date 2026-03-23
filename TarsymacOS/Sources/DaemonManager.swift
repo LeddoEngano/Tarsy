@@ -10,6 +10,8 @@ class DaemonManager: ObservableObject {
     @Published var tailscaleStatus: String = "checking..."
     @Published var tailscaleIP: String?
     @Published var machineId: UUID?
+    @Published var lastError: String?
+    @Published var debugLog: String = ""
 
     private var wsServer: WebSocketServer?
     let tailscale = TailscaleManager()
@@ -505,23 +507,36 @@ class DaemonManager: ObservableObject {
         return address
     }
 
+    private func log(_ msg: String) {
+        let entry = "[\(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium))] \(msg)"
+        print(entry)
+        debugLog += entry + "\n"
+    }
+
     private func registerMachine() async {
         let hostname = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
         let localIp = getLocalIP()
 
-        // Can register with either tailscale IP or local IP
-        guard tailscaleIP != nil || localIp != nil else { return }
+        log("registerMachine: tailscaleIP=\(tailscaleIP ?? "nil"), localIP=\(localIp ?? "nil")")
+
+        guard tailscaleIP != nil || localIp != nil else {
+            log("registerMachine: skipped — no IPs available")
+            lastError = "No IPs available to register"
+            return
+        }
 
         do {
             let session = try await supabase.auth.session
+            log("registerMachine: got session for user \(session.user.id)")
 
-            // Check if machine already registered
             let existing: [Machine] = try await supabase
                 .from("machines")
                 .select()
                 .eq("user_id", value: session.user.id.uuidString)
                 .execute()
                 .value
+
+            log("registerMachine: found \(existing.count) existing machines")
 
             var updateData: [String: String] = [
                 "hostname": hostname,
@@ -538,8 +553,10 @@ class DaemonManager: ObservableObject {
                     .update(updateData)
                     .eq("id", value: machine.id.uuidString)
                     .execute()
+                log("registerMachine: updated machine \(machine.id)")
             } else {
                 updateData["user_id"] = session.user.id.uuidString
+                log("registerMachine: inserting new machine with data: \(updateData)")
                 let result: Machine = try await supabase
                     .from("machines")
                     .insert(updateData)
@@ -548,9 +565,12 @@ class DaemonManager: ObservableObject {
                     .execute()
                     .value
                 machineId = result.id
+                log("registerMachine: created machine \(result.id)")
             }
+            lastError = nil
         } catch {
-            print("[Daemon] Failed to register machine: \(error)")
+            log("registerMachine: FAILED — \(error)")
+            lastError = "Register failed: \(error.localizedDescription)"
         }
     }
 

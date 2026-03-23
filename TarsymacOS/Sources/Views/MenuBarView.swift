@@ -84,6 +84,25 @@ struct MenuBarView: View {
                 }
             }
 
+            if let err = daemonManager.lastError {
+                Divider()
+                Text(err)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.red)
+                    .lineLimit(3)
+            }
+
+            if !daemonManager.debugLog.isEmpty {
+                Divider()
+                ScrollView {
+                    Text(daemonManager.debugLog)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 100)
+            }
+
             Divider()
 
             Button("Open Setup...") {
