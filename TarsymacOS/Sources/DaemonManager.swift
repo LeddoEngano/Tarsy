@@ -167,6 +167,8 @@ class DaemonManager: ObservableObject {
             await handleTerminalClose(clientId: clientId, packet: packet)
         case .claudeCreate:
             await handleClaudeCreate(clientId: clientId, packet: packet)
+        case .claudeUserResponse:
+            await handleClaudeUserResponse(clientId: clientId, packet: packet)
         case .claudeMessage:
             await handleClaudeMessage(clientId: clientId, packet: packet)
         case .claudeClose:
@@ -347,6 +349,20 @@ class DaemonManager: ObservableObject {
                             summary: message
                         )
                     }
+                },
+                onAskUser: { [weak self] (question: String, options: [String]) in
+                    Task {
+                        let optionsJson = (try? JSONSerialization.data(withJSONObject: options))
+                            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+                        await self?.wsServer?.send(
+                            WSPacket(action: .claudeAskUser, payload: [
+                                "sessionId": sid,
+                                "question": question,
+                                "options": optionsJson
+                            ]),
+                            to: clientId
+                        )
+                    }
                 }
             )
 
@@ -371,6 +387,13 @@ class DaemonManager: ObservableObject {
                 to: clientId
             )
         }
+    }
+
+    private func handleClaudeUserResponse(clientId: String, packet: WSPacket) async {
+        guard let sessionId = packet.payload?["sessionId"],
+              let answer = packet.payload?["answer"] else { return }
+        log("claudeUserResponse: \(answer) for session \(sessionId)")
+        await terminalManager.respondToClaudeQuestion(answer, sessionId: sessionId)
     }
 
     private func handleClaudeMessage(clientId: String, packet: WSPacket) async {

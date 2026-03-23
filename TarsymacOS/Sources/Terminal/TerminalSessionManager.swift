@@ -37,19 +37,18 @@ actor TerminalSessionManager {
         workspacePath: String,
         aiContext: String? = nil,
         onOutput: @escaping @Sendable (String) -> Void,
-        onComplete: @escaping @Sendable (String) -> Void
+        onComplete: @escaping @Sendable (String) -> Void,
+        onAskUser: @escaping @Sendable (String, [String]) -> Void = { _, _ in }
     ) throws -> String {
         let session = ClaudeCodeSession(id: id, workspacePath: workspacePath, aiContext: aiContext)
         claudeSessions[id] = session
 
         Task {
-            await session.setHandlers(
-                onOutput: onOutput,
-                onComplete: { [weak self] (msg: String) in
-                    onComplete(msg)
-                    Task { await self?.removeClaudeSession(id) }
-                }
-            )
+            await session.setHandlers(onOutput: onOutput, onComplete: { [weak self] (msg: String) in
+                onComplete(msg)
+                Task { await self?.removeClaudeSession(id) }
+            })
+            await session.setAskUserHandler(onAskUser)
             try await session.start()
         }
 
@@ -58,6 +57,10 @@ actor TerminalSessionManager {
 
     func sendClaudeMessage(_ message: String, to sessionId: String) async {
         await claudeSessions[sessionId]?.sendMessage(message)
+    }
+
+    func respondToClaudeQuestion(_ answer: String, sessionId: String) async {
+        await claudeSessions[sessionId]?.respondToQuestion(answer)
     }
 
     func closeClaudeSession(_ sessionId: String) async {

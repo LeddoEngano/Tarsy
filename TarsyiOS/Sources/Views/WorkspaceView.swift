@@ -203,11 +203,12 @@ struct WorkspaceView: View {
         Task {
             await chatService.addMessage(msg)
 
-            // Send the value to the Claude CLI via terminal
+            // Send the user's choice to the Claude session
             if let sessionId = currentTab.sessionId {
+                isAgentThinking = true
                 connectionManager.send(WSPacket(
-                    action: .claudeMessage,
-                    payload: ["sessionId": sessionId, "message": option.value]
+                    action: .claudeUserResponse,
+                    payload: ["sessionId": sessionId, "answer": option.value]
                 ))
             }
         }
@@ -361,7 +362,20 @@ struct WorkspaceView: View {
                 case .claudeCreate:
                     if let sessionId = packet.payload?["sessionId"] {
                         tabs[selectedTabIndex].sessionId = sessionId
-                        // Send the initial message now that we have a session
+                    }
+                case .claudeAskUser:
+                    isAgentThinking = false
+                    if let question = packet.payload?["question"],
+                       let optionsJson = packet.payload?["options"],
+                       let optionsData = optionsJson.data(using: .utf8),
+                       let options = try? JSONSerialization.jsonObject(with: optionsData) as? [String] {
+                        // Show interactive options from AskUserQuestion
+                        let parsed = options.enumerated().map { index, opt in
+                            InteractiveOption(label: opt, value: opt, style: .numbered)
+                        }
+                        if !parsed.isEmpty {
+                            withAnimation { interactiveOptions = parsed }
+                        }
                     }
                 case .openclawOutput:
                     if let output = packet.payload?["output"] {

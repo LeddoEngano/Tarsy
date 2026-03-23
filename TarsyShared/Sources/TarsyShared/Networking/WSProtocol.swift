@@ -29,6 +29,8 @@ public enum WSAction: String, Codable, Sendable {
     case claudeOutput = "claude:output"
     case claudeComplete = "claude:complete"
     case claudeClose = "claude:close"
+    case claudeAskUser = "claude:ask_user"
+    case claudeUserResponse = "claude:user_response"
 
     // OpenClaw
     case openclawStatus = "openclaw:status"
