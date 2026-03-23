@@ -111,15 +111,18 @@ class RemoteInputService {
     func scroll(relativeX: CGFloat, relativeY: CGFloat, deltaX: CGFloat, deltaY: CGFloat) {
         inputQueue.async { [self] in
             if isMobileSimulator && isDragging {
-                currentDragPoint.x += deltaX
-                currentDragPoint.y += deltaY
+                // Simulator: drag follows finger direction (same as iOS touch)
+                // deltaX/deltaY are in iOS points, scale to Mac screen pixels
+                currentDragPoint.x += deltaX * 2
+                currentDragPoint.y += deltaY * 2
                 let drag = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDragged, mouseCursorPosition: currentDragPoint, mouseButton: .left)
                 drag?.post(tap: .cghidEventTap)
             } else if !isMobileSimulator {
+                // Browser: scroll wheel (inverted — drag down = scroll up)
                 guard let point = currentAbsolutePoint(relativeX: relativeX, relativeY: relativeY) else { return }
                 let move = CGEvent(mouseEventSource: eventSource, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
                 move?.post(tap: .cghidEventTap)
-                if let scroll = CGEvent(scrollWheelEvent2Source: eventSource, units: .pixel, wheelCount: 2, wheel1: Int32(deltaY), wheel2: Int32(deltaX), wheel3: 0) {
+                if let scroll = CGEvent(scrollWheelEvent2Source: eventSource, units: .pixel, wheelCount: 2, wheel1: Int32(-deltaY * 3), wheel2: Int32(-deltaX * 3), wheel3: 0) {
                     scroll.post(tap: .cghidEventTap)
                 }
             }

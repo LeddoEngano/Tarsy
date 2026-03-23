@@ -683,7 +683,7 @@ struct TabButton: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(isSelected ? TarsyTheme.backgroundTertiary : Color.clear)
-            .cornerRadius(6)
+            .clipShape(UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 6))
         }
     }
 }

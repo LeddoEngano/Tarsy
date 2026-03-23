@@ -154,8 +154,8 @@ struct InteractiveStreamView: View {
                     payload: [
                         "x": f(rel.x),
                         "y": f(rel.y),
-                        "dx": f(-dx),
-                        "dy": f(-dy)
+                        "dx": f(dx),
+                        "dy": f(dy)
                     ]
                 ))
             }
