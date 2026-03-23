@@ -19,6 +19,7 @@ struct TarsymacOSApp: App {
         Settings {
             SettingsView()
                 .environmentObject(authManager)
+                .environmentObject(daemonManager)
         }
     }
 }

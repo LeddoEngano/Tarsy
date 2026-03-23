@@ -3,6 +3,7 @@ import TarsyShared
 
 struct SettingsView: View {
     @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var daemonManager: DaemonManager
     @State private var email = ""
     @State private var password = ""
 
@@ -54,7 +55,16 @@ struct SettingsView: View {
                     Text("Tailscale:")
                         .font(.system(size: 12, design: .monospaced))
                     Spacer()
-                    Text("checking...")
+                    Text(daemonManager.tailscaleStatus)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Text("Tailscale IP:")
+                        .font(.system(size: 12, design: .monospaced))
+                    Spacer()
+                    Text(daemonManager.tailscaleIP ?? "n/a")
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.secondary)
                 }
@@ -64,6 +74,15 @@ struct SettingsView: View {
                         .font(.system(size: 12, design: .monospaced))
                     Spacer()
                     Text("\(TarsyConfig.websocketPort)")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Text("Clients:")
+                        .font(.system(size: 12, design: .monospaced))
+                    Spacer()
+                    Text("\(daemonManager.connectedClients)")
                         .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(.secondary)
                 }

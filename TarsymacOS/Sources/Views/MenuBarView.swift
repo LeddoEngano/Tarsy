@@ -54,10 +54,23 @@ struct MenuBarView: View {
                 Divider()
 
                 // Stats
-                HStack {
-                    Text("clients: \(daemonManager.connectedClients)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("tailscale:")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        Text(daemonManager.tailscaleStatus)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                    HStack {
+                        Text("clients:")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        Text("\(daemonManager.connectedClients)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
 
@@ -78,7 +91,7 @@ struct MenuBarView: View {
         .frame(width: 280)
         .task {
             if authManager.isAuthenticated {
-                daemonManager.start()
+                await daemonManager.start()
             }
         }
     }
