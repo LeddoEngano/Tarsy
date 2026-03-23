@@ -240,15 +240,26 @@ class RemoteInputService {
 
     // MARK: - idb Commands (Simulator)
 
-    /// Convert stream-relative coords (0-1) to device screen coords (points) for idb
+    /// Convert stream-relative coords (0-1) to device screen coords (points) for idb.
+    /// The stream captures the full Simulator window which includes a ~28pt title bar.
+    /// We need to subtract the title bar portion from Y before mapping to device coords.
     private func streamToDeviceCoords(relativeX: CGFloat, relativeY: CGFloat) -> (x: Int, y: Int) {
-        // Clamp to valid range
         let rx = max(0, min(1, relativeX))
-        let ry = max(0, min(1, relativeY))
 
-        // Direct mapping — Simulator window content IS the device screen
+        // Get current window height to calculate title bar ratio
+        let titleBarRatio: CGFloat
+        if let frame = getCurrentWindowFrame(), frame.height > 0 {
+            // Title bar is ~28pt on macOS
+            titleBarRatio = 28.0 / frame.height
+        } else {
+            titleBarRatio = 0.0375 // fallback: 28/746
+        }
+
+        // Adjust Y: remove title bar portion, remap to device screen
+        let adjustedY = max(0, min(1, (relativeY - titleBarRatio) / (1.0 - titleBarRatio)))
+
         let x = Int(rx * simulatorScreenWidth)
-        let y = Int(ry * simulatorScreenHeight)
+        let y = Int(adjustedY * simulatorScreenHeight)
         return (x, y)
     }
 
