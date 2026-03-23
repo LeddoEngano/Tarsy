@@ -22,7 +22,11 @@ public enum WSAction: String, Codable, Sendable {
     case remoteLongPress = "remote:long_press"
     case remoteScroll = "remote:scroll"
     case remoteDrag = "remote:drag"
+    case remoteScrollStart = "remote:scroll_start"
+    case remoteScrollEnd = "remote:scroll_end"
     case remotePinch = "remote:pinch"
+    case remotePinchStart = "remote:pinch_start"
+    case remotePinchEnd = "remote:pinch_end"
     case remoteKeyboard = "remote:keyboard"
 
     // Dev Server

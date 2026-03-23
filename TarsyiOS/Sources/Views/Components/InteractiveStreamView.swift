@@ -6,12 +6,18 @@ struct InteractiveStreamView: View {
     var connectionManager: ConnectionManager
     var onClose: () -> Void
 
-    @State private var imageSize: CGSize = .zero
-    @State private var imageOrigin: CGPoint = .zero
     @State private var showControls = true
     @State private var controlsTimer: Timer?
     @State private var tapFeedbackPoint: CGPoint? = nil
+
+    // Drag state
+    @State private var lastDragTranslation: CGSize = .zero
+    @State private var isDragActive = false
     @State private var lastScrollSendTime: CFAbsoluteTime = 0
+
+    // Pinch state
+    @State private var isPinchActive = false
+    @State private var lastPinchScale: CGFloat = 1.0
 
     var body: some View {
         GeometryReader { geo in
@@ -22,37 +28,25 @@ struct InteractiveStreamView: View {
                     Image(uiImage: frame)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .background(
-                            GeometryReader { imageGeo in
-                                Color.clear.onAppear {
-                                    calculateImageLayout(screenSize: geo.size, imageSize: frame.size)
-                                }
-                                .onChange(of: frame.size.width) { _, _ in
-                                    calculateImageLayout(screenSize: geo.size, imageSize: frame.size)
-                                }
-                            }
-                        )
                         .gesture(tapGesture(screenSize: geo.size))
-                        .gesture(dragScrollGesture(screenSize: geo.size))
+                        .gesture(dragGesture(screenSize: geo.size))
                         .gesture(pinchGesture(screenSize: geo.size))
                         .gesture(longPressGesture(screenSize: geo.size))
                 }
 
-                // Tap feedback circle
+                // Tap feedback
                 if let point = tapFeedbackPoint {
                     Circle()
                         .fill(TarsyTheme.accentAmber.opacity(0.4))
                         .frame(width: 30, height: 30)
                         .position(point)
                         .allowsHitTesting(false)
-                        .transition(.scale.combined(with: .opacity))
                 }
 
-                // Controls overlay
+                // Controls
                 if showControls {
                     VStack {
                         HStack {
-                            // FPS
                             Text("\(viewModel.fps) fps")
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(.white.opacity(0.6))
@@ -73,7 +67,6 @@ struct InteractiveStreamView: View {
 
                         Spacer()
 
-                        // Hint
                         HStack(spacing: 12) {
                             hintLabel(icon: "hand.tap", text: "tap = click")
                             hintLabel(icon: "hand.draw", text: "drag = scroll")
@@ -83,7 +76,7 @@ struct InteractiveStreamView: View {
                         .padding(.vertical, 10)
                         .background(.black.opacity(0.6))
                         .cornerRadius(12)
-                        .padding(.bottom, 40) // safe area
+                        .padding(.bottom, 40)
                     }
                     .transition(.opacity)
                 }
@@ -91,123 +84,128 @@ struct InteractiveStreamView: View {
         }
         .persistentSystemOverlays(.hidden)
         .ignoresSafeArea()
-        .onAppear { autoHideControls() }
         .statusBarHidden()
+        .onAppear { autoHideControls() }
     }
 
-    // MARK: - Gestures
+    // MARK: - Tap
 
     private func tapGesture(screenSize: CGSize) -> some Gesture {
         SpatialTapGesture()
             .onEnded { value in
-                let relative = relativePosition(from: value.location, screenSize: screenSize)
-                guard let rel = relative else { return }
-
-                // Visual feedback
+                guard let rel = relativePosition(from: value.location, screenSize: screenSize) else { return }
                 showTapFeedback(at: value.location)
-
-                // Send tap
+                Haptics.light()
                 connectionManager.send(WSPacket(
                     action: .remoteTap,
-                    payload: ["x": String(format: "%.4f", rel.x), "y": String(format: "%.4f", rel.y)]
+                    payload: ["x": f(rel.x), "y": f(rel.y)]
                 ))
-
-                // Toggle controls on tap
                 showControls = true
                 autoHideControls()
             }
     }
 
+    // MARK: - Long Press
+
     private func longPressGesture(screenSize: CGSize) -> some Gesture {
         LongPressGesture(minimumDuration: 0.5)
             .sequenced(before: SpatialTapGesture())
             .onEnded { value in
-                switch value {
-                case .second(true, let tap):
-                    if let tap {
-                        let relative = relativePosition(from: tap.location, screenSize: screenSize)
-                        guard let rel = relative else { return }
-                        connectionManager.send(WSPacket(
-                            action: .remoteLongPress,
-                            payload: ["x": String(format: "%.4f", rel.x), "y": String(format: "%.4f", rel.y)]
-                        ))
-                    }
-                default:
-                    break
+                if case .second(true, let tap) = value, let tap {
+                    guard let rel = relativePosition(from: tap.location, screenSize: screenSize) else { return }
+                    Haptics.medium()
+                    connectionManager.send(WSPacket(
+                        action: .remoteLongPress,
+                        payload: ["x": f(rel.x), "y": f(rel.y)]
+                    ))
                 }
             }
     }
 
-    private func pinchGesture(screenSize: CGSize) -> some Gesture {
-        MagnifyGesture()
-            .onEnded { value in
-                let center = CGPoint(x: screenSize.width / 2, y: screenSize.height / 2)
-                let relative = relativePosition(from: center, screenSize: screenSize)
-                guard let rel = relative else { return }
+    // MARK: - Drag (Swipe/Scroll) — Stateful
 
-                connectionManager.send(WSPacket(
-                    action: .remotePinch,
-                    payload: [
-                        "x": String(format: "%.4f", rel.x),
-                        "y": String(format: "%.4f", rel.y),
-                        "scale": String(format: "%.2f", value.magnification)
-                    ]
-                ))
-            }
-    }
-
-    private func dragScrollGesture(screenSize: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 10)
+    private func dragGesture(screenSize: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 8)
             .onChanged { value in
-                // Throttle: max ~15 events per second
+                guard let rel = relativePosition(from: value.startLocation, screenSize: screenSize) else { return }
+
+                if !isDragActive {
+                    // First drag event — send start
+                    isDragActive = true
+                    lastDragTranslation = .zero
+                    connectionManager.send(WSPacket(
+                        action: .remoteScrollStart,
+                        payload: ["x": f(rel.x), "y": f(rel.y)]
+                    ))
+                }
+
+                // Throttle to 30Hz
                 let now = CFAbsoluteTimeGetCurrent()
-                guard now - lastScrollSendTime > 0.066 else { return }
+                guard now - lastScrollSendTime > 0.033 else { return }
                 lastScrollSendTime = now
 
-                let relative = relativePosition(from: value.location, screenSize: screenSize)
-                guard let rel = relative else { return }
-
-                let dx = value.translation.width / screenSize.width
-                let dy = value.translation.height / screenSize.height
+                // Incremental delta (not cumulative)
+                let dx = value.translation.width - lastDragTranslation.width
+                let dy = value.translation.height - lastDragTranslation.height
+                lastDragTranslation = value.translation
 
                 connectionManager.send(WSPacket(
                     action: .remoteScroll,
                     payload: [
-                        "x": String(format: "%.4f", rel.x),
-                        "y": String(format: "%.4f", rel.y),
-                        "dx": String(format: "%.4f", -dx * 3),
-                        "dy": String(format: "%.4f", -dy * 3)
+                        "x": f(rel.x),
+                        "y": f(rel.y),
+                        "dx": f(-dx),
+                        "dy": f(-dy)
                     ]
                 ))
             }
+            .onEnded { _ in
+                if isDragActive {
+                    connectionManager.send(WSPacket(action: .remoteScrollEnd))
+                    isDragActive = false
+                    lastDragTranslation = .zero
+                }
+            }
     }
 
-    // MARK: - Position Calculation
+    // MARK: - Pinch — Stateful
 
-    private func calculateImageLayout(screenSize: CGSize, imageSize: CGSize) {
-        let imageAspect = imageSize.width / imageSize.height
-        let screenAspect = screenSize.width / screenSize.height
+    private func pinchGesture(screenSize: CGSize) -> some Gesture {
+        MagnifyGesture()
+            .onChanged { value in
+                let center = CGPoint(x: screenSize.width / 2, y: screenSize.height / 2)
+                guard let rel = relativePosition(from: center, screenSize: screenSize) else { return }
 
-        if imageAspect > screenAspect {
-            // Image wider than screen — pillarboxed (bars top/bottom)
-            let displayWidth = screenSize.width
-            let displayHeight = displayWidth / imageAspect
-            self.imageSize = CGSize(width: displayWidth, height: displayHeight)
-            self.imageOrigin = CGPoint(x: 0, y: (screenSize.height - displayHeight) / 2)
-        } else {
-            // Image taller — letterboxed (bars left/right)
-            let displayHeight = screenSize.height
-            let displayWidth = displayHeight * imageAspect
-            self.imageSize = CGSize(width: displayWidth, height: displayHeight)
-            self.imageOrigin = CGPoint(x: (screenSize.width - displayWidth) / 2, y: 0)
-        }
+                if !isPinchActive {
+                    isPinchActive = true
+                    lastPinchScale = 1.0
+                    connectionManager.send(WSPacket(
+                        action: .remotePinchStart,
+                        payload: ["x": f(rel.x), "y": f(rel.y)]
+                    ))
+                }
+
+                let scale = value.magnification
+                connectionManager.send(WSPacket(
+                    action: .remotePinch,
+                    payload: ["x": f(rel.x), "y": f(rel.y), "scale": f(scale)]
+                ))
+                lastPinchScale = scale
+            }
+            .onEnded { _ in
+                if isPinchActive {
+                    connectionManager.send(WSPacket(action: .remotePinchEnd))
+                    isPinchActive = false
+                    lastPinchScale = 1.0
+                }
+            }
     }
+
+    // MARK: - Position Mapping
 
     private func relativePosition(from point: CGPoint, screenSize: CGSize) -> CGPoint? {
-        guard imageSize.width > 0, imageSize.height > 0 else { return nil }
-
-        // Calculate where the image is on screen
-        let imageAspect = (viewModel.currentFrame?.size.width ?? 1) / (viewModel.currentFrame?.size.height ?? 1)
+        guard let frame = viewModel.currentFrame else { return nil }
+        let imageAspect = frame.size.width / frame.size.height
         let screenAspect = screenSize.width / screenSize.height
 
         let displaySize: CGSize
@@ -225,25 +223,22 @@ struct InteractiveStreamView: View {
             origin = CGPoint(x: (screenSize.width - w) / 2, y: 0)
         }
 
-        // Convert tap point to relative position within image
         let relX = (point.x - origin.x) / displaySize.width
         let relY = (point.y - origin.y) / displaySize.height
-
-        // Clamp to 0-1
         guard relX >= 0, relX <= 1, relY >= 0, relY <= 1 else { return nil }
         return CGPoint(x: relX, y: relY)
     }
 
-    // MARK: - Feedback
+    // MARK: - Helpers
+
+    private func f(_ v: CGFloat) -> String {
+        String(format: "%.4f", v)
+    }
 
     private func showTapFeedback(at point: CGPoint) {
-        withAnimation(.easeOut(duration: 0.1)) {
-            tapFeedbackPoint = point
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            withAnimation(.easeOut(duration: 0.2)) {
-                tapFeedbackPoint = nil
-            }
+        withAnimation(.easeOut(duration: 0.1)) { tapFeedbackPoint = point }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            withAnimation(.easeOut(duration: 0.15)) { tapFeedbackPoint = nil }
         }
     }
 
@@ -257,11 +252,11 @@ struct InteractiveStreamView: View {
     @ViewBuilder
     private func hintLabel(icon: String, text: String) -> some View {
         HStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.system(size: 10))
-            Text(text)
-                .font(.system(size: 10, design: .monospaced))
+            Image(systemName: icon).font(.system(size: 10))
+            Text(text).font(.system(size: 10, design: .monospaced))
         }
         .foregroundColor(.white.opacity(0.7))
     }
 }
+
+// Uses Haptics from Theme/Haptics.swift

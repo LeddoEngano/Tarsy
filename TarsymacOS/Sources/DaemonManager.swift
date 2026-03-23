@@ -191,7 +191,7 @@ class DaemonManager: ObservableObject {
             await handleStreamStart(clientId: clientId, packet: packet)
         case .streamStop:
             await handleStreamStop(clientId: clientId, packet: packet)
-        case .remoteTap, .remoteDoubleTap, .remoteLongPress, .remoteScroll, .remoteDrag, .remotePinch, .remoteKeyboard:
+        case .remoteTap, .remoteDoubleTap, .remoteLongPress, .remoteScroll, .remoteScrollStart, .remoteScrollEnd, .remoteDrag, .remotePinch, .remotePinchStart, .remotePinchEnd, .remoteKeyboard:
             handleRemoteInput(packet: packet)
         default:
             await wsServer?.send(
@@ -679,8 +679,8 @@ class DaemonManager: ObservableObject {
     // MARK: - Remote Input
 
     private func handleRemoteInput(packet: WSPacket) {
-        guard let xStr = packet.payload?["x"], let yStr = packet.payload?["y"],
-              let x = Double(xStr), let y = Double(yStr) else { return }
+        let x = Double(packet.payload?["x"] ?? "0.5") ?? 0.5
+        let y = Double(packet.payload?["y"] ?? "0.5") ?? 0.5
 
         switch packet.action {
         case .remoteTap:
@@ -689,17 +689,25 @@ class DaemonManager: ObservableObject {
             remoteInput.doubleTap(relativeX: x, relativeY: y)
         case .remoteLongPress:
             remoteInput.longPress(relativeX: x, relativeY: y)
+        case .remoteScrollStart:
+            remoteInput.scrollStart(relativeX: x, relativeY: y)
         case .remoteScroll:
             let dx = Double(packet.payload?["dx"] ?? "0") ?? 0
             let dy = Double(packet.payload?["dy"] ?? "0") ?? 0
             remoteInput.scroll(relativeX: x, relativeY: y, deltaX: dx, deltaY: dy)
+        case .remoteScrollEnd:
+            remoteInput.scrollEnd()
         case .remoteDrag:
             let toX = Double(packet.payload?["toX"] ?? "0") ?? 0
             let toY = Double(packet.payload?["toY"] ?? "0") ?? 0
             remoteInput.drag(fromX: x, fromY: y, toX: toX, toY: toY)
+        case .remotePinchStart:
+            remoteInput.pinchStart(relativeX: x, relativeY: y)
         case .remotePinch:
             let scale = Double(packet.payload?["scale"] ?? "1") ?? 1
-            remoteInput.pinch(relativeX: x, relativeY: y, scale: scale)
+            remoteInput.pinchUpdate(scale: scale)
+        case .remotePinchEnd:
+            remoteInput.pinchEnd()
         case .remoteKeyboard:
             if let text = packet.payload?["text"] {
                 remoteInput.typeText(text)
