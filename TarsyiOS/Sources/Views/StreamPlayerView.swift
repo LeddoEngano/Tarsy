@@ -134,6 +134,7 @@ struct StreamPlayerView: View {
 
     let workspace: Workspace
     @Binding var isActive: Bool
+    var onScreenshot: ((UIImage) -> Void)? = nil
     @State private var isFullscreen = false
     @State private var isDevServerRunning = false
     @State private var isDevServerStarting = false
@@ -519,7 +520,7 @@ struct StreamPlayerView: View {
 
     private func saveScreenshot() {
         guard let image = viewModel.currentFrame else { return }
-        UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+        onScreenshot?(image)
     }
 
     @ViewBuilder

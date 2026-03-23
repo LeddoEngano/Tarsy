@@ -33,7 +33,15 @@ struct WorkspaceView: View {
 
             VStack(spacing: 0) {
                 // Stream area
-                StreamPlayerView(workspace: workspace, isActive: $isStreamActive)
+                StreamPlayerView(workspace: workspace, isActive: $isStreamActive) { image in
+                    let data = image.jpegData(compressionQuality: 0.8)
+                    attachments.append(Attachment(
+                        name: "screenshot",
+                        type: .image,
+                        thumbnail: image,
+                        data: data
+                    ))
+                }
                     .frame(maxWidth: .infinity)
                     .frame(height: UIScreen.main.bounds.height * 0.35)
 
