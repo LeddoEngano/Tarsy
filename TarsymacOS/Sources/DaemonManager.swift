@@ -722,6 +722,21 @@ class DaemonManager: ObservableObject {
     private func handleStreamStart(clientId: String, packet: WSPacket) async {
         let stack = packet.payload?["stack"] ?? "web"
         let streamUrl = packet.payload?["streamUrl"]
+        let quality = packet.payload?["quality"]
+
+        // Handle quality change for existing stream
+        if let quality, screenCapture.isCapturing {
+            if quality == "high" {
+                await mjpegServer?.setQuality(jpegQuality: 0.8, maxFrameSize: 1_000_000)
+                log("streamStart: quality boosted to HIGH (fullscreen)")
+            } else {
+                let isLocal = !(packet.payload?["ip"]?.hasPrefix("100.") ?? true)
+                await mjpegServer?.setQuality(jpegQuality: isLocal ? 0.65 : 0.35, maxFrameSize: isLocal ? 500_000 : 80_000)
+                log("streamStart: quality restored to normal")
+            }
+            return
+        }
+
         log("streamStart: looking for window with stack=\(stack), streamUrl=\(streamUrl ?? "nil")")
 
         // If a streamUrl is provided, open the browser to that URL first

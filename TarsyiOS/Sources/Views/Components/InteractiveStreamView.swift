@@ -43,7 +43,7 @@ struct InteractiveStreamView: View {
                         .allowsHitTesting(false)
                 }
 
-                // Controls
+                // Controls — respect safe area
                 if showControls {
                     VStack {
                         HStack {
@@ -63,7 +63,8 @@ struct InteractiveStreamView: View {
                                     .foregroundColor(.white.opacity(0.7))
                             }
                         }
-                        .padding()
+                        .padding(.horizontal)
+                        .padding(.top, geo.safeAreaInsets.top + 8)
 
                         Spacer()
 
@@ -76,16 +77,35 @@ struct InteractiveStreamView: View {
                         .padding(.vertical, 10)
                         .background(.black.opacity(0.6))
                         .cornerRadius(12)
-                        .padding(.bottom, 40)
+                        .padding(.bottom, geo.safeAreaInsets.bottom + 8)
                     }
                     .transition(.opacity)
                 }
             }
         }
-        .persistentSystemOverlays(.hidden)
         .ignoresSafeArea()
         .statusBarHidden()
-        .onAppear { autoHideControls() }
+        .onAppear {
+            autoHideControls()
+            requestHighQuality()
+        }
+        .onDisappear {
+            requestNormalQuality()
+        }
+    }
+
+    private func requestHighQuality() {
+        connectionManager.send(WSPacket(
+            action: .streamStart,
+            payload: ["quality": "high"]
+        ))
+    }
+
+    private func requestNormalQuality() {
+        connectionManager.send(WSPacket(
+            action: .streamStart,
+            payload: ["quality": "normal"]
+        ))
     }
 
     // MARK: - Tap

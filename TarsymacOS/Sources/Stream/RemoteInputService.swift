@@ -267,17 +267,28 @@ class RemoteInputService {
         runIdb(args)
     }
 
+    private let idbQueue = DispatchQueue(label: "com.tarsy.idb", qos: .userInteractive)
+
     private func runIdb(_ args: [String]) {
-        inputQueue.async {
+        let argsCopy = args
+        idbQueue.async {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/Library/Frameworks/Python.framework/Versions/3.13/bin/idb")
-            process.arguments = args
+            process.arguments = argsCopy
             process.standardOutput = Pipe()
-            process.standardError = Pipe()
+            let errPipe = Pipe()
+            process.standardError = errPipe
 
             do {
                 try process.run()
                 process.waitUntilExit()
+                if process.terminationStatus != 0 {
+                    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                    let errStr = String(data: errData, encoding: .utf8) ?? ""
+                    print("[RemoteInput] idb failed (\(process.terminationStatus)): idb \(argsCopy.joined(separator: " ")) — \(errStr.prefix(200))")
+                } else {
+                    print("[RemoteInput] idb ok: \(argsCopy.prefix(4).joined(separator: " "))")
+                }
             } catch {
                 print("[RemoteInput] idb error: \(error)")
             }
@@ -285,7 +296,7 @@ class RemoteInputService {
     }
 
     private func detectSimulatorInfo() {
-        inputQueue.async { [self] in
+        idbQueue.async { [self] in
             // Get booted simulator UDID
             let simctl = Process()
             simctl.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")

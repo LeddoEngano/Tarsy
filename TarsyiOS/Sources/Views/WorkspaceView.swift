@@ -153,11 +153,19 @@ struct WorkspaceView: View {
                             .id("thinking")
                     }
 
-                    // Multi-question form from AskUserQuestion
+                    // Paginated question card from AskUserQuestion
                     if let questions = interactiveQuestions {
-                        MultiQuestionFormView(questions: questions) { answers in
-                            submitMultiQuestionAnswers(answers)
-                        }
+                        PaginatedQuestionCard(
+                            questions: questions,
+                            onSubmitAll: { answers in
+                                submitMultiQuestionAnswers(answers)
+                            },
+                            onDismiss: {
+                                withAnimation {
+                                    interactiveQuestions = nil
+                                }
+                            }
+                        )
                         .id("interactive-questions")
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
@@ -587,17 +595,8 @@ struct WorkspaceView: View {
                     if let questionsJson = packet.payload?["questions"],
                        let questionsData = questionsJson.data(using: .utf8),
                        let questions = try? JSONDecoder().decode([InteractiveQuestion].self, from: questionsData) {
-                        if questions.count == 1 && !questions[0].options.isEmpty {
-                            // Single question — show as simple option buttons
-                            let opts = questions[0].options.map {
-                                InteractiveOption(label: $0, value: $0, style: .numbered)
-                            }
-                            withAnimation {
-                                interactiveQuestions = nil
-                                interactiveOptions = opts
-                            }
-                        } else if !questions.isEmpty {
-                            // Multiple questions — show full form with submit
+                        if !questions.isEmpty {
+                            // Show paginated question card for all cases
                             withAnimation {
                                 interactiveOptions = nil
                                 interactiveQuestions = questions

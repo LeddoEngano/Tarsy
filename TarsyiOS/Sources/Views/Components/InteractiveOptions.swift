@@ -27,151 +27,304 @@ struct InteractiveOption: Identifiable {
     }
 }
 
-// MARK: - Multi-Question Form
+// MARK: - Paginated Question Card (Anthropic-style)
 
-struct MultiQuestionFormView: View {
+struct PaginatedQuestionCard: View {
     let questions: [InteractiveQuestion]
-    let onSubmit: ([String: String]) -> Void
+    let onSubmitAll: ([String: String]) -> Void
+    let onDismiss: () -> Void
 
-    @State private var answers: [Int: String] = [:] // questionIndex -> selected option
-    @State private var customInputs: [Int: String] = [:] // questionIndex -> custom text
-    @State private var showCustomInput: [Int: Bool] = [:] // questionIndex -> is "other" selected
+    @State private var currentIndex: Int = 0
+    @State private var singleAnswers: [Int: String] = [:]
+    @State private var multiAnswers: [Int: Set<String>] = [:]
+    @State private var customInputs: [Int: String] = [:]
 
-    private var allAnswered: Bool {
-        questions.indices.allSatisfy { index in
-            if showCustomInput[index] == true {
-                return !(customInputs[index] ?? "").isEmpty
-            }
-            return answers[index] != nil
-        }
+    private var safeIndex: Int {
+        max(0, min(currentIndex, questions.count - 1))
+    }
+
+    private var totalQuestions: Int {
+        questions.count
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(questions.enumerated()), id: \.offset) { index, question in
-                questionCard(index: index, question: question)
+        Group {
+            if questions.isEmpty {
+                EmptyView()
+            } else {
+                cardContent
             }
-
-            // Submit button
-            Button(action: { submit() }) {
-                Text(allAnswered ? "submit" : "answer all questions")
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundColor(allAnswered ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 10)
-                    .background(allAnswered ? TarsyTheme.accentAmber : TarsyTheme.backgroundTertiary)
-                    .cornerRadius(8)
-            }
-            .disabled(!allAnswered)
         }
     }
 
-    @ViewBuilder
-    private func questionCard(index: Int, question: InteractiveQuestion) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Question header
-            if !question.header.isEmpty {
-                Text(question.header.uppercased())
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundColor(TarsyTheme.accentAmber)
-                    .tracking(1)
+    private var cardContent: some View {
+        let question = questions[safeIndex]
+        return VStack(alignment: .leading, spacing: 0) {
+            // Navigation header
+            if totalQuestions > 1 {
+                navigationHeader
             }
 
+            // Question text
             Text(question.question)
-                .font(.system(size: 12, design: .monospaced))
+                .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(TarsyTheme.textPrimary)
+                .padding(.horizontal, 16)
+                .padding(.top, totalQuestions > 1 ? 8 : 16)
+                .padding(.bottom, 12)
 
             // Options
-            VStack(spacing: 4) {
-                ForEach(Array(question.options.enumerated()), id: \.offset) { optIndex, option in
-                    let isSelected = answers[index] == option && showCustomInput[index] != true
-                    Button(action: {
-                        answers[index] = option
-                        showCustomInput[index] = false
-                    }) {
-                        HStack(spacing: 8) {
-                            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 14))
-                                .foregroundColor(isSelected ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
+            optionsList(for: question)
 
-                            Text(option)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(TarsyTheme.textPrimary)
-
-                            Spacer()
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(isSelected ? TarsyTheme.accentAmber.opacity(0.1) : TarsyTheme.backgroundTertiary)
-                        .cornerRadius(6)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(isSelected ? TarsyTheme.accentAmber : Color.clear, lineWidth: 1)
-                        )
-                    }
-                }
-
-                // "Other" option with text input
-                let isOtherSelected = showCustomInput[index] == true
-                Button(action: {
-                    showCustomInput[index] = true
-                    answers[index] = nil
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: isOtherSelected ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 14))
-                            .foregroundColor(isOtherSelected ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
-
-                        Text("Other...")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(TarsyTheme.textSecondary)
-
-                        Spacer()
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 7)
-                    .background(isOtherSelected ? TarsyTheme.accentAmber.opacity(0.1) : TarsyTheme.backgroundTertiary)
-                    .cornerRadius(6)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(isOtherSelected ? TarsyTheme.accentAmber : Color.clear, lineWidth: 1)
-                    )
-                }
-
-                if isOtherSelected {
-                    TextField("", text: Binding(
-                        get: { customInputs[index] ?? "" },
-                        set: { customInputs[index] = $0 }
-                    ), prompt: Text("type your answer...").foregroundColor(TarsyTheme.textSecondary.opacity(0.5)))
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textPrimary)
-                        .padding(10)
-                        .background(TarsyTheme.backgroundPrimary)
-                        .cornerRadius(6)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(TarsyTheme.accentAmber.opacity(0.5), lineWidth: 1)
-                        )
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
-                }
-            }
+            // Custom text input
+            customInputField(for: question)
         }
-        .padding(10)
         .background(TarsyTheme.backgroundSecondary)
-        .cornerRadius(8)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(TarsyTheme.textSecondary.opacity(0.2), lineWidth: 1)
+        )
     }
 
-    private func submit() {
-        var result: [String: String] = [:]
-        for (index, question) in questions.enumerated() {
-            if showCustomInput[index] == true {
-                result[question.question] = customInputs[index] ?? ""
-            } else if let answer = answers[index] {
-                result[question.question] = answer
+    // MARK: - Navigation Header
+
+    private var navigationHeader: some View {
+        HStack {
+            Button(action: goToPrevious) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(currentIndex > 0 ? TarsyTheme.textPrimary : TarsyTheme.textSecondary.opacity(0.4))
+            }
+            .disabled(currentIndex == 0)
+
+            Text("\(currentIndex + 1) de \(totalQuestions)")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(TarsyTheme.textSecondary)
+
+            Button(action: goToNext) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(currentIndex < totalQuestions - 1 ? TarsyTheme.textPrimary : TarsyTheme.textSecondary.opacity(0.4))
+            }
+            .disabled(currentIndex >= totalQuestions - 1)
+
+            Spacer()
+
+            Button(action: onDismiss) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(TarsyTheme.textSecondary)
             }
         }
-        onSubmit(result)
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+    }
+
+    // MARK: - Options List
+
+    private func optionsList(for question: InteractiveQuestion) -> some View {
+        VStack(spacing: 0) {
+            ForEach(Array(question.options.enumerated()), id: \.offset) { optIndex, option in
+                if question.multiSelect {
+                    multiSelectRow(option: option, optIndex: optIndex)
+                } else {
+                    singleSelectRow(option: option, optIndex: optIndex + 1)
+                }
+
+                if optIndex < question.options.count - 1 {
+                    Divider()
+                        .background(TarsyTheme.textSecondary.opacity(0.15))
+                        .padding(.leading, 52)
+                }
+            }
+        }
+    }
+
+    // MARK: - Single Select Row (numbered)
+
+    private func singleSelectRow(option: String, optIndex: Int) -> some View {
+        let idx = safeIndex
+        return Button(action: {
+            singleAnswers[idx] = option
+            // Auto-advance or submit
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                if currentIndex < totalQuestions - 1 {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        currentIndex += 1
+                    }
+                } else {
+                    submitAll()
+                }
+            }
+        }) {
+            HStack(spacing: 12) {
+                Text("\(optIndex)")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(singleAnswers[idx] == option ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
+                    .frame(width: 28)
+
+                Text(option)
+                    .font(.system(size: 15))
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .multilineTextAlignment(.leading)
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Multi Select Row (checkbox)
+
+    private func multiSelectRow(option: String, optIndex: Int) -> some View {
+        let idx = safeIndex
+        let selected = multiAnswers[idx]?.contains(option) ?? false
+
+        return Button(action: {
+            var current = multiAnswers[idx] ?? []
+            if current.contains(option) {
+                current.remove(option)
+            } else {
+                current.insert(option)
+            }
+            multiAnswers[idx] = current
+        }) {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(selected ? TarsyTheme.accentAmber : Color.clear)
+                        .frame(width: 28, height: 28)
+                        .overlay(
+                            Circle()
+                                .stroke(selected ? TarsyTheme.accentAmber : TarsyTheme.textSecondary.opacity(0.4), lineWidth: 2)
+                        )
+
+                    if selected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                    }
+                }
+
+                Text(option)
+                    .font(.system(size: 15))
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .multilineTextAlignment(.leading)
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Custom Input Field
+
+    private func customInputField(for question: InteractiveQuestion) -> some View {
+        let idx = safeIndex
+        let hasMultiSelections = !(multiAnswers[idx] ?? []).isEmpty
+        let showSendButton = question.multiSelect && hasMultiSelections
+
+        return HStack(spacing: 8) {
+            Image(systemName: "paperclip")
+                .font(.system(size: 14))
+                .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
+
+            TextField("", text: Binding(
+                get: { customInputs[idx] ?? "" },
+                set: { customInputs[idx] = $0 }
+            ), prompt: Text("Digite sua resposta...")
+                .foregroundColor(TarsyTheme.textSecondary.opacity(0.4)))
+                .font(.system(size: 14))
+                .foregroundColor(TarsyTheme.textPrimary)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .onSubmit {
+                    handleCustomInputSubmit()
+                }
+
+            if showSendButton {
+                Button(action: {
+                    if currentIndex < totalQuestions - 1 {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            currentIndex += 1
+                        }
+                    } else {
+                        submitAll()
+                    }
+                }) {
+                    Circle()
+                        .fill(TarsyTheme.accentAmber)
+                        .frame(width: 32, height: 32)
+                        .overlay(
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.white)
+                        )
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .overlay(
+            Divider()
+                .background(TarsyTheme.textSecondary.opacity(0.15)),
+            alignment: .top
+        )
+    }
+
+    // MARK: - Navigation
+
+    private func goToPrevious() {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            currentIndex = max(0, currentIndex - 1)
+        }
+    }
+
+    private func goToNext() {
+        withAnimation(.easeInOut(duration: 0.25)) {
+            currentIndex = min(totalQuestions - 1, currentIndex + 1)
+        }
+    }
+
+    private func handleCustomInputSubmit() {
+        let idx = safeIndex
+        let text = customInputs[idx] ?? ""
+        guard !text.isEmpty else { return }
+
+        if questions[idx].multiSelect {
+            multiAnswers[idx] = nil
+        }
+        singleAnswers[idx] = text
+        customInputs[idx] = ""
+
+        if currentIndex < totalQuestions - 1 {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                currentIndex += 1
+            }
+        } else {
+            submitAll()
+        }
+    }
+
+    // MARK: - Submit
+
+    private func submitAll() {
+        var result: [String: String] = [:]
+        for (index, question) in questions.enumerated() {
+            if let custom = singleAnswers[index], !custom.isEmpty {
+                result[question.question] = custom
+            } else if let selections = multiAnswers[index], !selections.isEmpty {
+                result[question.question] = selections.sorted().joined(separator: ", ")
+            }
+        }
+        onSubmitAll(result)
     }
 }
 
