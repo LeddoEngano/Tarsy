@@ -36,6 +36,15 @@ struct InteractiveStreamView: View {
 
                     Spacer()
 
+                    // Simulator device buttons
+                    HStack(spacing: 16) {
+                        deviceButton(icon: "house.fill", action: "home")
+                        deviceButton(icon: "camera.fill", action: "screenshot")
+                        deviceButton(icon: "rotate.right", action: "rotate_right")
+                    }
+
+                    Spacer()
+
                     Button(action: onClose) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.title2)
@@ -242,6 +251,26 @@ struct InteractiveStreamView: View {
         let relY = (point.y - origin.y) / displaySize.height
         guard relX >= 0, relX <= 1, relY >= 0, relY <= 1 else { return nil }
         return CGPoint(x: relX, y: relY)
+    }
+
+    // MARK: - Device Buttons
+
+    @ViewBuilder
+    private func deviceButton(icon: String, action: String) -> some View {
+        Button {
+            Haptics.light()
+            connectionManager.send(WSPacket(
+                action: .remoteButton,
+                payload: ["button": action]
+            ))
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(.white.opacity(0.8))
+                .frame(width: 36, height: 36)
+                .background(.white.opacity(0.15))
+                .cornerRadius(18)
+        }
     }
 
     // MARK: - Helpers

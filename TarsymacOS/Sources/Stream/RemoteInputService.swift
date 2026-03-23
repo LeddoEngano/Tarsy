@@ -216,6 +216,64 @@ class RemoteInputService {
         }
     }
 
+    // MARK: - Device Buttons
+
+    func pressButton(_ button: String) {
+        guard isMobileSimulator else { return }
+
+        switch button {
+        case "home":
+            runIdb(["ui", "button", "HOME"])
+        case "lock":
+            runIdb(["ui", "button", "LOCK"])
+        case "siri":
+            runIdb(["ui", "button", "SIRI"])
+        case "rotate_left":
+            // Send Cmd+Left to Simulator app
+            sendSimulatorShortcut(keyCode: 0x7B, modifiers: .maskCommand) // Left arrow
+        case "rotate_right":
+            // Send Cmd+Right to Simulator app
+            sendSimulatorShortcut(keyCode: 0x7C, modifiers: .maskCommand) // Right arrow
+        case "screenshot":
+            takeSimulatorScreenshot()
+        default:
+            print("[RemoteInput] Unknown button: \(button)")
+        }
+    }
+
+    private func sendSimulatorShortcut(keyCode: CGKeyCode, modifiers: CGEventFlags) {
+        inputQueue.async { [self] in
+            // Focus Simulator first
+            if let app = NSRunningApplication(processIdentifier: ownerPid) {
+                app.activate()
+            }
+            usleep(100_000)
+
+            let down = CGEvent(keyboardEventSource: eventSource, virtualKey: keyCode, keyDown: true)
+            down?.flags = modifiers
+            down?.post(tap: .cghidEventTap)
+            usleep(30_000)
+            let up = CGEvent(keyboardEventSource: eventSource, virtualKey: keyCode, keyDown: false)
+            up?.flags = modifiers
+            up?.post(tap: .cghidEventTap)
+        }
+    }
+
+    private func takeSimulatorScreenshot() {
+        idbQueue.async { [self] in
+            guard let udid = simulatorUDID else { return }
+            let path = NSHomeDirectory() + "/Desktop/simulator_screenshot_\(Int(Date().timeIntervalSince1970)).png"
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+            process.arguments = ["simctl", "io", udid, "screenshot", path]
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            try? process.run()
+            process.waitUntilExit()
+            print("[RemoteInput] Screenshot saved: \(path)")
+        }
+    }
+
     // MARK: - Keyboard
 
     func typeText(_ text: String) {

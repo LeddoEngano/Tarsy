@@ -191,7 +191,7 @@ class DaemonManager: ObservableObject {
             await handleStreamStart(clientId: clientId, packet: packet)
         case .streamStop:
             await handleStreamStop(clientId: clientId, packet: packet)
-        case .remoteTap, .remoteDoubleTap, .remoteLongPress, .remoteScroll, .remoteScrollStart, .remoteScrollEnd, .remoteDrag, .remotePinch, .remotePinchStart, .remotePinchEnd, .remoteKeyboard:
+        case .remoteTap, .remoteDoubleTap, .remoteLongPress, .remoteScroll, .remoteScrollStart, .remoteScrollEnd, .remoteDrag, .remotePinch, .remotePinchStart, .remotePinchEnd, .remoteKeyboard, .remoteButton:
             handleRemoteInput(packet: packet)
         default:
             await wsServer?.send(
@@ -712,6 +712,10 @@ class DaemonManager: ObservableObject {
         case .remoteKeyboard:
             if let text = packet.payload?["text"] {
                 remoteInput.typeText(text)
+            }
+        case .remoteButton:
+            if let button = packet.payload?["button"] {
+                remoteInput.pressButton(button)
             }
         default:
             break
