@@ -310,7 +310,7 @@ struct NewWorkspaceView: View {
         if let s = repo.stack, let ws = Workspace.WorkspaceStack(rawValue: s) {
             stack = ws
         }
-        showRepoList = true // Keep showing but now the form appears below
+        withAnimation { showRepoList = false }
     }
 
     private func createWorkspace() async {

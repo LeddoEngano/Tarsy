@@ -136,7 +136,7 @@ public class ConnectionManager: ObservableObject {
             isConnected = false
             errorMessage = "authentication failed"
             disconnect()
-        case .pong:
+        case .auth, .pong:
             if let pingTime = lastPingTime {
                 latency = Date().timeIntervalSince(pingTime)
             }
