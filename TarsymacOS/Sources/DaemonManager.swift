@@ -486,7 +486,7 @@ class DaemonManager: ObservableObject {
                 }
             }
 
-            try await screenCapture.startCapture(window: window, fps: 10, scale: 0.5)
+            try await screenCapture.startCapture(window: window, fps: 5, scale: 0.5)
             log("streamStart: capture started")
 
             let streamPort: UInt16 = 8643

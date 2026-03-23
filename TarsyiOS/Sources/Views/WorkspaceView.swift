@@ -40,11 +40,11 @@ struct WorkspaceView: View {
 
                 // Chat area
                 chatArea
-                    .onTapGesture { isInputFocused = false }
 
                 // Input bar
                 inputBar
             }
+            .onTapGesture { isInputFocused = false }
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

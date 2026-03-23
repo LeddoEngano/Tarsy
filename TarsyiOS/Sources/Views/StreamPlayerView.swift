@@ -13,6 +13,9 @@ class MJPEGStreamViewModel: ObservableObject {
     private var buffer = Data()
     private let jpegStart = Data([0xFF, 0xD8])
     private let jpegEnd = Data([0xFF, 0xD9])
+    private var lastFrameTime: CFAbsoluteTime = 0
+    private let minFrameInterval: CFAbsoluteTime = 1.0 / 6.0 // Max 6 fps to keep UI responsive
+    private let processingQueue = DispatchQueue(label: "mjpeg.processing", qos: .userInitiated)
 
     func connect(host: String, port: UInt16) {
         disconnect()
@@ -73,8 +76,10 @@ class MJPEGStreamViewModel: ObservableObject {
             guard let self else { return }
 
             if let data {
-                self.buffer.append(data)
-                self.processBuffer()
+                self.processingQueue.async {
+                    self.buffer.append(data)
+                    self.processBuffer()
+                }
             }
 
             if isComplete || error != nil {
@@ -82,32 +87,41 @@ class MJPEGStreamViewModel: ObservableObject {
                 return
             }
 
-            // Continue receiving
             self.receiveData()
         }
     }
 
     private func processBuffer() {
         // Look for complete JPEG frames in buffer
+        var latestImage: UIImage?
+
         while let endRange = buffer.range(of: jpegEnd) {
             let searchEnd = endRange.upperBound
-            if let startRange = buffer.range(of: jpegStart) {
-                if startRange.lowerBound < endRange.lowerBound {
-                    let jpegData = Data(buffer[startRange.lowerBound..<searchEnd])
+            if let startRange = buffer.range(of: jpegStart),
+               startRange.lowerBound < endRange.lowerBound {
+                let jpegData = Data(buffer[startRange.lowerBound..<searchEnd])
+                // Only decode if enough time has passed (throttle)
+                let now = CFAbsoluteTimeGetCurrent()
+                if now - lastFrameTime >= minFrameInterval {
                     if let image = UIImage(data: jpegData) {
-                        DispatchQueue.main.async {
-                            self.currentFrame = image
-                            self.frameCount += 1
-                        }
+                        latestImage = image
+                        lastFrameTime = now
                     }
                 }
             }
-            // Remove processed data
             buffer.removeSubrange(buffer.startIndex..<searchEnd)
         }
 
+        // Only update UI with the latest frame (skip intermediate ones)
+        if let image = latestImage {
+            DispatchQueue.main.async {
+                self.currentFrame = image
+                self.frameCount += 1
+            }
+        }
+
         // Prevent buffer overflow
-        if buffer.count > 5_000_000 {
+        if buffer.count > 2_000_000 {
             buffer.removeAll(keepingCapacity: true)
         }
     }
