@@ -14,6 +14,7 @@ struct WorkspaceView: View {
     ]
     @State private var messageText = ""
     @State private var isStreamActive = false
+    @State private var isAgentThinking = false
     @StateObject private var chatService = ChatService()
 
     private var currentTab: TerminalTab {
@@ -131,6 +132,12 @@ struct WorkspaceView: View {
                             .id(message.id)
                     }
 
+                    // Thinking indicator
+                    if isAgentThinking {
+                        ThinkingIndicator()
+                            .id("thinking")
+                    }
+
                     // Interactive options from Claude CLI
                     if let options = interactiveOptions {
                         InteractiveOptionsView(options: options) { selected in
@@ -153,12 +160,12 @@ struct WorkspaceView: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
-        if interactiveOptions != nil {
-            withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            if interactiveOptions != nil {
                 proxy.scrollTo("interactive-options", anchor: .bottom)
-            }
-        } else if let last = chatService.messages.last {
-            withAnimation(.easeOut(duration: 0.2)) {
+            } else if isAgentThinking {
+                proxy.scrollTo("thinking", anchor: .bottom)
+            } else if let last = chatService.messages.last {
                 proxy.scrollTo(last.id, anchor: .bottom)
             }
         }
@@ -249,6 +256,7 @@ struct WorkspaceView: View {
         Task {
             await chatService.addMessage(msg)
 
+            isAgentThinking = true
             print("[Chat] sendMessage: tab=\(currentTab.type), sessionId=\(currentTab.sessionId ?? "nil"), connected=\(connectionManager.isConnected), path=\(workspace.localPath)")
 
             if currentTab.type == .claude {
@@ -343,10 +351,12 @@ struct WorkspaceView: View {
             Task { @MainActor in
                 switch packet.action {
                 case .claudeOutput:
+                    isAgentThinking = false
                     if let output = packet.payload?["output"] {
                         chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
                     }
                 case .claudeComplete:
+                    isAgentThinking = false
                     await chatService.saveLastAssistantMessage()
                 case .claudeCreate:
                     if let sessionId = packet.payload?["sessionId"] {
