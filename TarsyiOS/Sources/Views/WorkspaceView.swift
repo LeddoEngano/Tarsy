@@ -77,6 +77,7 @@ struct WorkspaceView: View {
         .task {
             await chatService.loadMessages(workspaceId: workspace.id, tabId: currentTab.id)
             setupOutputHandler()
+            await waitForConnectionAndStartClaude()
         }
         .onDisappear {
             cleanupHandler()
@@ -218,6 +219,35 @@ struct WorkspaceView: View {
                     ))
                 }
             }
+        }
+    }
+
+    private func waitForConnectionAndStartClaude() async {
+        // Wait for WebSocket to be connected and authenticated
+        var attempts = 0
+        while !connectionManager.isConnected && attempts < 30 {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            attempts += 1
+        }
+
+        guard connectionManager.isConnected else {
+            print("[Workspace] Could not connect to Mac after \(attempts) attempts")
+            return
+        }
+
+        print("[Workspace] Connected! Auto-starting Claude session for \(workspace.name)")
+
+        // Find the first Claude tab without a session
+        if let claudeIndex = tabs.firstIndex(where: { $0.type == .claude && $0.sessionId == nil }) {
+            selectedTabIndex = claudeIndex
+            connectionManager.send(WSPacket(
+                action: .claudeCreate,
+                payload: [
+                    "path": workspace.localPath,
+                    "aiContext": workspace.aiContext ?? ""
+                ]
+            ))
+            print("[Workspace] Sent claudeCreate for path=\(workspace.localPath)")
         }
     }
 

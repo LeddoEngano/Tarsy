@@ -37,14 +37,9 @@ public class MachineService: ObservableObject {
         machine?.localIp
     }
 
-    /// Returns the best IP to connect to the Mac.
-    /// Prefers local IP (direct WiFi, no VPN overhead), falls back to Tailscale.
+    /// Prefer local IP when on same WiFi, fall back to Tailscale for remote.
     public var bestIP: String? {
-        // Prefer local IP — direct connection, no VPN fragmentation issues
-        if let lip = localIP {
-            return lip
-        }
-        // Fallback to Tailscale for remote access
+        if let lip = localIP { return lip }
         return tailscaleIP
     }
 }

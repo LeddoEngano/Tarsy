@@ -87,33 +87,48 @@ actor WebSocketServer {
                     return
                 }
 
-                if let data = content, let packet = try? WSPacket.decode(from: data) {
-                    if !authenticated {
-                        if packet.action == .auth, let token = packet.payload?["token"] {
-                            let valid = await self.validateToken(token)
-                            if valid {
-                                await self.send(WSPacket(action: .authSuccess), to: clientId)
-                                await self.onClientConnected?(clientId)
-                                await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)
-                            } else {
-                                await self.send(WSPacket(action: .authFail), to: clientId)
-                                await self.removeConnection(clientId)
-                            }
-                        } else {
-                            await self.send(WSPacket(action: .authFail, payload: ["reason": "not authenticated"]), to: clientId)
-                        }
-                        return
-                    }
-
-                    if packet.action == .ping {
-                        await self.send(WSPacket(action: .pong, id: packet.id), to: clientId)
-                        await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)
-                        return
-                    }
-
-                    await self.onPacketReceived?(clientId, packet)
-                    await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)
+                guard let data = content else {
+                    // No data but no error — continue listening
+                    await self.receiveLoop(connection: connection, clientId: clientId, authenticated: authenticated)
+                    return
                 }
+
+                guard let packet = try? WSPacket.decode(from: data) else {
+                    // Corrupted packet — log and continue listening
+                    print("[WSServer] Failed to decode packet from \(clientId), \(data.count) bytes")
+                    await self.receiveLoop(connection: connection, clientId: clientId, authenticated: authenticated)
+                    return
+                }
+
+                if !authenticated {
+                    if packet.action == .auth, let token = packet.payload?["token"] {
+                        let valid = await self.validateToken(token)
+                        if valid {
+                            print("[WSServer] Client \(clientId) authenticated")
+                            await self.send(WSPacket(action: .authSuccess), to: clientId)
+                            await self.onClientConnected?(clientId)
+                            await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)
+                        } else {
+                            print("[WSServer] Client \(clientId) auth failed")
+                            await self.send(WSPacket(action: .authFail), to: clientId)
+                            await self.removeConnection(clientId)
+                        }
+                    } else {
+                        await self.send(WSPacket(action: .authFail, payload: ["reason": "not authenticated"]), to: clientId)
+                        await self.receiveLoop(connection: connection, clientId: clientId, authenticated: false)
+                    }
+                    return
+                }
+
+                if packet.action == .ping {
+                    await self.send(WSPacket(action: .pong, id: packet.id), to: clientId)
+                    await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)
+                    return
+                }
+
+                print("[WSServer] Received: \(packet.action.rawValue) from \(clientId)")
+                await self.onPacketReceived?(clientId, packet)
+                await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)
             }
         }
     }
