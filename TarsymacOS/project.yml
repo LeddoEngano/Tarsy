@@ -26,6 +26,8 @@ targets:
           CFBundleShortVersionString=0.1.0
           CFBundleVersion=1
           LSUIElement=YES
-        DEVELOPMENT_TEAM: ""
+        DEVELOPMENT_TEAM: "J2M334NJ3L"
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: "Automatic"
     dependencies:
       - package: TarsyShared
