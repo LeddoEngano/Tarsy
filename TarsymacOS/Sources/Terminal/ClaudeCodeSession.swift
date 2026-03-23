@@ -38,7 +38,7 @@ actor ClaudeCodeSession {
         print("[ClaudeCode] Starting session \(id) at \(expandedPath) with CLI: \(claudePath)")
 
         process.executableURL = URL(fileURLWithPath: claudePath)
-        process.arguments = ["--dangerously-skip-permissions", "--verbose"]
+        process.arguments = ["--dangerously-skip-permissions"]
         process.currentDirectoryURL = URL(fileURLWithPath: expandedPath)
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
@@ -46,6 +46,9 @@ actor ClaudeCodeSession {
 
         var env = ProcessInfo.processInfo.environment
         env["TERM"] = "dumb"
+        // Remove CLAUDECODE env var to prevent "nested session" error
+        env.removeValue(forKey: "CLAUDECODE")
+        env.removeValue(forKey: "CLAUDE_CODE")
         // Inject AI context as system prompt via env if available
         if let ctx = aiContext, !ctx.isEmpty {
             env["CLAUDE_SYSTEM_PROMPT"] = ctx
