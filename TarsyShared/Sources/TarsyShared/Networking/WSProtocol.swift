@@ -16,6 +16,14 @@ public enum WSAction: String, Codable, Sendable {
     case streamStop = "stream:stop"
     case streamFrame = "stream:frame"
 
+    // Remote Input
+    case remoteTap = "remote:tap"
+    case remoteDoubleTap = "remote:double_tap"
+    case remoteLongPress = "remote:long_press"
+    case remoteScroll = "remote:scroll"
+    case remoteDrag = "remote:drag"
+    case remoteKeyboard = "remote:keyboard"
+
     // Dev Server
     case devServerStart = "devserver:start"
     case devServerStop = "devserver:stop"

@@ -236,29 +236,11 @@ struct StreamPlayerView: View {
         .padding(.top, 8)
         .padding(.bottom, 8)
         .fullScreenCover(isPresented: $isFullscreen) {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                if let frame = viewModel.currentFrame {
-                    Image(uiImage: frame)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                }
-                VStack {
-                    HStack {
-                        Spacer()
-                        Button(action: { isFullscreen = false }) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title2)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
-                        .padding()
-                    }
-                    Spacer()
-                }
-            }
-            .onTapGesture(count: 2) {
-                isFullscreen = false
-            }
+            InteractiveStreamView(
+                viewModel: viewModel,
+                connectionManager: connectionManager,
+                onClose: { isFullscreen = false }
+            )
         }
         .onAppear {
             checkDevServerStatus()

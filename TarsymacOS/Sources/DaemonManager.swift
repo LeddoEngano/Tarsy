@@ -21,6 +21,7 @@ class DaemonManager: ObservableObject {
     private let screenCapture = ScreenCaptureService()
     private var mjpegServer: MJPEGStreamServer?
     private let openClaw = OpenClawService()
+    private let remoteInput = RemoteInputService()
     private var heartbeatTimer: Timer?
     private var devServerSessions: [String: String] = [:] // workspacePath -> terminalSessionId
 
@@ -190,6 +191,8 @@ class DaemonManager: ObservableObject {
             await handleStreamStart(clientId: clientId, packet: packet)
         case .streamStop:
             await handleStreamStop(clientId: clientId, packet: packet)
+        case .remoteTap, .remoteDoubleTap, .remoteLongPress, .remoteScroll, .remoteDrag, .remoteKeyboard:
+            handleRemoteInput(packet: packet)
         default:
             await wsServer?.send(
                 WSPacket(action: .error, payload: ["message": "Unknown action: \(packet.action.rawValue)"]),
@@ -673,6 +676,36 @@ class DaemonManager: ObservableObject {
         return pollResult > 0 && (pollFd.revents & Int16(POLLOUT)) != 0
     }
 
+    // MARK: - Remote Input
+
+    private func handleRemoteInput(packet: WSPacket) {
+        guard let xStr = packet.payload?["x"], let yStr = packet.payload?["y"],
+              let x = Double(xStr), let y = Double(yStr) else { return }
+
+        switch packet.action {
+        case .remoteTap:
+            remoteInput.tap(relativeX: x, relativeY: y)
+        case .remoteDoubleTap:
+            remoteInput.doubleTap(relativeX: x, relativeY: y)
+        case .remoteLongPress:
+            remoteInput.longPress(relativeX: x, relativeY: y)
+        case .remoteScroll:
+            let dx = Double(packet.payload?["dx"] ?? "0") ?? 0
+            let dy = Double(packet.payload?["dy"] ?? "0") ?? 0
+            remoteInput.scroll(relativeX: x, relativeY: y, deltaX: dx, deltaY: dy)
+        case .remoteDrag:
+            let toX = Double(packet.payload?["toX"] ?? "0") ?? 0
+            let toY = Double(packet.payload?["toY"] ?? "0") ?? 0
+            remoteInput.drag(fromX: x, fromY: y, toX: toX, toY: toY)
+        case .remoteKeyboard:
+            if let text = packet.payload?["text"] {
+                remoteInput.typeText(text)
+            }
+        default:
+            break
+        }
+    }
+
     // MARK: - Stream
 
     private func handleStreamStart(clientId: String, packet: WSPacket) async {
@@ -747,6 +780,10 @@ class DaemonManager: ObservableObject {
             }
 
             try await screenCapture.startCapture(window: window, fps: fps, scale: scale)
+
+            // Set target window for remote input
+            remoteInput.setTargetWindow(frame: window.frame, windowId: CGWindowID(window.windowID))
+
             log("streamStart: capture started")
 
             let streamPort: UInt16 = 8643
