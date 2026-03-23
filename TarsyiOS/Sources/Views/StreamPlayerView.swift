@@ -135,6 +135,10 @@ struct StreamPlayerView: View {
     let workspace: Workspace
     @Binding var isActive: Bool
     @State private var isFullscreen = false
+    @State private var isDevServerRunning = false
+    @State private var isDevServerStarting = false
+    @State private var gearRotation: Double = 0
+    @State private var showNoCommandAlert = false
 
     var body: some View {
         ZStack {
@@ -151,7 +155,11 @@ struct StreamPlayerView: View {
                 // Overlay controls
                 VStack {
                     HStack {
+                        // Gear icon — dev server status
+                        devServerGear
+
                         Spacer()
+
                         // FPS badge
                         Text("\(viewModel.fps) fps")
                             .font(.system(size: 10, design: .monospaced))
@@ -187,26 +195,33 @@ struct StreamPlayerView: View {
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
             } else {
-                VStack(spacing: 12) {
-                    Image(systemName: "eye")
-                        .font(.system(size: 40))
-                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
+                ZStack(alignment: .topLeading) {
+                    VStack(spacing: 12) {
+                        Image(systemName: "eye")
+                            .font(.system(size: 40))
+                            .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
 
-                    Text("stream offline")
-                        .font(TarsyTheme.monoFont)
-                        .foregroundColor(TarsyTheme.textSecondary)
+                        Text("stream offline")
+                            .font(TarsyTheme.monoFont)
+                            .foregroundColor(TarsyTheme.textSecondary)
 
-                    Button(action: { startStream() }) {
-                        Text("start stream")
-                            .font(TarsyTheme.monoFontSmall)
-                            .foregroundColor(TarsyTheme.accentAmber)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(TarsyTheme.accentAmber, lineWidth: 1)
-                            )
+                        Button(action: { startStream() }) {
+                            Text("start stream")
+                                .font(TarsyTheme.monoFontSmall)
+                                .foregroundColor(TarsyTheme.accentAmber)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(TarsyTheme.accentAmber, lineWidth: 1)
+                                )
+                        }
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    // Gear icon even when stream is offline
+                    devServerGear
+                        .padding(8)
                 }
             }
         }
@@ -239,15 +254,166 @@ struct StreamPlayerView: View {
                 isFullscreen = false
             }
         }
+        .onAppear {
+            checkDevServerStatus()
+        }
         .onDisappear {
             viewModel.disconnect()
         }
     }
 
+    // MARK: - Dev Server Gear
+
+    private var devServerGear: some View {
+        Button(action: { toggleDevServer() }) {
+            Image(systemName: "gearshape.fill")
+                .font(.system(size: 14))
+                .foregroundColor(gearColor)
+                .rotationEffect(.degrees(gearRotation))
+                .padding(8)
+                .background(TarsyTheme.backgroundPrimary.opacity(0.7))
+                .cornerRadius(6)
+        }
+        .disabled(isDevServerStarting)
+        .onChange(of: isDevServerRunning) { _, running in
+            if running {
+                startGearAnimation()
+            } else if !isDevServerStarting {
+                stopGearAnimation()
+            }
+        }
+        .onChange(of: isDevServerStarting) { _, starting in
+            if starting {
+                startGearAnimation()
+            } else if !isDevServerRunning {
+                stopGearAnimation()
+            }
+        }
+        .alert("dev server not configured", isPresented: $showNoCommandAlert) {
+            Button("ok", role: .cancel) {}
+        } message: {
+            Text("set the dev server command in workspace settings (e.g. npm run dev)")
+        }
+    }
+
+    private var gearColor: Color {
+        if isDevServerRunning { return TarsyTheme.statusRunning }
+        if isDevServerStarting { return TarsyTheme.accentAmber }
+        return TarsyTheme.textSecondary
+    }
+
+    private func startGearAnimation() {
+        withAnimation(.linear(duration: 3).repeatForever(autoreverses: false)) {
+            gearRotation = 360
+        }
+    }
+
+    private func stopGearAnimation() {
+        withAnimation(.easeOut(duration: 0.3)) {
+            gearRotation = 0
+        }
+    }
+
+    // MARK: - Dev Server Actions
+
+    private func toggleDevServer() {
+        if isDevServerRunning {
+            stopDevServer()
+        } else {
+            startDevServer()
+        }
+    }
+
+    private func startDevServer() {
+        guard let command = workspace.devServerCommand, !command.isEmpty else {
+            showNoCommandAlert = true
+            return
+        }
+
+        isDevServerStarting = true
+
+        var payload: [String: String] = [
+            "path": workspace.localPath,
+            "command": command
+        ]
+        if let url = workspace.streamUrl, !url.isEmpty {
+            payload["streamUrl"] = url
+        }
+
+        connectionManager.send(WSPacket(action: .devServerStart, payload: payload))
+
+        connectionManager.addListener("devserver") { packet in
+            if packet.action == .devServerStart {
+                let status = packet.payload?["status"] ?? ""
+                DispatchQueue.main.async {
+                    isDevServerStarting = false
+                    isDevServerRunning = (status == "running" || status == "already_running")
+                }
+                connectionManager.removeListener("devserver")
+            } else if packet.action == .error {
+                DispatchQueue.main.async {
+                    isDevServerStarting = false
+                }
+                connectionManager.removeListener("devserver")
+            }
+        }
+
+        // Timeout: if no response in 20s, stop waiting
+        Task {
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            if isDevServerStarting {
+                isDevServerStarting = false
+                connectionManager.removeListener("devserver")
+            }
+        }
+    }
+
+    private func stopDevServer() {
+        connectionManager.send(WSPacket(action: .devServerStop, payload: ["path": workspace.localPath]))
+
+        connectionManager.addListener("devserver-stop") { packet in
+            if packet.action == .devServerStop {
+                DispatchQueue.main.async {
+                    isDevServerRunning = false
+                }
+                connectionManager.removeListener("devserver-stop")
+            }
+        }
+    }
+
+    private func checkDevServerStatus() {
+        guard connectionManager.isConnected else { return }
+
+        var payload: [String: String] = ["path": workspace.localPath]
+        if let url = workspace.streamUrl, !url.isEmpty {
+            payload["streamUrl"] = url
+        }
+
+        connectionManager.send(WSPacket(action: .devServerStatus, payload: payload))
+
+        connectionManager.addListener("devserver-status") { packet in
+            if packet.action == .devServerStatus {
+                DispatchQueue.main.async {
+                    isDevServerRunning = packet.payload?["running"] == "true"
+                }
+                connectionManager.removeListener("devserver-status")
+            }
+        }
+    }
+
+    // MARK: - Stream Actions
+
     private func startStream() {
         isActive = true
+
+        // Build payload with streamUrl if available
+        var payload: [String: String] = ["stack": workspace.stack.rawValue]
+        if let url = workspace.streamUrl, !url.isEmpty {
+            payload["streamUrl"] = url
+        }
+
         // Send stream:start via WebSocket — Mac will start capture + MJPEG server
-        connectionManager.send(WSPacket(action: .streamStart, payload: ["stack": workspace.stack.rawValue]))
+        connectionManager.send(WSPacket(action: .streamStart, payload: payload))
 
         // Listen for stream:start response which confirms server is ready
         connectionManager.addListener("stream") { [self] packet in

@@ -203,12 +203,13 @@ struct WorkspaceView: View {
         Task {
             await chatService.addMessage(msg)
 
-            // Send the user's choice to the Claude session
+            // Send the user's choice as a new message to continue the conversation
             if let sessionId = currentTab.sessionId {
                 isAgentThinking = true
+                // Use claudeMessage — the session will process it as a follow-up
                 connectionManager.send(WSPacket(
-                    action: .claudeUserResponse,
-                    payload: ["sessionId": sessionId, "answer": option.value]
+                    action: .claudeMessage,
+                    payload: ["sessionId": sessionId, "message": option.label]
                 ))
             }
         }

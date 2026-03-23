@@ -511,11 +511,16 @@ class DaemonManager: ObservableObject {
 
             // Monitor terminal output for server-ready signals
             let serverReady = DevServerReadySignal()
-            await terminalManager.setOutputHandler(for: sessionId) { output in
-                Task { await serverReady.check(output) }
+            await terminalManager.setOutputHandler(for: sessionId) { [weak self] output in
+                Task {
+                    await serverReady.check(output)
+                    await MainActor.run { self?.log("devServer[\(sessionId.prefix(8))]: \(output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))") }
+                }
             }
 
-            await terminalManager.sendInput(command, to: sessionId)
+            // Source shell config first to ensure PATH has npm/node/pnpm/etc.
+            let fullCommand = "source ~/.zshrc 2>/dev/null; source ~/.zprofile 2>/dev/null; \(command)"
+            await terminalManager.sendInput(fullCommand, to: sessionId)
             log("devServerStart: running '\(command)' in \(expandedPath)")
 
             // Wait for actual confirmation: either output-based or port-based

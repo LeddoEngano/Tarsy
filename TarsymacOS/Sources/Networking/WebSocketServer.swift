@@ -94,8 +94,9 @@ actor WebSocketServer {
                 }
 
                 guard let packet = try? WSPacket.decode(from: data) else {
-                    // Corrupted packet — log and continue listening
-                    print("[WSServer] Failed to decode packet from \(clientId), \(data.count) bytes")
+                    // Log the raw data for debugging unknown actions
+                    let raw = String(data: data, encoding: .utf8) ?? "<binary \(data.count) bytes>"
+                    print("[WSServer] Failed to decode packet from \(clientId): \(raw.prefix(300))")
                     await self.receiveLoop(connection: connection, clientId: clientId, authenticated: authenticated)
                     return
                 }

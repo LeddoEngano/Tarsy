@@ -7,9 +7,9 @@ struct InteractiveOption: Identifiable {
     let style: OptionStyle
 
     enum OptionStyle {
-        case primary    // Yes, Allow, Accept
-        case secondary  // No, Deny, Skip
-        case numbered   // 1, 2, 3...
+        case primary
+        case secondary
+        case numbered
     }
 }
 
@@ -18,56 +18,50 @@ struct InteractiveOptionsView: View {
     let onSelect: (InteractiveOption) -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
-            // Yes/No style (horizontal)
+        VStack(spacing: 6) {
             if options.count <= 3 && options.contains(where: { $0.style != .numbered }) {
-                HStack(spacing: 8) {
+                // Yes/No style — compact horizontal
+                HStack(spacing: 6) {
                     ForEach(options) { option in
                         Button(action: { onSelect(option) }) {
                             Text(option.label)
-                                .font(.system(size: 13, design: .monospaced))
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
                                 .foregroundColor(option.style == .primary ? TarsyTheme.backgroundPrimary : TarsyTheme.textPrimary)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
+                                .padding(.vertical, 8)
                                 .background(option.style == .primary ? TarsyTheme.accentAmber : TarsyTheme.backgroundTertiary)
-                                .cornerRadius(8)
+                                .cornerRadius(6)
                         }
                     }
                 }
             } else {
-                // Numbered/multiple options (vertical)
+                // Multiple options — vertical list
                 ForEach(options) { option in
                     Button(action: { onSelect(option) }) {
-                        HStack(spacing: 8) {
-                            if option.style == .numbered {
-                                Text(option.value)
-                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .foregroundColor(TarsyTheme.accentAmber)
-                                    .frame(width: 20)
-                            }
-                            Text(option.label)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(TarsyTheme.textPrimary)
-                            Spacer()
-                        }
-                        .padding(10)
-                        .background(TarsyTheme.backgroundTertiary)
-                        .cornerRadius(6)
+                        Text(option.label)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 9)
+                            .background(TarsyTheme.backgroundTertiary)
+                            .cornerRadius(6)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(TarsyTheme.accentAmber.opacity(0.3), lineWidth: 1)
+                            )
                     }
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-// Parse Claude Code interactive prompts from terminal output
 struct InteractiveParser {
     static func parse(_ text: String) -> [InteractiveOption]? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Yes/No prompts: [Y/n], [y/N], (y/n)
         if trimmed.contains("[Y/n]") || trimmed.contains("[y/n]") || trimmed.contains("(y/n)") {
             return [
                 InteractiveOption(label: "Yes", value: "y", style: .primary),
@@ -81,7 +75,6 @@ struct InteractiveParser {
             ]
         }
 
-        // Allow/Deny tool use
         if trimmed.lowercased().contains("allow") && trimmed.lowercased().contains("deny") {
             var options = [
                 InteractiveOption(label: "Allow", value: "y", style: .primary),
@@ -93,7 +86,6 @@ struct InteractiveParser {
             return options
         }
 
-        // "Do you want to proceed?" style
         if trimmed.contains("proceed?") || trimmed.contains("continue?") || trimmed.contains("confirm?") {
             return [
                 InteractiveOption(label: "Yes", value: "y", style: .primary),
@@ -101,7 +93,6 @@ struct InteractiveParser {
             ]
         }
 
-        // Numbered options: (1) Something (2) Something
         let numberedPattern = #"\((\d+)\)\s+(.+?)(?=\(\d+\)|$)"#
         if let regex = try? NSRegularExpression(pattern: numberedPattern, options: .dotMatchesLineSeparators) {
             let matches = regex.matches(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed))

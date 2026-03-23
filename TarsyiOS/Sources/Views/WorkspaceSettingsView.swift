@@ -12,6 +12,7 @@ struct WorkspaceSettingsView: View {
     @State private var localPath: String
     @State private var stack: Workspace.WorkspaceStack
     @State private var devServerCommand: String
+    @State private var streamUrl: String
     @State private var isSaving = false
     @State private var showDeleteConfirm = false
 
@@ -22,6 +23,7 @@ struct WorkspaceSettingsView: View {
         _localPath = State(initialValue: workspace.localPath)
         _stack = State(initialValue: workspace.stack)
         _devServerCommand = State(initialValue: workspace.devServerCommand ?? "")
+        _streamUrl = State(initialValue: workspace.streamUrl ?? "")
     }
 
     var body: some View {
@@ -61,6 +63,10 @@ struct WorkspaceSettingsView: View {
 
                     fieldSection("dev server command") {
                         tarsyTextField("npm run dev", text: $devServerCommand)
+                    }
+
+                    fieldSection("stream url") {
+                        tarsyTextField("http://localhost:3000", text: $streamUrl)
                     }
 
                     // Save button
@@ -112,6 +118,7 @@ struct WorkspaceSettingsView: View {
         req.localPath = localPath
         req.stack = stack.rawValue
         req.devServerCommand = devServerCommand.isEmpty ? nil : devServerCommand
+        req.streamUrl = streamUrl.isEmpty ? nil : streamUrl
         try? await workspaceService.updateWorkspace(id: workspace.id, req)
         isSaving = false
         dismiss()

@@ -95,12 +95,12 @@ actor ClaudeCodeSession {
     }
 
     func sendMessage(_ message: String) {
-        guard isRunning, let pipe = stdinPipe else {
-            print("[ClaudeCode] Cannot send — not running")
+        guard let pipe = stdinPipe else {
+            print("[ClaudeCode] Cannot send — no stdin pipe")
             return
         }
 
-        print("[ClaudeCode] Sending message: \(message.prefix(80))...")
+        print("[ClaudeCode] Sending message (isRunning=\(isRunning)): \(message.prefix(80))...")
 
         // Send as stream-json user message
         let msg: [String: Any] = [

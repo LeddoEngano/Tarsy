@@ -332,6 +332,7 @@ struct NewWorkspaceView: View {
                 localPath: localPath.isEmpty ? "~/Projects/\(name.lowercased())" : localPath,
                 stack: stack.rawValue,
                 devServerCommand: devServerCommand.isEmpty ? nil : devServerCommand,
+                streamUrl: nil,
                 aiContext: nil
             )
             let _ = try await workspaceService.createWorkspace(request)
