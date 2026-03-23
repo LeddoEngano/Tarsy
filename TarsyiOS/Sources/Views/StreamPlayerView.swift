@@ -1,14 +1,18 @@
 import SwiftUI
 import TarsyShared
+import Network
 
 class MJPEGStreamViewModel: ObservableObject {
     @Published var currentFrame: UIImage?
     @Published var isConnected = false
     @Published var fps: Int = 0
 
-    private var task: Task<Void, Never>?
+    private var connection: NWConnection?
     private var frameCount = 0
     private var fpsTimer: Timer?
+    private var buffer = Data()
+    private let jpegStart = Data([0xFF, 0xD8])
+    private let jpegEnd = Data([0xFF, 0xD9])
 
     func connect(host: String, port: UInt16) {
         disconnect()
@@ -20,65 +24,92 @@ class MJPEGStreamViewModel: ObservableObject {
             }
         }
 
-        task = Task { [weak self] in
-            guard let url = URL(string: "http://\(host):\(port)/stream") else { return }
+        // Use raw TCP via Network.framework (bypasses ATS)
+        let parameters = NWParameters.tcp
+        let endpoint = NWEndpoint.hostPort(
+            host: NWEndpoint.Host(host),
+            port: NWEndpoint.Port(rawValue: port)!
+        )
 
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 30
+        let conn = NWConnection(to: endpoint, using: parameters)
 
-            do {
-                let (bytes, _) = try await URLSession.shared.bytes(for: request)
-                await MainActor.run { self?.isConnected = true }
-
-                var buffer = Data()
-                let jpegStart = Data([0xFF, 0xD8])
-                let jpegEnd = Data([0xFF, 0xD9])
-
-                for try await byte in bytes {
-                    guard !Task.isCancelled else { break }
-                    buffer.append(byte)
-
-                    // Look for JPEG boundaries
-                    if buffer.count >= 2 {
-                        let lastTwo = buffer.suffix(2)
-                        if lastTwo == jpegEnd {
-                            // Find JPEG start
-                            if let startRange = buffer.range(of: jpegStart) {
-                                let jpegData = buffer[startRange.lowerBound...]
-                                if let image = UIImage(data: Data(jpegData)) {
-                                    await MainActor.run {
-                                        self?.currentFrame = image
-                                        self?.frameCount += 1
-                                    }
-                                }
-                            }
-                            buffer.removeAll(keepingCapacity: true)
-                        }
-
-                        // Prevent buffer from growing too large
-                        if buffer.count > 5_000_000 {
-                            buffer.removeAll(keepingCapacity: true)
-                        }
-                    }
+        conn.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                print("[MJPEG] Connected to \(host):\(port)")
+                // Send HTTP request for MJPEG stream
+                let request = "GET /stream HTTP/1.1\r\nHost: \(host):\(port)\r\nAccept: multipart/x-mixed-replace\r\n\r\n"
+                if let data = request.data(using: .ascii) {
+                    conn.send(content: data, completion: .contentProcessed { _ in })
                 }
-            } catch {
-                if !Task.isCancelled {
-                    print("[MJPEG Client] Error: \(error)")
-                    await MainActor.run { self?.isConnected = false }
-                }
+                DispatchQueue.main.async { self?.isConnected = true }
+                self?.receiveData()
+            case .failed(let error):
+                print("[MJPEG] Failed: \(error)")
+                DispatchQueue.main.async { self?.isConnected = false }
+            default:
+                break
             }
         }
+
+        conn.start(queue: .global(qos: .userInteractive))
+        self.connection = conn
     }
 
     func disconnect() {
-        task?.cancel()
-        task = nil
+        connection?.cancel()
+        connection = nil
         fpsTimer?.invalidate()
         fpsTimer = nil
         isConnected = false
         currentFrame = nil
+        buffer.removeAll()
         frameCount = 0
         fps = 0
+    }
+
+    private func receiveData() {
+        connection?.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
+            guard let self else { return }
+
+            if let data {
+                self.buffer.append(data)
+                self.processBuffer()
+            }
+
+            if isComplete || error != nil {
+                DispatchQueue.main.async { self.isConnected = false }
+                return
+            }
+
+            // Continue receiving
+            self.receiveData()
+        }
+    }
+
+    private func processBuffer() {
+        // Look for complete JPEG frames in buffer
+        while let endRange = buffer.range(of: jpegEnd) {
+            let searchEnd = endRange.upperBound
+            if let startRange = buffer.range(of: jpegStart) {
+                if startRange.lowerBound < endRange.lowerBound {
+                    let jpegData = Data(buffer[startRange.lowerBound..<searchEnd])
+                    if let image = UIImage(data: jpegData) {
+                        DispatchQueue.main.async {
+                            self.currentFrame = image
+                            self.frameCount += 1
+                        }
+                    }
+                }
+            }
+            // Remove processed data
+            buffer.removeSubrange(buffer.startIndex..<searchEnd)
+        }
+
+        // Prevent buffer overflow
+        if buffer.count > 5_000_000 {
+            buffer.removeAll(keepingCapacity: true)
+        }
     }
 }
 
