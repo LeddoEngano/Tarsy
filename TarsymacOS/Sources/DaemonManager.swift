@@ -1,6 +1,7 @@
 import Foundation
 import TarsyShared
 import Supabase
+import AppKit
 
 @MainActor
 class DaemonManager: ObservableObject {
@@ -448,11 +449,21 @@ class DaemonManager: ObservableObject {
         log("streamStart: looking for window with stack=\(stack)")
 
         // Find the right window for this stack
-        guard let window = await screenCapture.findWindow(forStack: stack) else {
-            log("streamStart: no window found for stack \(stack)")
-            log("streamStart: available windows: \(screenCapture.availableWindows.map { "\($0.owningApplication?.applicationName ?? "?") - \($0.title ?? "?")" })")
+        var window = await screenCapture.findWindow(forStack: stack)
+
+        // If no window found, open the default app for this stack and retry
+        if window == nil {
+            log("streamStart: no window found, opening app for stack \(stack)")
+            await openAppForStack(stack)
+            // Wait for app to launch
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            window = await screenCapture.findWindow(forStack: stack)
+        }
+
+        guard let window else {
+            log("streamStart: still no window found after opening app")
             await wsServer?.send(
-                WSPacket(action: .error, payload: ["message": "No matching window found for stack: \(stack). Make sure the app (browser/simulator) is open."], id: packet.id),
+                WSPacket(action: .error, payload: ["message": "No window found for stack: \(stack). Could not open app automatically."], id: packet.id),
                 to: clientId
             )
             return
@@ -495,6 +506,30 @@ class DaemonManager: ObservableObject {
                 WSPacket(action: .error, payload: ["message": "Stream failed: \(error.localizedDescription)"], id: packet.id),
                 to: clientId
             )
+        }
+    }
+
+    private func openAppForStack(_ stack: String) async {
+        let bundleId: String
+        switch stack {
+        case "web":
+            // Try Chrome first, then Safari
+            if NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") != nil {
+                bundleId = "com.google.Chrome"
+            } else {
+                bundleId = "com.apple.Safari"
+            }
+        case "mobile":
+            bundleId = "com.apple.iphonesimulator"
+        case "backend":
+            bundleId = "com.apple.Terminal"
+        default:
+            bundleId = "com.apple.Safari"
+        }
+
+        log("streamStart: opening \(bundleId)")
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
+            try? await NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
         }
     }
 
