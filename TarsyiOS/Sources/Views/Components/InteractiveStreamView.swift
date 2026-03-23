@@ -6,8 +6,6 @@ struct InteractiveStreamView: View {
     var connectionManager: ConnectionManager
     var onClose: () -> Void
 
-    @State private var showControls = true
-    @State private var controlsTimer: Timer?
     @State private var tapFeedbackPoint: CGPoint? = nil
 
     // Drag state
@@ -26,30 +24,28 @@ struct InteractiveStreamView: View {
 
             // Stream + controls — respects safe area naturally
             VStack(spacing: 0) {
-                // Controls top bar
-                if showControls {
-                    HStack {
-                        Text("\(viewModel.fps) fps")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.6))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(.black.opacity(0.5))
-                            .cornerRadius(4)
+                // Top bar — always visible
+                HStack {
+                    Text("\(viewModel.fps) fps")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(.black.opacity(0.5))
+                        .cornerRadius(4)
 
-                        Spacer()
+                    Spacer()
 
-                        Button(action: onClose) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.title2)
-                                .foregroundColor(.white.opacity(0.7))
-                        }
+                    Button(action: onClose) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .foregroundColor(.white.opacity(0.7))
                     }
-                    .padding(.horizontal)
-                    .padding(.top, 4)
                 }
+                .padding(.horizontal)
+                .padding(.top, 4)
 
-                // Stream image — takes remaining space between safe areas
+                // Stream image — takes remaining space
                 GeometryReader { geo in
                     ZStack {
                         if let frame = viewModel.currentFrame {
@@ -73,24 +69,21 @@ struct InteractiveStreamView: View {
                     }
                 }
 
-                // Hint bar at bottom
-                if showControls {
-                    HStack(spacing: 12) {
-                        hintLabel(icon: "hand.tap", text: "tap = click")
-                        hintLabel(icon: "hand.draw", text: "drag = scroll")
-                        hintLabel(icon: "hand.tap.fill", text: "hold = right-click")
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(.black.opacity(0.6))
-                    .cornerRadius(12)
-                    .padding(.bottom, 4)
+                // Hint bar — always visible
+                HStack(spacing: 12) {
+                    hintLabel(icon: "hand.tap", text: "tap = click")
+                    hintLabel(icon: "hand.draw", text: "drag = scroll")
+                    hintLabel(icon: "hand.tap.fill", text: "hold = right-click")
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(.black.opacity(0.6))
+                .cornerRadius(12)
+                .padding(.bottom, 4)
             }
         }
         .statusBarHidden()
         .onAppear {
-            autoHideControls()
             requestHighQuality()
         }
         .onDisappear {
@@ -124,8 +117,6 @@ struct InteractiveStreamView: View {
                     action: .remoteTap,
                     payload: ["x": f(rel.x), "y": f(rel.y)]
                 ))
-                showControls = true
-                autoHideControls()
             }
     }
 
@@ -263,13 +254,6 @@ struct InteractiveStreamView: View {
         withAnimation(.easeOut(duration: 0.1)) { tapFeedbackPoint = point }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
             withAnimation(.easeOut(duration: 0.15)) { tapFeedbackPoint = nil }
-        }
-    }
-
-    private func autoHideControls() {
-        controlsTimer?.invalidate()
-        controlsTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { _ in
-            withAnimation { showControls = false }
         }
     }
 
