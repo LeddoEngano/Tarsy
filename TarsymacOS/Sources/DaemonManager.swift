@@ -782,7 +782,14 @@ class DaemonManager: ObservableObject {
             try await screenCapture.startCapture(window: window, fps: fps, scale: scale)
 
             // Set target window for remote input
-            remoteInput.setTargetWindow(frame: window.frame, windowId: CGWindowID(window.windowID))
+            let isSimulator = window.owningApplication?.applicationName == "Simulator"
+            let pid = window.owningApplication?.processID ?? 0
+            remoteInput.setTargetWindow(
+                frame: window.frame,
+                windowId: CGWindowID(window.windowID),
+                pid: pid_t(pid),
+                isSimulator: isSimulator
+            )
 
             log("streamStart: capture started")
 

@@ -11,6 +11,7 @@ struct InteractiveStreamView: View {
     @State private var showControls = true
     @State private var controlsTimer: Timer?
     @State private var tapFeedbackPoint: CGPoint? = nil
+    @State private var lastScrollSendTime: CFAbsoluteTime = 0
 
     var body: some View {
         GeometryReader { geo in
@@ -72,15 +73,22 @@ struct InteractiveStreamView: View {
                         Spacer()
 
                         // Hint
-                        Text("tap to click  |  drag to scroll  |  long press for right-click")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.4))
-                            .padding(.bottom, 8)
+                        HStack(spacing: 12) {
+                            hintLabel(icon: "hand.tap", text: "tap = click")
+                            hintLabel(icon: "hand.draw", text: "drag = scroll")
+                            hintLabel(icon: "hand.tap.fill", text: "hold = right-click")
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(.black.opacity(0.6))
+                        .cornerRadius(12)
+                        .padding(.bottom, 40) // safe area
                     }
                     .transition(.opacity)
                 }
             }
         }
+        .persistentSystemOverlays(.hidden)
         .ignoresSafeArea()
         .onAppear { autoHideControls() }
         .statusBarHidden()
@@ -132,6 +140,11 @@ struct InteractiveStreamView: View {
     private func dragScrollGesture(screenSize: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 10)
             .onChanged { value in
+                // Throttle: max ~15 events per second
+                let now = CFAbsoluteTimeGetCurrent()
+                guard now - lastScrollSendTime > 0.066 else { return }
+                lastScrollSendTime = now
+
                 let relative = relativePosition(from: value.location, screenSize: screenSize)
                 guard let rel = relative else { return }
 
@@ -143,8 +156,8 @@ struct InteractiveStreamView: View {
                     payload: [
                         "x": String(format: "%.4f", rel.x),
                         "y": String(format: "%.4f", rel.y),
-                        "dx": String(format: "%.4f", -dx * 10),
-                        "dy": String(format: "%.4f", -dy * 10)
+                        "dx": String(format: "%.4f", -dx * 3),
+                        "dy": String(format: "%.4f", -dy * 3)
                     ]
                 ))
             }
@@ -220,5 +233,16 @@ struct InteractiveStreamView: View {
         controlsTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: false) { _ in
             withAnimation { showControls = false }
         }
+    }
+
+    @ViewBuilder
+    private func hintLabel(icon: String, text: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 10))
+            Text(text)
+                .font(.system(size: 10, design: .monospaced))
+        }
+        .foregroundColor(.white.opacity(0.7))
     }
 }
