@@ -169,6 +169,12 @@ struct WorkspaceView: View {
             .onChange(of: interactiveQuestions?.count) { _, _ in
                 scrollToBottom(proxy)
             }
+            .onChange(of: chatService.updateCounter) { _, _ in
+                scrollToBottom(proxy)
+            }
+            .onChange(of: isAgentThinking) { _, _ in
+                scrollToBottom(proxy)
+            }
         }
     }
 

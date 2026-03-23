@@ -9,6 +9,7 @@ public struct CreateWorkspaceRequest: Encodable {
     public let localPath: String
     public let stack: String
     public let devServerCommand: String?
+    public let streamUrl: String?
     public let aiContext: String?
 
     enum CodingKeys: String, CodingKey {
@@ -19,10 +20,11 @@ public struct CreateWorkspaceRequest: Encodable {
         case localPath = "local_path"
         case stack
         case devServerCommand = "dev_server_command"
+        case streamUrl = "stream_url"
         case aiContext = "ai_context"
     }
 
-    public init(userId: String, machineId: String, name: String, repoUrl: String?, localPath: String, stack: String, devServerCommand: String?, aiContext: String?) {
+    public init(userId: String, machineId: String, name: String, repoUrl: String?, localPath: String, stack: String, devServerCommand: String?, streamUrl: String?, aiContext: String?) {
         self.userId = userId
         self.machineId = machineId
         self.name = name
@@ -30,6 +32,7 @@ public struct CreateWorkspaceRequest: Encodable {
         self.localPath = localPath
         self.stack = stack
         self.devServerCommand = devServerCommand
+        self.streamUrl = streamUrl
         self.aiContext = aiContext
     }
 }
@@ -40,6 +43,7 @@ public struct UpdateWorkspaceRequest: Encodable {
     public var localPath: String?
     public var stack: String?
     public var devServerCommand: String?
+    public var streamUrl: String?
     public var aiContext: String?
     public var status: String?
     public var currentBranch: String?
@@ -50,6 +54,7 @@ public struct UpdateWorkspaceRequest: Encodable {
         case localPath = "local_path"
         case stack
         case devServerCommand = "dev_server_command"
+        case streamUrl = "stream_url"
         case aiContext = "ai_context"
         case status
         case currentBranch = "current_branch"

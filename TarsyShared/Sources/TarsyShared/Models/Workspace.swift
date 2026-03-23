@@ -11,6 +11,7 @@ public struct Workspace: Codable, Identifiable, Sendable {
     public let status: WorkspaceStatus
     public let currentBranch: String?
     public let devServerCommand: String?
+    public let streamUrl: String?
     public let aiContext: String?
     public let config: [String: String]?
     public let createdAt: Date
@@ -41,6 +42,7 @@ public struct Workspace: Codable, Identifiable, Sendable {
         case status
         case currentBranch = "current_branch"
         case devServerCommand = "dev_server_command"
+        case streamUrl = "stream_url"
         case aiContext = "ai_context"
         case config
         case createdAt = "created_at"

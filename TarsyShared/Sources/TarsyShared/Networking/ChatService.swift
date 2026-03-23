@@ -5,6 +5,7 @@ import Supabase
 public class ChatService: ObservableObject {
     @Published public var messages: [ChatMessage] = []
     @Published public var isLoading = false
+    @Published public var updateCounter: Int = 0
 
     public init() {}
 
@@ -49,6 +50,7 @@ public class ChatService: ObservableObject {
                 createdAt: last.createdAt
             )
             messages[messages.count - 1] = updated
+            updateCounter += 1
         } else {
             let msg = ChatMessage(
                 workspaceId: workspaceId,

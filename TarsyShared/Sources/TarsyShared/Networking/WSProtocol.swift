@@ -16,6 +16,14 @@ public enum WSAction: String, Codable, Sendable {
     case streamStop = "stream:stop"
     case streamFrame = "stream:frame"
 
+    // Dev Server
+    case devServerStart = "devserver:start"
+    case devServerStop = "devserver:stop"
+    case devServerStatus = "devserver:status"
+
+    // Browser
+    case browserOpenUrl = "browser:open_url"
+
     // Terminal
     case terminalCreate = "terminal:create"
     case terminalInput = "terminal:input"
