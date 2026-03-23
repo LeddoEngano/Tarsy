@@ -6,7 +6,7 @@ class RemoteInputService {
     private var windowId: CGWindowID = 0
     private var ownerPid: pid_t = 0
     private var isMobileSimulator = false
-    private let titleBarHeight: CGFloat = 28 // Simulator title bar
+    private let titleBarHeight: CGFloat = 28
 
     // Stateful drag/pinch
     private var isDragging = false
@@ -14,18 +14,15 @@ class RemoteInputService {
     private var isPinching = false
     private var pinchCenter: CGPoint = .zero
 
-    // Serial queue for all input — prevents race conditions
     private let inputQueue = DispatchQueue(label: "com.tarsy.remoteInput", qos: .userInteractive)
     private let eventSource = CGEventSource(stateID: .privateState)
+    private var windowFocused = false
 
     func setTargetWindow(frame: CGRect, windowId: CGWindowID, pid: pid_t, isSimulator: Bool, appName: String = "") {
         self.windowId = windowId
         self.ownerPid = pid
         self.isMobileSimulator = isSimulator
-
-        // One-time focus on setup
-        focusWindowOnce()
-
+        self.windowFocused = false
         print("[RemoteInput] Target set: wid=\(windowId), pid=\(pid), sim=\(isSimulator)")
     }
 
@@ -34,21 +31,39 @@ class RemoteInputService {
     func tap(relativeX: CGFloat, relativeY: CGFloat) {
         inputQueue.async { [self] in
             guard let point = currentAbsolutePoint(relativeX: relativeX, relativeY: relativeY) else { return }
-            postMouseClick(at: point)
+            ensureWindowFocused()
+
+            // Move cursor first, then click
+            let move = CGEvent(mouseEventSource: eventSource, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
+            move?.post(tap: .cghidEventTap)
+            usleep(10_000)
+
+            let down = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
+            down?.post(tap: .cghidEventTap)
+            usleep(30_000)
+            let up = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
+            up?.post(tap: .cghidEventTap)
         }
     }
 
     func doubleTap(relativeX: CGFloat, relativeY: CGFloat) {
         inputQueue.async { [self] in
             guard let point = currentAbsolutePoint(relativeX: relativeX, relativeY: relativeY) else { return }
+            ensureWindowFocused()
+
+            let move = CGEvent(mouseEventSource: eventSource, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
+            move?.post(tap: .cghidEventTap)
+            usleep(10_000)
+
             for clickState in [1, 2] as [Int64] {
                 let down = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
                 down?.setIntegerValueField(.mouseEventClickState, value: clickState)
-                postEvent(down)
+                down?.post(tap: .cghidEventTap)
+                usleep(20_000)
                 let up = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
                 up?.setIntegerValueField(.mouseEventClickState, value: clickState)
-                postEvent(up)
-                usleep(10_000)
+                up?.post(tap: .cghidEventTap)
+                usleep(20_000)
             }
         }
     }
@@ -56,18 +71,20 @@ class RemoteInputService {
     func longPress(relativeX: CGFloat, relativeY: CGFloat) {
         inputQueue.async { [self] in
             guard let point = currentAbsolutePoint(relativeX: relativeX, relativeY: relativeY) else { return }
+            ensureWindowFocused()
+
             if isMobileSimulator {
                 let down = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
-                postEvent(down)
+                down?.post(tap: .cghidEventTap)
                 usleep(800_000)
                 let up = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
-                postEvent(up)
+                up?.post(tap: .cghidEventTap)
             } else {
                 let down = CGEvent(mouseEventSource: eventSource, mouseType: .rightMouseDown, mouseCursorPosition: point, mouseButton: .right)
-                postEvent(down)
-                usleep(50)
+                down?.post(tap: .cghidEventTap)
+                usleep(30_000)
                 let up = CGEvent(mouseEventSource: eventSource, mouseType: .rightMouseUp, mouseCursorPosition: point, mouseButton: .right)
-                postEvent(up)
+                up?.post(tap: .cghidEventTap)
             }
         }
     }
@@ -77,11 +94,14 @@ class RemoteInputService {
     func scrollStart(relativeX: CGFloat, relativeY: CGFloat) {
         inputQueue.async { [self] in
             guard let point = currentAbsolutePoint(relativeX: relativeX, relativeY: relativeY) else { return }
+            ensureWindowFocused()
 
             if isMobileSimulator {
-                // Start a continuous drag for simulator swipe
+                let move = CGEvent(mouseEventSource: eventSource, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
+                move?.post(tap: .cghidEventTap)
+                usleep(10_000)
                 let down = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
-                postEvent(down)
+                down?.post(tap: .cghidEventTap)
                 isDragging = true
                 currentDragPoint = point
             }
@@ -91,18 +111,16 @@ class RemoteInputService {
     func scroll(relativeX: CGFloat, relativeY: CGFloat, deltaX: CGFloat, deltaY: CGFloat) {
         inputQueue.async { [self] in
             if isMobileSimulator && isDragging {
-                // Continue the drag — move by incremental delta
                 currentDragPoint.x += deltaX
                 currentDragPoint.y += deltaY
                 let drag = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDragged, mouseCursorPosition: currentDragPoint, mouseButton: .left)
-                postEvent(drag)
+                drag?.post(tap: .cghidEventTap)
             } else if !isMobileSimulator {
-                // Browser: scroll wheel
                 guard let point = currentAbsolutePoint(relativeX: relativeX, relativeY: relativeY) else { return }
                 let move = CGEvent(mouseEventSource: eventSource, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
-                postEvent(move)
+                move?.post(tap: .cghidEventTap)
                 if let scroll = CGEvent(scrollWheelEvent2Source: eventSource, units: .pixel, wheelCount: 2, wheel1: Int32(deltaY), wheel2: Int32(deltaX), wheel3: 0) {
-                    postEvent(scroll)
+                    scroll.post(tap: .cghidEventTap)
                 }
             }
         }
@@ -112,62 +130,55 @@ class RemoteInputService {
         inputQueue.async { [self] in
             if isMobileSimulator && isDragging {
                 let up = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseUp, mouseCursorPosition: currentDragPoint, mouseButton: .left)
-                postEvent(up)
+                up?.post(tap: .cghidEventTap)
                 isDragging = false
             }
         }
     }
 
-    // MARK: - Stateful Pinch (Simulator only)
+    // MARK: - Stateful Pinch
 
     func pinchStart(relativeX: CGFloat, relativeY: CGFloat) {
         inputQueue.async { [self] in
             guard isMobileSimulator else { return }
             guard let point = currentAbsolutePoint(relativeX: relativeX, relativeY: relativeY) else { return }
+            ensureWindowFocused()
 
             pinchCenter = point
             isPinching = true
 
-            // Move mouse to pinch center
             let move = CGEvent(mouseEventSource: eventSource, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
-            postEvent(move)
+            move?.post(tap: .cghidEventTap)
             usleep(30_000)
 
-            // Press Option key (activates two-finger mode in Simulator)
+            // Option key = two-finger mode in Simulator
             let optDown = CGEvent(keyboardEventSource: eventSource, virtualKey: 0x3A, keyDown: true)
-            postEvent(optDown)
+            optDown?.post(tap: .cghidEventTap)
             usleep(30_000)
 
-            // Mouse down
             let down = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
-            postEvent(down)
+            down?.post(tap: .cghidEventTap)
         }
     }
 
     func pinchUpdate(scale: CGFloat) {
         inputQueue.async { [self] in
             guard isMobileSimulator, isPinching else { return }
-            // Scale > 1 = zoom in = drag up (negative Y), Scale < 1 = zoom out = drag down
             let delta = -(scale - 1.0) * 50
             let newPoint = CGPoint(x: pinchCenter.x, y: pinchCenter.y + delta)
             let drag = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDragged, mouseCursorPosition: newPoint, mouseButton: .left)
-            postEvent(drag)
+            drag?.post(tap: .cghidEventTap)
         }
     }
 
     func pinchEnd() {
         inputQueue.async { [self] in
             guard isMobileSimulator, isPinching else { return }
-
-            // Release mouse
             let up = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseUp, mouseCursorPosition: pinchCenter, mouseButton: .left)
-            postEvent(up)
+            up?.post(tap: .cghidEventTap)
             usleep(20_000)
-
-            // Release Option key
             let optUp = CGEvent(keyboardEventSource: eventSource, virtualKey: 0x3A, keyDown: false)
-            postEvent(optUp)
-
+            optUp?.post(tap: .cghidEventTap)
             isPinching = false
         }
     }
@@ -178,21 +189,20 @@ class RemoteInputService {
         inputQueue.async { [self] in
             guard let from = currentAbsolutePoint(relativeX: fromX, relativeY: fromY),
                   let to = currentAbsolutePoint(relativeX: toX, relativeY: toY) else { return }
+            ensureWindowFocused()
 
             let down = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left)
-            postEvent(down)
-
+            down?.post(tap: .cghidEventTap)
             let steps = 10
             for i in 1...steps {
                 let t = CGFloat(i) / CGFloat(steps)
                 let p = CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
-                let drag = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDragged, mouseCursorPosition: p, mouseButton: .left)
-                postEvent(drag)
+                let d = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDragged, mouseCursorPosition: p, mouseButton: .left)
+                d?.post(tap: .cghidEventTap)
                 usleep(10_000)
             }
-
             let up = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left)
-            postEvent(up)
+            up?.post(tap: .cghidEventTap)
         }
     }
 
@@ -200,14 +210,15 @@ class RemoteInputService {
 
     func typeText(_ text: String) {
         inputQueue.async { [self] in
+            ensureWindowFocused()
             for char in text {
                 let str = String(char)
                 let event = CGEvent(keyboardEventSource: eventSource, virtualKey: 0, keyDown: true)
                 let chars = Array(str.utf16)
                 event?.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: chars)
-                postEvent(event)
+                event?.post(tap: .cghidEventTap)
                 let up = CGEvent(keyboardEventSource: eventSource, virtualKey: 0, keyDown: false)
-                postEvent(up)
+                up?.post(tap: .cghidEventTap)
                 usleep(3_000)
             }
         }
@@ -215,7 +226,6 @@ class RemoteInputService {
 
     // MARK: - Private
 
-    /// Get current window frame from system (always fresh, handles window moves)
     private func getCurrentWindowFrame() -> CGRect? {
         guard let info = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowId) as? [[String: Any]],
               let windowInfo = info.first,
@@ -229,15 +239,13 @@ class RemoteInputService {
         return CGRect(x: x, y: y, width: w, height: h)
     }
 
-    /// Convert relative coords (0-1) to absolute screen coords, refreshing window frame
     private func currentAbsolutePoint(relativeX: CGFloat, relativeY: CGFloat) -> CGPoint? {
         guard let frame = getCurrentWindowFrame() else {
-            print("[RemoteInput] Could not get window frame for \(windowId)")
+            print("[RemoteInput] Window \(windowId) not found")
             return nil
         }
 
         if isMobileSimulator {
-            // Exclude title bar — map only to simulator content area
             let contentY = frame.origin.y + titleBarHeight
             let contentHeight = frame.height - titleBarHeight
             return CGPoint(
@@ -252,45 +260,32 @@ class RemoteInputService {
         }
     }
 
-    /// Post event directly to target process (works even when window is behind others)
-    private func postEvent(_ event: CGEvent?) {
-        guard let event else { return }
-        event.postToPid(ownerPid)
-    }
+    /// Focus the target window — called once, then cached
+    private func ensureWindowFocused() {
+        guard !windowFocused else { return }
 
-    /// Post a simple click
-    private func postMouseClick(at point: CGPoint) {
-        let down = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
-        postEvent(down)
-        usleep(50)
-        let up = CGEvent(mouseEventSource: eventSource, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
-        postEvent(up)
-    }
+        // Activate the app
+        if let app = NSRunningApplication(processIdentifier: ownerPid) {
+            app.activate()
+        }
 
-    /// Focus the target window once during setup
-    private func focusWindowOnce() {
-        inputQueue.async { [self] in
-            if let app = NSRunningApplication(processIdentifier: ownerPid) {
-                app.activate()
-            }
-
-            let appElement = AXUIElementCreateApplication(ownerPid)
-            var windowsRef: CFTypeRef?
-            AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
-            if let windows = windowsRef as? [AXUIElement] {
-                for window in windows {
-                    var wid: CGWindowID = 0
-                    _AXUIElementGetWindow(window, &wid)
-                    if wid == windowId {
-                        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-                        return
-                    }
-                }
-                if let first = windows.first {
-                    AXUIElementPerformAction(first, kAXRaiseAction as CFString)
+        // Raise the specific window via Accessibility API
+        let appElement = AXUIElementCreateApplication(ownerPid)
+        var windowsRef: CFTypeRef?
+        AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        if let windows = windowsRef as? [AXUIElement] {
+            for window in windows {
+                var wid: CGWindowID = 0
+                _ = _AXUIElementGetWindow(window, &wid)
+                if wid == windowId {
+                    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+                    break
                 }
             }
         }
+
+        usleep(100_000) // Wait for window to come to front
+        windowFocused = true
     }
 }
 
