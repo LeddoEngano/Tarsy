@@ -184,6 +184,8 @@ class DaemonManager: ObservableObject {
             await handleDevServerStop(clientId: clientId, packet: packet)
         case .devServerStatus:
             await handleDevServerStatus(clientId: clientId, packet: packet)
+        case .browserOpenUrl:
+            await handleBrowserOpenUrl(clientId: clientId, packet: packet)
         case .streamStart:
             await handleStreamStart(clientId: clientId, packet: packet)
         case .streamStop:
@@ -357,15 +359,13 @@ class DaemonManager: ObservableObject {
                         )
                     }
                 },
-                onAskUser: { [weak self] (question: String, options: [String]) in
+                onAskUser: { [weak self] (questionsJson: String, _: [String]) in
                     Task {
-                        let optionsJson = (try? JSONSerialization.data(withJSONObject: options))
-                            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+                        // questionsJson is already a JSON string of the full questions array
                         await self?.wsServer?.send(
                             WSPacket(action: .claudeAskUser, payload: [
                                 "sessionId": sid,
-                                "question": question,
-                                "options": optionsJson
+                                "questions": questionsJson
                             ]),
                             to: clientId
                         )
@@ -596,6 +596,24 @@ class DaemonManager: ObservableObject {
 
         await wsServer?.send(
             WSPacket(action: .devServerStatus, payload: ["running": running ? "true" : "false"], id: packet.id),
+            to: clientId
+        )
+    }
+
+    // MARK: - Browser
+
+    private func handleBrowserOpenUrl(clientId: String, packet: WSPacket) async {
+        guard let urlString = packet.payload?["url"], !urlString.isEmpty else {
+            await wsServer?.send(
+                WSPacket(action: .error, payload: ["message": "Missing url"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+        await openBrowserToUrl(urlString)
+        log("browserOpenUrl: \(urlString)")
+        await wsServer?.send(
+            WSPacket(action: .browserOpenUrl, payload: ["status": "opened", "url": urlString], id: packet.id),
             to: clientId
         )
     }

@@ -122,6 +122,7 @@ struct WorkspaceView: View {
     // MARK: - Chat Area
 
     @State private var interactiveOptions: [InteractiveOption]? = nil
+    @State private var interactiveQuestions: [InteractiveQuestion]? = nil
 
     private var chatArea: some View {
         ScrollViewReader { proxy in
@@ -138,7 +139,16 @@ struct WorkspaceView: View {
                             .id("thinking")
                     }
 
-                    // Interactive options from Claude CLI
+                    // Multi-question form from AskUserQuestion
+                    if let questions = interactiveQuestions {
+                        MultiQuestionFormView(questions: questions) { answers in
+                            submitMultiQuestionAnswers(answers)
+                        }
+                        .id("interactive-questions")
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+
+                    // Simple interactive options (yes/no, allow/deny from terminal)
                     if let options = interactiveOptions {
                         InteractiveOptionsView(options: options) { selected in
                             sendInteractiveChoice(selected)
@@ -156,12 +166,17 @@ struct WorkspaceView: View {
             .onChange(of: interactiveOptions?.count) { _, _ in
                 scrollToBottom(proxy)
             }
+            .onChange(of: interactiveQuestions?.count) { _, _ in
+                scrollToBottom(proxy)
+            }
         }
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         withAnimation(.easeOut(duration: 0.2)) {
-            if interactiveOptions != nil {
+            if interactiveQuestions != nil {
+                proxy.scrollTo("interactive-questions", anchor: .bottom)
+            } else if interactiveOptions != nil {
                 proxy.scrollTo("interactive-options", anchor: .bottom)
             } else if isAgentThinking {
                 proxy.scrollTo("thinking", anchor: .bottom)
@@ -190,9 +205,11 @@ struct WorkspaceView: View {
     }
 
     private func sendInteractiveChoice(_ option: InteractiveOption) {
-        withAnimation { interactiveOptions = nil }
+        withAnimation {
+            interactiveOptions = nil
+            interactiveQuestions = nil
+        }
 
-        // Add as user message in chat
         let msg = ChatMessage(
             workspaceId: workspace.id,
             tabId: currentTab.id,
@@ -202,14 +219,39 @@ struct WorkspaceView: View {
 
         Task {
             await chatService.addMessage(msg)
-
-            // Send the user's choice as a new message to continue the conversation
             if let sessionId = currentTab.sessionId {
                 isAgentThinking = true
-                // Use claudeMessage — the session will process it as a follow-up
                 connectionManager.send(WSPacket(
                     action: .claudeMessage,
                     payload: ["sessionId": sessionId, "message": option.label]
+                ))
+            }
+        }
+    }
+
+    private func submitMultiQuestionAnswers(_ answers: [String: String]) {
+        withAnimation {
+            interactiveQuestions = nil
+            interactiveOptions = nil
+        }
+
+        // Format answers as readable text
+        let answerText = answers.map { "\($0.key): \($0.value)" }.joined(separator: "\n")
+
+        let msg = ChatMessage(
+            workspaceId: workspace.id,
+            tabId: currentTab.id,
+            role: .user,
+            content: answerText
+        )
+
+        Task {
+            await chatService.addMessage(msg)
+            if let sessionId = currentTab.sessionId {
+                isAgentThinking = true
+                connectionManager.send(WSPacket(
+                    action: .claudeMessage,
+                    payload: ["sessionId": sessionId, "message": answerText]
                 ))
             }
         }
@@ -366,16 +408,24 @@ struct WorkspaceView: View {
                     }
                 case .claudeAskUser:
                     isAgentThinking = false
-                    if let question = packet.payload?["question"],
-                       let optionsJson = packet.payload?["options"],
-                       let optionsData = optionsJson.data(using: .utf8),
-                       let options = try? JSONSerialization.jsonObject(with: optionsData) as? [String] {
-                        // Show interactive options from AskUserQuestion
-                        let parsed = options.enumerated().map { index, opt in
-                            InteractiveOption(label: opt, value: opt, style: .numbered)
-                        }
-                        if !parsed.isEmpty {
-                            withAnimation { interactiveOptions = parsed }
+                    if let questionsJson = packet.payload?["questions"],
+                       let questionsData = questionsJson.data(using: .utf8),
+                       let questions = try? JSONDecoder().decode([InteractiveQuestion].self, from: questionsData) {
+                        if questions.count == 1 && !questions[0].options.isEmpty {
+                            // Single question — show as simple option buttons
+                            let opts = questions[0].options.map {
+                                InteractiveOption(label: $0, value: $0, style: .numbered)
+                            }
+                            withAnimation {
+                                interactiveQuestions = nil
+                                interactiveOptions = opts
+                            }
+                        } else if !questions.isEmpty {
+                            // Multiple questions — show full form with submit
+                            withAnimation {
+                                interactiveOptions = nil
+                                interactiveQuestions = questions
+                            }
                         }
                     }
                 case .openclawOutput:

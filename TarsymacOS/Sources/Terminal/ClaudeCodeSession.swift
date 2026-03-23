@@ -189,31 +189,52 @@ actor ClaudeCodeSession {
 
         if name == "AskUserQuestion" {
             if let input = block["input"] as? [String: Any] {
-                // The real AskUserQuestion schema: input.questions[].question, input.questions[].options[].label
-                if let questions = input["questions"] as? [[String: Any]], let firstQ = questions.first {
-                    let question = firstQ["question"] as? String ?? "Question from Claude"
-                    var options: [String] = []
+                // Build a structured questions array to send to iOS
+                var questionsPayload: [[String: Any]] = []
 
-                    if let opts = firstQ["options"] as? [[String: Any]] {
-                        options = opts.compactMap { $0["label"] as? String }
-                    } else if let opts = firstQ["options"] as? [String] {
-                        options = opts
+                if let questions = input["questions"] as? [[String: Any]] {
+                    for q in questions {
+                        let question = q["question"] as? String ?? ""
+                        let header = q["header"] as? String ?? ""
+                        let multiSelect = q["multiSelect"] as? Bool ?? false
+                        var optionLabels: [String] = []
+
+                        if let opts = q["options"] as? [[String: Any]] {
+                            optionLabels = opts.compactMap { $0["label"] as? String }
+                        } else if let opts = q["options"] as? [String] {
+                            optionLabels = opts
+                        }
+
+                        questionsPayload.append([
+                            "question": question,
+                            "header": header,
+                            "options": optionLabels,
+                            "multiSelect": multiSelect
+                        ])
                     }
-
-                    print("[ClaudeCode] AskUserQuestion: \(question), options: \(options)")
-                    onOutput?("\n📋 \(question)\n")
-                    onAskUser?(question, options)
                 } else {
-                    // Fallback: try flat structure
+                    // Flat structure fallback
                     let question = input["question"] as? String ?? "Question from Claude"
-                    var options: [String] = []
-                    if let opts = input["options"] as? [String] { options = opts }
+                    var optionLabels: [String] = []
+                    if let opts = input["options"] as? [String] { optionLabels = opts }
                     else if let opts = input["options"] as? [[String: Any]] {
-                        options = opts.compactMap { $0["label"] as? String }
+                        optionLabels = opts.compactMap { $0["label"] as? String }
                     }
-                    print("[ClaudeCode] AskUserQuestion (flat): \(question), options: \(options)")
-                    onOutput?("\n📋 \(question)\n")
-                    onAskUser?(question, options)
+                    questionsPayload.append([
+                        "question": question,
+                        "header": "",
+                        "options": optionLabels,
+                        "multiSelect": false
+                    ])
+                }
+
+                print("[ClaudeCode] AskUserQuestion: \(questionsPayload.count) questions")
+
+                // Send all questions as JSON to iOS via onAskUser
+                // Encode the full questions array as the first param, empty array as second
+                if let jsonData = try? JSONSerialization.data(withJSONObject: questionsPayload),
+                   let jsonStr = String(data: jsonData, encoding: .utf8) {
+                    onAskUser?(jsonStr, [])
                 }
             }
         } else {

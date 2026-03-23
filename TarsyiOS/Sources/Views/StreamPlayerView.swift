@@ -139,6 +139,9 @@ struct StreamPlayerView: View {
     @State private var isDevServerStarting = false
     @State private var gearRotation: Double = 0
     @State private var showNoCommandAlert = false
+    @State private var showGoToMenu = false
+    @State private var showCustomUrlInput = false
+    @State private var customUrl = ""
 
     var body: some View {
         ZStack {
@@ -171,6 +174,8 @@ struct StreamPlayerView: View {
                     }
                     Spacer()
                     HStack(spacing: 16) {
+                        // Go to...
+                        goToButton
                         // Screenshot
                         streamButton("camera.viewfinder") {
                             saveScreenshot()
@@ -300,6 +305,75 @@ struct StreamPlayerView: View {
         if isDevServerRunning { return TarsyTheme.statusRunning }
         if isDevServerStarting { return TarsyTheme.accentAmber }
         return TarsyTheme.textSecondary
+    }
+
+    // MARK: - Go To Button
+
+    private var goToButton: some View {
+        Menu {
+            // Option 1: localhost with detected port
+            Button(action: { openUrlOnMac(localhostUrl) }) {
+                Label(localhostUrl, systemImage: "network")
+            }
+
+            // Option 2: configured stream URL (if set)
+            if let url = workspace.streamUrl, !url.isEmpty {
+                Button(action: { openUrlOnMac(url) }) {
+                    Label(url, systemImage: "link")
+                }
+            }
+
+            Divider()
+
+            // Option 3: custom URL
+            Button(action: { showCustomUrlInput = true }) {
+                Label("custom url...", systemImage: "pencil")
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "safari")
+                    .font(.caption)
+                Text("go to")
+                    .font(.system(size: 10, design: .monospaced))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(TarsyTheme.backgroundPrimary.opacity(0.7))
+            .cornerRadius(6)
+        }
+        .alert("open url", isPresented: $showCustomUrlInput) {
+            TextField("https://...", text: $customUrl)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+            Button("go") {
+                let url = customUrl.hasPrefix("http") ? customUrl : "https://\(customUrl)"
+                openUrlOnMac(url)
+                customUrl = ""
+            }
+            Button("cancel", role: .cancel) { customUrl = "" }
+        }
+    }
+
+    private var localhostUrl: String {
+        if let url = workspace.streamUrl, !url.isEmpty,
+           let parsed = URL(string: url),
+           let port = parsed.port {
+            return "http://localhost:\(port)"
+        }
+        // Fallback: guess common ports based on stack
+        let port: Int
+        switch workspace.stack {
+        case .web: port = 3000
+        case .mobile: port = 8081
+        case .backend: port = 8000
+        case .fullstack: port = 3000
+        }
+        return "http://localhost:\(port)"
+    }
+
+    private func openUrlOnMac(_ urlString: String) {
+        connectionManager.send(WSPacket(action: .browserOpenUrl, payload: ["url": urlString]))
     }
 
     private func startGearAnimation() {
