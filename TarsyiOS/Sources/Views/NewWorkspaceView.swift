@@ -1,18 +1,41 @@
 import SwiftUI
 import TarsyShared
 
+struct ScannedRepo: Codable {
+    let name: String
+    let path: String
+    let remoteUrl: String?
+    let currentBranch: String?
+    let stack: String?
+}
+
 struct NewWorkspaceView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var workspaceService: WorkspaceService
     @EnvironmentObject var machineService: MachineService
+    @EnvironmentObject var connectionManager: ConnectionManager
 
     @State private var name = ""
     @State private var repoUrl = ""
-    @State private var localPath = "~/Projects/"
+    @State private var localPath = ""
     @State private var stack: Workspace.WorkspaceStack = .web
     @State private var devServerCommand = ""
     @State private var isCreating = false
     @State private var error: String?
+
+    // Repo scanning
+    @State private var scannedRepos: [ScannedRepo] = []
+    @State private var isScanning = false
+    @State private var showRepoList = true
+    @State private var searchText = ""
+
+    private var filteredRepos: [ScannedRepo] {
+        if searchText.isEmpty { return scannedRepos }
+        return scannedRepos.filter {
+            $0.name.localizedCaseInsensitiveContains(searchText) ||
+            ($0.remoteUrl ?? "").localizedCaseInsensitiveContains(searchText)
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -22,60 +45,15 @@ struct NewWorkspaceView: View {
 
                 ScrollView {
                     VStack(spacing: 20) {
-                        // Name
-                        fieldSection("project name") {
-                            tarsyTextField("EDONext", text: $name)
+                        // Scanned repos from Mac
+                        if showRepoList {
+                            repoSuggestions
                         }
 
-                        // Repo URL
-                        fieldSection("repository url (optional)") {
-                            tarsyTextField("https://github.com/user/repo.git", text: $repoUrl)
-                                .keyboardType(.URL)
+                        // Manual form (shown after selecting or toggling)
+                        if !showRepoList || !name.isEmpty {
+                            manualForm
                         }
-
-                        // Local path
-                        fieldSection("local path on mac") {
-                            tarsyTextField("~/Projects/my-app", text: $localPath)
-                        }
-
-                        // Stack
-                        fieldSection("stack") {
-                            HStack(spacing: 8) {
-                                ForEach([Workspace.WorkspaceStack.web, .mobile, .backend, .fullstack], id: \.rawValue) { s in
-                                    stackChip(s)
-                                }
-                            }
-                        }
-
-                        // Dev server command
-                        fieldSection("dev server command (optional)") {
-                            tarsyTextField("npm run dev", text: $devServerCommand)
-                        }
-
-                        if let error {
-                            Text(error)
-                                .font(TarsyTheme.monoFontSmall)
-                                .foregroundColor(TarsyTheme.accentTerracotta)
-                        }
-
-                        // Create button
-                        Button(action: { Task { await createWorkspace() } }) {
-                            HStack {
-                                if isCreating {
-                                    ProgressView()
-                                        .tint(TarsyTheme.backgroundPrimary)
-                                        .scaleEffect(0.8)
-                                }
-                                Text(isCreating ? "creating..." : "create workspace")
-                                    .font(TarsyTheme.monoFont)
-                            }
-                            .foregroundColor(TarsyTheme.backgroundPrimary)
-                            .frame(maxWidth: .infinity)
-                            .padding(16)
-                            .background(name.isEmpty ? TarsyTheme.textSecondary : TarsyTheme.accentAmber)
-                            .cornerRadius(12)
-                        }
-                        .disabled(name.isEmpty || isCreating)
                     }
                     .padding(20)
                 }
@@ -96,6 +74,243 @@ struct NewWorkspaceView: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
+        .onAppear { scanRepos() }
+    }
+
+    // MARK: - Repo Suggestions
+
+    private var repoSuggestions: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("repos on your mac")
+                    .font(TarsyTheme.monoFontSmall)
+                    .foregroundColor(TarsyTheme.textSecondary)
+                Spacer()
+                if isScanning {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(TarsyTheme.accentAmber)
+                } else {
+                    Button(action: { scanRepos() }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                            .foregroundColor(TarsyTheme.textSecondary)
+                    }
+                }
+            }
+
+            if !scannedRepos.isEmpty {
+                // Search
+                TextField("", text: $searchText, prompt: Text("search repos...").foregroundColor(TarsyTheme.textSecondary.opacity(0.5)))
+                    .textFieldStyle(.plain)
+                    .font(TarsyTheme.monoFontSmall)
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .padding(10)
+                    .background(TarsyTheme.backgroundSecondary)
+                    .cornerRadius(8)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+
+                // Repo list
+                LazyVStack(spacing: 8) {
+                    ForEach(filteredRepos, id: \.path) { repo in
+                        Button(action: { selectRepo(repo) }) {
+                            repoCard(repo)
+                        }
+                    }
+                }
+            } else if !isScanning {
+                Text("no repos found. connect your mac first.")
+                    .font(TarsyTheme.monoFontSmall)
+                    .foregroundColor(TarsyTheme.textSecondary)
+                    .padding(12)
+            }
+
+            // Toggle to manual
+            Button(action: {
+                withAnimation { showRepoList = false }
+            }) {
+                HStack {
+                    Image(systemName: "plus.circle")
+                        .font(.caption)
+                    Text("create from scratch")
+                        .font(TarsyTheme.monoFontSmall)
+                }
+                .foregroundColor(TarsyTheme.accentAmber)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func repoCard(_ repo: ScannedRepo) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: "folder.fill")
+                .foregroundColor(TarsyTheme.accentAmber)
+                .font(.caption)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(repo.name)
+                    .font(TarsyTheme.monoFont)
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .fontWeight(.medium)
+
+                HStack(spacing: 8) {
+                    if let branch = repo.currentBranch {
+                        Label(branch, systemImage: "arrow.triangle.branch")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                    }
+                    if let s = repo.stack {
+                        Text(s)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(TarsyTheme.accentAmber)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(TarsyTheme.accentAmber.opacity(0.15))
+                            .cornerRadius(3)
+                    }
+                }
+
+                Text(repo.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption2)
+                .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
+        }
+        .padding(12)
+        .background(TarsyTheme.backgroundSecondary)
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(TarsyTheme.backgroundTertiary, lineWidth: 1)
+        )
+    }
+
+    // MARK: - Manual Form
+
+    private var manualForm: some View {
+        VStack(spacing: 16) {
+            if showRepoList {
+                // Show back button if we came from repo selection
+                HStack {
+                    Button(action: {
+                        withAnimation {
+                            name = ""
+                            showRepoList = true
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.caption)
+                            Text("back to repos")
+                                .font(TarsyTheme.monoFontSmall)
+                        }
+                        .foregroundColor(TarsyTheme.textSecondary)
+                    }
+                    Spacer()
+                }
+            }
+
+            fieldSection("project name") {
+                tarsyTextField("EDONext", text: $name)
+            }
+
+            fieldSection("repository url (optional)") {
+                tarsyTextField("https://github.com/user/repo.git", text: $repoUrl)
+                    .keyboardType(.URL)
+            }
+
+            fieldSection("local path on mac") {
+                tarsyTextField("~/Projects/my-app", text: $localPath)
+            }
+
+            fieldSection("stack") {
+                HStack(spacing: 8) {
+                    ForEach([Workspace.WorkspaceStack.web, .mobile, .backend, .fullstack], id: \.rawValue) { s in
+                        stackChip(s)
+                    }
+                }
+            }
+
+            fieldSection("dev server command (optional)") {
+                tarsyTextField("npm run dev", text: $devServerCommand)
+            }
+
+            if let error {
+                Text(error)
+                    .font(TarsyTheme.monoFontSmall)
+                    .foregroundColor(TarsyTheme.accentTerracotta)
+            }
+
+            Button(action: { Task { await createWorkspace() } }) {
+                HStack {
+                    if isCreating {
+                        ProgressView()
+                            .tint(TarsyTheme.backgroundPrimary)
+                            .scaleEffect(0.8)
+                    }
+                    Text(isCreating ? "creating..." : "create workspace")
+                        .font(TarsyTheme.monoFont)
+                }
+                .foregroundColor(TarsyTheme.backgroundPrimary)
+                .frame(maxWidth: .infinity)
+                .padding(16)
+                .background(name.isEmpty ? TarsyTheme.textSecondary : TarsyTheme.accentAmber)
+                .cornerRadius(12)
+            }
+            .disabled(name.isEmpty || isCreating)
+        }
+    }
+
+    // MARK: - Actions
+
+    private func scanRepos() {
+        isScanning = true
+        connectionManager.send(WSPacket(action: .workspaceScanRepos))
+
+        // Listen for scan result
+        let previousHandler = connectionManager.onPacketReceived
+        connectionManager.onPacketReceived = { packet in
+            if packet.action == .workspaceScanResult,
+               let json = packet.payload?["repos"],
+               let data = json.data(using: .utf8),
+               let repos = try? JSONDecoder().decode([ScannedRepo].self, from: data) {
+                Task { @MainActor in
+                    self.scannedRepos = repos
+                    self.isScanning = false
+                    // Restore previous handler
+                    self.connectionManager.onPacketReceived = previousHandler
+                }
+            } else {
+                previousHandler?(packet)
+            }
+        }
+
+        // Timeout
+        Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            await MainActor.run {
+                if isScanning {
+                    isScanning = false
+                    connectionManager.onPacketReceived = previousHandler
+                }
+            }
+        }
+    }
+
+    private func selectRepo(_ repo: ScannedRepo) {
+        name = repo.name
+        localPath = repo.path
+        repoUrl = repo.remoteUrl ?? ""
+        if let s = repo.stack, let ws = Workspace.WorkspaceStack(rawValue: s) {
+            stack = ws
+        }
+        showRepoList = true // Keep showing but now the form appears below
     }
 
     private func createWorkspace() async {
@@ -114,7 +329,7 @@ struct NewWorkspaceView: View {
                 machineId: machineId.uuidString,
                 name: name,
                 repoUrl: repoUrl.isEmpty ? nil : repoUrl,
-                localPath: localPath.hasSuffix("/") ? localPath + name.lowercased() : localPath,
+                localPath: localPath.isEmpty ? "~/Projects/\(name.lowercased())" : localPath,
                 stack: stack.rawValue,
                 devServerCommand: devServerCommand.isEmpty ? nil : devServerCommand,
                 aiContext: nil
@@ -126,6 +341,8 @@ struct NewWorkspaceView: View {
         }
         isCreating = false
     }
+
+    // MARK: - Helpers
 
     @ViewBuilder
     private func fieldSection(_ title: String, @ViewBuilder content: () -> some View) -> some View {

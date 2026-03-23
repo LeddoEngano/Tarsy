@@ -8,6 +8,8 @@ public enum WSAction: String, Codable, Sendable {
     case workspaceStop = "workspace:stop"
     case workspaceStatus = "workspace:status"
     case workspaceUpdate = "workspace:update"
+    case workspaceScanRepos = "workspace:scan_repos"
+    case workspaceScanResult = "workspace:scan_result"
 
     // Stream
     case streamStart = "stream:start"

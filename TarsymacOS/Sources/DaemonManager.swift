@@ -148,6 +148,8 @@ class DaemonManager: ObservableObject {
         switch packet.action {
         case .workspaceList:
             await handleWorkspaceList(clientId: clientId, packet: packet)
+        case .workspaceScanRepos:
+            await handleScanRepos(clientId: clientId, packet: packet)
         case .workspaceCreate:
             await handleWorkspaceCreate(clientId: clientId, packet: packet)
         case .workspaceStart:
@@ -177,6 +179,20 @@ class DaemonManager: ObservableObject {
         default:
             await wsServer?.send(
                 WSPacket(action: .error, payload: ["message": "Unknown action: \(packet.action.rawValue)"]),
+                to: clientId
+            )
+        }
+    }
+
+    private func handleScanRepos(clientId: String, packet: WSPacket) async {
+        let scanner = RepoScanner()
+        let repos = await scanner.scan()
+
+        // Encode repos as JSON string in payload
+        if let data = try? JSONEncoder().encode(repos),
+           let json = String(data: data, encoding: .utf8) {
+            await wsServer?.send(
+                WSPacket(action: .workspaceScanResult, payload: ["repos": json], id: packet.id),
                 to: clientId
             )
         }

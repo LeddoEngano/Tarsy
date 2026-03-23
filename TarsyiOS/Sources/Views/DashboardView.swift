@@ -10,33 +10,14 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                TarsyTheme.backgroundPrimary
-                    .ignoresSafeArea()
-
-                if workspaceService.isLoading && workspaceService.workspaces.isEmpty {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .tint(TarsyTheme.accentAmber)
-                        Text("loading workspaces...")
-                            .font(TarsyTheme.monoFontSmall)
-                            .foregroundColor(TarsyTheme.textSecondary)
-                    }
-                } else if workspaceService.workspaces.isEmpty {
-                    emptyState
-                } else {
-                    workspaceList
-                }
-            }
-            .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 10) {
+            VStack(spacing: 0) {
+                // Custom header
+                HStack {
+                    HStack(spacing: 8) {
                         Text("TARSY")
                             .font(.system(size: 24, weight: .bold, design: .monospaced))
                             .foregroundColor(TarsyTheme.accentAmber)
 
-                        // Machine status
                         HStack(spacing: 4) {
                             Circle()
                                 .fill(machineService.isOnline ? TarsyTheme.statusRunning : TarsyTheme.statusError)
@@ -46,9 +27,10 @@ struct DashboardView: View {
                                 .foregroundColor(TarsyTheme.textSecondary)
                         }
                     }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
+
+                    Spacer()
+
+                    HStack(spacing: 16) {
                         Button(action: { showNewWorkspace = true }) {
                             Image(systemName: "plus")
                                 .foregroundColor(TarsyTheme.accentAmber)
@@ -61,14 +43,34 @@ struct DashboardView: View {
                         }
                     }
                 }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(TarsyTheme.backgroundPrimary)
+
+                // Content
+                ZStack {
+                    TarsyTheme.backgroundPrimary
+                        .ignoresSafeArea()
+
+                    if workspaceService.isLoading && workspaceService.workspaces.isEmpty {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                                .tint(TarsyTheme.accentAmber)
+                            Text("loading workspaces...")
+                                .font(TarsyTheme.monoFontSmall)
+                                .foregroundColor(TarsyTheme.textSecondary)
+                        }
+                    } else if workspaceService.workspaces.isEmpty {
+                        emptyState
+                    } else {
+                        workspaceList
+                    }
+                }
             }
-            .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
+            .navigationBarHidden(true)
         }
         .sheet(isPresented: $showNewWorkspace) {
             NewWorkspaceView()
-                .environmentObject(workspaceService)
-                .environmentObject(machineService)
         }
         .task {
             await machineService.fetchMachine()
