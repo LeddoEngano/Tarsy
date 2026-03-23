@@ -42,69 +42,54 @@ class TailscaleManager: ObservableObject {
 
         defer { isInstalling = false }
 
-        // Find brew
         let brewPath = findBrew()
         guard let brew = brewPath else {
             throw TailscaleError.installFailed("Homebrew not found. Install it from https://brew.sh")
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: brew)
-        process.arguments = ["install", "--cask", "tailscale-app"]
+        // Step 1: Download the cask (no sudo needed)
+        appendLog("→ Downloading tailscale-app...\n")
+        onOutput("→ Downloading tailscale-app...\n")
+        installProgress = 0.1
 
-        var env = ProcessInfo.processInfo.environment
-        env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
-        process.environment = env
-
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
-        let outputAccumulator = OutputAccumulator()
-
-        // Read stdout in real-time
-        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            outputAccumulator.append(text)
-            Task { @MainActor in
-                self?.appendLog(text)
-                self?.updateProgress(from: text)
-                onOutput(text)
+        let downloadResult = try await runProcess(
+            executable: brew,
+            arguments: ["fetch", "--cask", "tailscale-app"],
+            env: ["HOMEBREW_NO_AUTO_UPDATE": "1"],
+            onOutput: { [weak self] text in
+                Task { @MainActor in
+                    self?.appendLog(text)
+                    self?.updateProgress(from: text)
+                    onOutput(text)
+                }
             }
-        }
+        )
 
-        // Read stderr in real-time (brew writes progress here)
-        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            outputAccumulator.append(text)
-            Task { @MainActor in
-                self?.appendLog(text)
-                self?.updateProgress(from: text)
-                onOutput(text)
+        installProgress = 0.5
+        appendLog("→ Download complete. Installing (admin password required)...\n")
+        onOutput("→ Installing (admin password required)...\n")
+
+        // Step 2: Install via osascript with admin privileges
+        // This shows the native macOS password dialog
+        let script = """
+        do shell script "HOMEBREW_NO_AUTO_UPDATE=1 \(brew) install --cask tailscale-app 2>&1" with administrator privileges
+        """
+
+        let installResult = try await runProcess(
+            executable: "/usr/bin/osascript",
+            arguments: ["-e", script],
+            onOutput: { [weak self] text in
+                Task { @MainActor in
+                    self?.appendLog(text)
+                    self?.updateProgress(from: text)
+                    onOutput(text)
+                }
             }
-        }
+        )
 
-        try process.run()
+        installProgress = 0.9
 
-        // Wait on background thread
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global().async {
-                process.waitUntilExit()
-                continuation.resume()
-            }
-        }
-
-        // Give pipes a moment to flush remaining data
-        try? await Task.sleep(nanoseconds: 500_000_000)
-
-        outputPipe.fileHandleForReading.readabilityHandler = nil
-        errorPipe.fileHandleForReading.readabilityHandler = nil
-
-        // Check if Tailscale.app exists regardless of exit code
-        // (brew returns non-zero for caveats like kernel extension warnings)
+        // Check if installed
         let appInstalled = FileManager.default.fileExists(atPath: "/Applications/Tailscale.app")
         let caskInstalled = FileManager.default.fileExists(atPath: "/opt/homebrew/Caskroom/tailscale-app")
 
@@ -112,14 +97,13 @@ class TailscaleManager: ObservableObject {
             installProgress = 1.0
             appendLog("\n✓ Tailscale installed successfully!\n")
             appendLog("→ Opening Tailscale — please sign in.\n")
+            onOutput("\n✓ Installed! Opening Tailscale...\n")
 
-            // Open Tailscale app
             if appInstalled {
                 NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Tailscale.app"))
             }
         } else {
-            let output = outputAccumulator.value
-            throw TailscaleError.installFailed(output.isEmpty ? "Installation failed with exit code \(process.terminationStatus)" : output)
+            throw TailscaleError.installFailed(installResult)
         }
     }
 
@@ -178,6 +162,61 @@ class TailscaleManager: ObservableObject {
         if lower.contains("caveats") || lower.contains("installed") {
             installProgress = max(installProgress, 0.9)
         }
+    }
+
+    @discardableResult
+    private func runProcess(
+        executable: String,
+        arguments: [String],
+        env: [String: String]? = nil,
+        onOutput: @escaping (String) -> Void
+    ) async throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+
+        var processEnv = ProcessInfo.processInfo.environment
+        if let env {
+            for (k, v) in env { processEnv[k] = v }
+        }
+        process.environment = processEnv
+
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+
+        let accumulator = OutputAccumulator()
+
+        outputPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            accumulator.append(text)
+            onOutput(text)
+        }
+
+        errorPipe.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            accumulator.append(text)
+            onOutput(text)
+        }
+
+        try process.run()
+
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                process.waitUntilExit()
+                continuation.resume()
+            }
+        }
+
+        try? await Task.sleep(nanoseconds: 300_000_000)
+
+        outputPipe.fileHandleForReading.readabilityHandler = nil
+        errorPipe.fileHandleForReading.readabilityHandler = nil
+
+        return accumulator.value
     }
 
     private func findBrew() -> String? {
