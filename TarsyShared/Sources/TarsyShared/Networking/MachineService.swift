@@ -38,17 +38,13 @@ public class MachineService: ObservableObject {
     }
 
     /// Returns the best IP to connect to the Mac.
-    /// Prefers local IP (same WiFi, lower latency), falls back to Tailscale IP.
+    /// Prefers local IP (direct WiFi, no VPN overhead), falls back to Tailscale.
     public var bestIP: String? {
-        // If Tailscale is installed on iPhone, prefer Tailscale (works from anywhere)
-        if hasTailscale, let tsIP = tailscaleIP {
-            return tsIP
-        }
-        // Otherwise use local IP (same WiFi only)
+        // Prefer local IP — direct connection, no VPN fragmentation issues
         if let lip = localIP {
             return lip
         }
-        // Last resort: tailscale IP even without the app (won't work but shows intent)
+        // Fallback to Tailscale for remote access
         return tailscaleIP
     }
 }

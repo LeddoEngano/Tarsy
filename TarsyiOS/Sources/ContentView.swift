@@ -26,13 +26,12 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)
         .onChange(of: authManager.isAuthenticated) { _, isAuth in
-            if isAuth {
+            if isAuth && !connectionManager.isConnected {
                 Task { await autoConnect() }
             }
         }
         .onChange(of: authManager.isLoading) { _, isLoading in
-            // Connect when auth finishes loading and user is already logged in
-            if !isLoading && authManager.isAuthenticated {
+            if !isLoading && authManager.isAuthenticated && !connectionManager.isConnected {
                 Task { await autoConnect() }
             }
         }
