@@ -681,6 +681,7 @@ class DaemonManager: ObservableObject {
     private func handleRemoteInput(packet: WSPacket) {
         let x = Double(packet.payload?["x"] ?? "0.5") ?? 0.5
         let y = Double(packet.payload?["y"] ?? "0.5") ?? 0.5
+        log("remoteInput: \(packet.action.rawValue) x=\(String(format: "%.3f", x)) y=\(String(format: "%.3f", y))")
 
         switch packet.action {
         case .remoteTap:
