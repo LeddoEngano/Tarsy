@@ -445,21 +445,27 @@ class DaemonManager: ObservableObject {
 
     private func handleStreamStart(clientId: String, packet: WSPacket) async {
         let stack = packet.payload?["stack"] ?? "web"
+        log("streamStart: looking for window with stack=\(stack)")
 
         // Find the right window for this stack
         guard let window = await screenCapture.findWindow(forStack: stack) else {
+            log("streamStart: no window found for stack \(stack)")
+            log("streamStart: available windows: \(screenCapture.availableWindows.map { "\($0.owningApplication?.applicationName ?? "?") - \($0.title ?? "?")" })")
             await wsServer?.send(
-                WSPacket(action: .error, payload: ["message": "No matching window found for stack: \(stack)"], id: packet.id),
+                WSPacket(action: .error, payload: ["message": "No matching window found for stack: \(stack). Make sure the app (browser/simulator) is open."], id: packet.id),
                 to: clientId
             )
             return
         }
+
+        log("streamStart: found window '\(window.title ?? "?")' from \(window.owningApplication?.applicationName ?? "?")")
 
         do {
             // Start MJPEG server if not running
             if mjpegServer == nil {
                 mjpegServer = MJPEGStreamServer()
                 try await mjpegServer?.start()
+                log("streamStart: MJPEG server started on port 8643")
             }
 
             // Wire screen capture to MJPEG
@@ -470,6 +476,7 @@ class DaemonManager: ObservableObject {
             }
 
             try await screenCapture.startCapture(window: window, fps: 10, scale: 0.5)
+            log("streamStart: capture started")
 
             let streamPort: UInt16 = 8643
             await wsServer?.send(
@@ -481,7 +488,9 @@ class DaemonManager: ObservableObject {
                 ], id: packet.id),
                 to: clientId
             )
+            log("streamStart: response sent to client")
         } catch {
+            log("streamStart: FAILED — \(error)")
             await wsServer?.send(
                 WSPacket(action: .error, payload: ["message": "Stream failed: \(error.localizedDescription)"], id: packet.id),
                 to: clientId

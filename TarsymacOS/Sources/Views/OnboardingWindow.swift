@@ -97,7 +97,7 @@ struct OnboardingWindow: View {
             stepLine(done: step != .login)
             stepDot(label: "2. tailscale", active: step == .tailscale, done: step == .permissions || step == .ready)
             stepLine(done: step == .permissions || step == .ready)
-            stepDot(label: "3. permissions", active: step == .permissions, done: step == .ready)
+            stepDot(label: "3. perms", active: step == .permissions, done: step == .ready)
             stepLine(done: step == .ready)
             stepDot(label: "4. ready", active: step == .ready, done: false)
         }

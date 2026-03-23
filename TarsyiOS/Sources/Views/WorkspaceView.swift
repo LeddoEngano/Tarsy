@@ -20,6 +20,8 @@ struct WorkspaceView: View {
         tabs[selectedTabIndex]
     }
 
+    @FocusState private var isInputFocused: Bool
+
     var body: some View {
         ZStack {
             TarsyTheme.backgroundPrimary
@@ -38,6 +40,7 @@ struct WorkspaceView: View {
 
                 // Chat area
                 chatArea
+                    .onTapGesture { isInputFocused = false }
 
                 // Input bar
                 inputBar
@@ -145,6 +148,7 @@ struct WorkspaceView: View {
                 .padding(12)
                 .background(TarsyTheme.backgroundSecondary)
                 .cornerRadius(8)
+                .focused($isInputFocused)
                 .onSubmit { sendMessage() }
 
             Button(action: { sendMessage() }) {
@@ -164,6 +168,7 @@ struct WorkspaceView: View {
         guard !messageText.isEmpty else { return }
         let text = messageText
         messageText = ""
+        isInputFocused = false
 
         let msg = ChatMessage(
             workspaceId: workspace.id,

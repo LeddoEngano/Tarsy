@@ -199,6 +199,7 @@ struct StreamPlayerView: View {
         .cornerRadius(12)
         .padding(.horizontal, 12)
         .padding(.top, 8)
+        .padding(.bottom, 8)
         .fullScreenCover(isPresented: $isFullscreen) {
             ZStack {
                 Color.black.ignoresSafeArea()
@@ -231,12 +232,30 @@ struct StreamPlayerView: View {
 
     private func startStream() {
         isActive = true
-        // Send stream:start via WebSocket
+        // Send stream:start via WebSocket — Mac will start capture + MJPEG server
         connectionManager.send(WSPacket(action: .streamStart, payload: ["stack": workspace.stack.rawValue]))
 
-        // Connect to MJPEG stream
-        if let ip = machineService.tailscaleIP {
-            viewModel.connect(host: ip, port: 8643)
+        // Listen for stream:start response which confirms server is ready
+        let previousHandler = connectionManager.onPacketReceived
+        connectionManager.onPacketReceived = { packet in
+            if packet.action == .streamStart, let port = packet.payload?["port"] {
+                // Server is ready, connect MJPEG client
+                if let ip = self.machineService.bestIP {
+                    self.viewModel.connect(host: ip, port: UInt16(port) ?? 8643)
+                }
+                // Restore handler
+                self.connectionManager.onPacketReceived = previousHandler
+            } else {
+                previousHandler?(packet)
+            }
+        }
+
+        // Fallback: if no response in 3s, try connecting anyway
+        Task {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if !viewModel.isConnected, let ip = machineService.bestIP {
+                viewModel.connect(host: ip, port: 8643)
+            }
         }
     }
 
