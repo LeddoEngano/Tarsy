@@ -50,8 +50,28 @@ struct WorkspaceView: View {
 
                 Divider().background(TarsyTheme.backgroundTertiary)
 
-                // Chat area
-                chatArea
+                // Chat area + floating question card
+                ZStack(alignment: .bottom) {
+                    chatArea
+
+                    if let questions = interactiveQuestions {
+                        PaginatedQuestionCard(
+                            questions: questions,
+                            onSubmitAll: { answers in
+                                submitMultiQuestionAnswers(answers)
+                            },
+                            onDismiss: {
+                                withAnimation {
+                                    interactiveQuestions = nil
+                                }
+                            }
+                        )
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
+                    }
+                }
 
                 // Input bar
                 inputBar
@@ -153,23 +173,6 @@ struct WorkspaceView: View {
                             .id("thinking")
                     }
 
-                    // Paginated question card from AskUserQuestion
-                    if let questions = interactiveQuestions {
-                        PaginatedQuestionCard(
-                            questions: questions,
-                            onSubmitAll: { answers in
-                                submitMultiQuestionAnswers(answers)
-                            },
-                            onDismiss: {
-                                withAnimation {
-                                    interactiveQuestions = nil
-                                }
-                            }
-                        )
-                        .id("interactive-questions")
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    }
-
                     // Simple interactive options (yes/no, allow/deny from terminal)
                     if let options = interactiveOptions {
                         InteractiveOptionsView(options: options) { selected in
@@ -188,9 +191,6 @@ struct WorkspaceView: View {
             .onChange(of: interactiveOptions?.count) { _, _ in
                 scrollToBottom(proxy)
             }
-            .onChange(of: interactiveQuestions?.count) { _, _ in
-                scrollToBottom(proxy)
-            }
             .onChange(of: chatService.updateCounter) { _, _ in
                 scrollToBottom(proxy)
             }
@@ -205,9 +205,7 @@ struct WorkspaceView: View {
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         withAnimation(.easeOut(duration: 0.2)) {
-            if interactiveQuestions != nil {
-                proxy.scrollTo("interactive-questions", anchor: .bottom)
-            } else if interactiveOptions != nil {
+            if interactiveOptions != nil {
                 proxy.scrollTo("interactive-options", anchor: .bottom)
             } else if agentActivity != nil {
                 proxy.scrollTo("activity", anchor: .bottom)
