@@ -38,6 +38,7 @@ actor ClaudeCodeSession {
         print("[ClaudeCode] Starting bidirectional session \(id) at \(expandedPath)")
 
         var args = [
+            "-p",
             "--dangerously-skip-permissions",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
@@ -104,7 +105,7 @@ actor ClaudeCodeSession {
         // Send as stream-json user message
         let msg: [String: Any] = [
             "type": "user",
-            "content": message
+            "message": ["role": "user", "content": message]
         ]
 
         if let data = try? JSONSerialization.data(withJSONObject: msg),
