@@ -21,6 +21,13 @@ public enum WSAction: String, Codable, Sendable {
     case terminalClose = "terminal:close"
     case terminalList = "terminal:list"
 
+    // Claude Code
+    case claudeCreate = "claude:create"
+    case claudeMessage = "claude:message"
+    case claudeOutput = "claude:output"
+    case claudeComplete = "claude:complete"
+    case claudeClose = "claude:close"
+
     // System
     case auth
     case authSuccess = "auth:success"

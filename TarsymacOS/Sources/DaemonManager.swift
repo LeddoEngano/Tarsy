@@ -128,6 +128,12 @@ class DaemonManager: ObservableObject {
             await handleTerminalInput(clientId: clientId, packet: packet)
         case .terminalClose:
             await handleTerminalClose(clientId: clientId, packet: packet)
+        case .claudeCreate:
+            await handleClaudeCreate(clientId: clientId, packet: packet)
+        case .claudeMessage:
+            await handleClaudeMessage(clientId: clientId, packet: packet)
+        case .claudeClose:
+            await handleClaudeClose(clientId: clientId, packet: packet)
         case .streamStart:
             await handleStreamStart(clientId: clientId, packet: packet)
         case .streamStop:
@@ -244,6 +250,68 @@ class DaemonManager: ObservableObject {
         await terminalManager.closeSession(sessionId)
         await wsServer?.send(
             WSPacket(action: .terminalClose, payload: ["sessionId": sessionId], id: packet.id),
+            to: clientId
+        )
+    }
+
+    // MARK: - Claude Code
+
+    private func handleClaudeCreate(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else { return }
+        let aiContext = packet.payload?["aiContext"]
+        let sid = UUID().uuidString
+        let workspaceName = path.components(separatedBy: "/").last ?? "workspace"
+
+        do {
+            let _ = try await terminalManager.createClaudeSession(
+                id: sid,
+                workspacePath: path,
+                aiContext: aiContext,
+                onOutput: { [weak self] output in
+                    Task {
+                        await self?.wsServer?.send(
+                            WSPacket(action: .claudeOutput, payload: ["sessionId": sid, "output": output]),
+                            to: clientId
+                        )
+                    }
+                },
+                onComplete: { [weak self] (message: String) in
+                    Task {
+                        await self?.wsServer?.send(
+                            WSPacket(action: .claudeComplete, payload: ["sessionId": sid, "message": message]),
+                            to: clientId
+                        )
+                        PushNotificationService.shared.notifyTaskComplete(
+                            workspace: workspaceName,
+                            summary: message
+                        )
+                    }
+                }
+            )
+
+            await wsServer?.send(
+                WSPacket(action: .claudeCreate, payload: ["sessionId": sid], id: packet.id),
+                to: clientId
+            )
+        } catch {
+            await wsServer?.send(
+                WSPacket(action: .error, payload: ["message": error.localizedDescription], id: packet.id),
+                to: clientId
+            )
+        }
+    }
+
+    private func handleClaudeMessage(clientId: String, packet: WSPacket) async {
+        guard let sessionId = packet.payload?["sessionId"],
+              let message = packet.payload?["message"] else { return }
+        await terminalManager.sendClaudeMessage(message, to: sessionId)
+    }
+
+    private func handleClaudeClose(clientId: String, packet: WSPacket) async {
+        guard let sessionId = packet.payload?["sessionId"] else { return }
+        await terminalManager.closeClaudeSession(sessionId)
+        await wsServer?.send(
+            WSPacket(action: .claudeClose, payload: ["sessionId": sessionId], id: packet.id),
             to: clientId
         )
     }

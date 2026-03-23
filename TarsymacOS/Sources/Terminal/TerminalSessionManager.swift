@@ -2,9 +2,13 @@ import Foundation
 
 actor TerminalSessionManager {
     private var sessions: [String: TerminalSession] = [:]
+    private var claudeSessions: [String: ClaudeCodeSession] = [:]
+
+    // MARK: - Raw Terminal Sessions
 
     func createSession(id: String = UUID().uuidString, workingDirectory: String? = nil) throws -> String {
-        let session = try TerminalSession(id: id, workingDirectory: workingDirectory)
+        let expandedDir = workingDirectory.map { ($0 as NSString).expandingTildeInPath }
+        let session = try TerminalSession(id: id, workingDirectory: expandedDir)
         sessions[id] = session
         return id
     }
@@ -22,8 +26,57 @@ actor TerminalSessionManager {
         Array(sessions.keys)
     }
 
-    func setOutputHandler(for sessionId: String, handler: @escaping (String) -> Void) {
+    func setOutputHandler(for sessionId: String, handler: @escaping @Sendable (String) -> Void) {
         sessions[sessionId]?.onOutput = handler
+    }
+
+    // MARK: - Claude Code Sessions
+
+    func createClaudeSession(
+        id: String = UUID().uuidString,
+        workspacePath: String,
+        aiContext: String? = nil,
+        onOutput: @escaping @Sendable (String) -> Void,
+        onComplete: @escaping @Sendable (String) -> Void
+    ) throws -> String {
+        let session = ClaudeCodeSession(id: id, workspacePath: workspacePath)
+        claudeSessions[id] = session
+
+        Task {
+            await session.setHandlers(
+                onOutput: onOutput,
+                onComplete: { [weak self] msg in
+                    onComplete(msg)
+                    Task { await self?.removeClaudeSession(id) }
+                }
+            )
+            try await session.start(aiContext: aiContext)
+        }
+
+        return id
+    }
+
+    func sendClaudeMessage(_ message: String, to sessionId: String) async {
+        await claudeSessions[sessionId]?.sendMessage(message)
+    }
+
+    func closeClaudeSession(_ sessionId: String) async {
+        await claudeSessions[sessionId]?.terminate()
+        claudeSessions.removeValue(forKey: sessionId)
+    }
+
+    func listClaudeSessions() -> [String] {
+        Array(claudeSessions.keys)
+    }
+
+    private func removeClaudeSession(_ id: String) {
+        claudeSessions.removeValue(forKey: id)
+    }
+
+    // MARK: - All Sessions
+
+    func listAllSessions() -> (terminals: [String], claude: [String]) {
+        (terminals: Array(sessions.keys), claude: Array(claudeSessions.keys))
     }
 }
 
@@ -32,7 +85,7 @@ class TerminalSession {
     let process: Process
     let inputPipe: Pipe
     let outputPipe: Pipe
-    var onOutput: ((String) -> Void)?
+    var onOutput: (@Sendable (String) -> Void)?
 
     init(id: String, workingDirectory: String? = nil) throws {
         self.id = id
