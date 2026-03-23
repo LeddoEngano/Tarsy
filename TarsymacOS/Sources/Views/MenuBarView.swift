@@ -1,0 +1,85 @@
+import SwiftUI
+import TarsyShared
+
+struct MenuBarView: View {
+    @EnvironmentObject var authManager: AuthManager
+    @EnvironmentObject var daemonManager: DaemonManager
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            HStack {
+                Text("TARSY")
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+
+                Spacer()
+
+                Circle()
+                    .fill(daemonManager.isRunning ? .green : .red)
+                    .frame(width: 8, height: 8)
+
+                Text(daemonManager.isRunning ? "online" : "offline")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+
+            Divider()
+
+            if !authManager.isAuthenticated {
+                Text("Not signed in")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(.secondary)
+            } else {
+                // Active workspaces
+                if daemonManager.activeWorkspaces.isEmpty {
+                    Text("no active workspaces")
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(daemonManager.activeWorkspaces) { workspace in
+                        HStack {
+                            Circle()
+                                .fill(workspace.status == .running ? .green : .orange)
+                                .frame(width: 6, height: 6)
+                            Text(workspace.name)
+                                .font(.system(size: 12, design: .monospaced))
+                            Spacer()
+                            Text(workspace.status.rawValue)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+
+                Divider()
+
+                // Stats
+                HStack {
+                    Text("clients: \(daemonManager.connectedClients)")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Divider()
+
+            Button("Settings...") {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            }
+            .font(.system(size: 12, design: .monospaced))
+
+            Button("Quit Tarsy") {
+                daemonManager.stop()
+                NSApplication.shared.terminate(nil)
+            }
+            .font(.system(size: 12, design: .monospaced))
+        }
+        .padding(16)
+        .frame(width: 280)
+        .task {
+            if authManager.isAuthenticated {
+                daemonManager.start()
+            }
+        }
+    }
+}
