@@ -404,6 +404,10 @@ struct OnboardingWindow: View {
 
             Spacer()
         }
+        .task {
+            // Ensure machine is registered and all services running
+            await daemonManager.refreshTailscale()
+        }
     }
 
     @ViewBuilder

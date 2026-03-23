@@ -75,8 +75,16 @@ class DaemonManager: ObservableObject {
                 }
             }
             tailscaleStatus = "installed - open Tailscale app and sign in"
-            // Re-check after install
+            // Re-check after install and register if IP available
             await setupTailscale()
+            if tailscaleIP != nil && machineId == nil {
+                await registerMachine()
+                if !isRunning {
+                    await startWSServer()
+                    startHeartbeat()
+                    isRunning = true
+                }
+            }
         } catch {
             tailscaleStatus = error.localizedDescription
         }
@@ -84,6 +92,15 @@ class DaemonManager: ObservableObject {
 
     func refreshTailscale() async {
         await setupTailscale()
+        // If we now have an IP, register the machine
+        if tailscaleIP != nil && machineId == nil {
+            await registerMachine()
+            if !isRunning {
+                await startWSServer()
+                startHeartbeat()
+                isRunning = true
+            }
+        }
     }
 
     // MARK: - WebSocket Server
