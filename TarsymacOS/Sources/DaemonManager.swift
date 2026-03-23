@@ -14,9 +14,13 @@ class DaemonManager: ObservableObject {
     private var wsServer: WebSocketServer?
     private let tailscale = TailscaleManager()
     private let terminalManager = TerminalSessionManager()
+    private var orchestrator: WorkspaceOrchestrator?
     private var heartbeatTimer: Timer?
 
     func start() async {
+        // 0. Init orchestrator
+        orchestrator = WorkspaceOrchestrator(terminalManager: terminalManager)
+
         // 1. Check/install Tailscale
         await setupTailscale()
 
@@ -110,6 +114,8 @@ class DaemonManager: ObservableObject {
         switch packet.action {
         case .workspaceList:
             await handleWorkspaceList(clientId: clientId, packet: packet)
+        case .workspaceCreate:
+            await handleWorkspaceCreate(clientId: clientId, packet: packet)
         case .workspaceStart:
             await handleWorkspaceStart(clientId: clientId, packet: packet)
         case .workspaceStop:
@@ -128,6 +134,31 @@ class DaemonManager: ObservableObject {
         }
     }
 
+    private func handleWorkspaceCreate(clientId: String, packet: WSPacket) async {
+        guard let name = packet.payload?["name"],
+              let localPath = packet.payload?["path"] else { return }
+
+        let repoUrl = packet.payload?["repoUrl"]
+
+        do {
+            let result = try await orchestrator?.setupWorkspace(repoUrl: repoUrl, localPath: localPath, name: name)
+            await wsServer?.send(
+                WSPacket(action: .workspaceCreate, payload: [
+                    "sessionId": result?.sessionId ?? "",
+                    "stack": result?.detectedStack ?? "unknown",
+                    "devCommand": result?.detectedDevCommand ?? "",
+                    "status": "ready"
+                ], id: packet.id),
+                to: clientId
+            )
+        } catch {
+            await wsServer?.send(
+                WSPacket(action: .error, payload: ["message": error.localizedDescription], id: packet.id),
+                to: clientId
+            )
+        }
+    }
+
     private func handleWorkspaceList(clientId: String, packet: WSPacket) async {
         let sessions = await terminalManager.listSessions()
         await wsServer?.send(
@@ -138,9 +169,10 @@ class DaemonManager: ObservableObject {
 
     private func handleWorkspaceStart(clientId: String, packet: WSPacket) async {
         guard let path = packet.payload?["path"] else { return }
+        let devCmd = packet.payload?["devCommand"]
 
         do {
-            let sessionId = try await terminalManager.createSession(workingDirectory: path)
+            let sessionId = try await orchestrator?.coldStart(localPath: path, devServerCommand: devCmd) ?? ""
             await terminalManager.setOutputHandler(for: sessionId) { [weak self] output in
                 Task {
                     await self?.wsServer?.send(
@@ -148,11 +180,6 @@ class DaemonManager: ObservableObject {
                         to: clientId
                     )
                 }
-            }
-
-            // Run dev server if configured
-            if let devCmd = packet.payload?["devCommand"] {
-                await terminalManager.sendInput(devCmd, to: sessionId)
             }
 
             await wsServer?.send(

@@ -3,7 +3,9 @@ import TarsyShared
 
 struct DashboardView: View {
     @EnvironmentObject var authManager: AuthManager
-    @State private var workspaces: [Workspace] = []
+    @EnvironmentObject var workspaceService: WorkspaceService
+    @EnvironmentObject var machineService: MachineService
+
     @State private var showNewWorkspace = false
 
     var body: some View {
@@ -12,23 +14,38 @@ struct DashboardView: View {
                 TarsyTheme.backgroundPrimary
                     .ignoresSafeArea()
 
-                ScrollView {
-                    LazyVStack(spacing: 12) {
-                        ForEach(workspaces) { workspace in
-                            NavigationLink(destination: WorkspaceView(workspace: workspace)) {
-                                WorkspaceCard(workspace: workspace)
-                            }
-                        }
+                if workspaceService.isLoading && workspaceService.workspaces.isEmpty {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                            .tint(TarsyTheme.accentAmber)
+                        Text("loading workspaces...")
+                            .font(TarsyTheme.monoFontSmall)
+                            .foregroundColor(TarsyTheme.textSecondary)
                     }
-                    .padding(16)
+                } else if workspaceService.workspaces.isEmpty {
+                    emptyState
+                } else {
+                    workspaceList
                 }
             }
             .navigationTitle("")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Text("TARSY")
-                        .font(.system(size: 24, weight: .bold, design: .monospaced))
-                        .foregroundColor(TarsyTheme.accentAmber)
+                    HStack(spacing: 10) {
+                        Text("TARSY")
+                            .font(.system(size: 24, weight: .bold, design: .monospaced))
+                            .foregroundColor(TarsyTheme.accentAmber)
+
+                        // Machine status
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(machineService.isOnline ? TarsyTheme.statusRunning : TarsyTheme.statusError)
+                                .frame(width: 6, height: 6)
+                            Text(machineService.isOnline ? "mac online" : "mac offline")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(TarsyTheme.textSecondary)
+                        }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
@@ -48,20 +65,68 @@ struct DashboardView: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
+        .sheet(isPresented: $showNewWorkspace) {
+            NewWorkspaceView()
+                .environmentObject(workspaceService)
+                .environmentObject(machineService)
+        }
         .task {
-            await loadWorkspaces()
+            await machineService.fetchMachine()
+            await workspaceService.fetchWorkspaces()
+        }
+        .refreshable {
+            await machineService.fetchMachine()
+            await workspaceService.fetchWorkspaces()
         }
     }
 
-    private func loadWorkspaces() async {
-        do {
-            workspaces = try await supabase
-                .from("workspaces")
-                .select()
-                .execute()
-                .value
-        } catch {
-            print("Failed to load workspaces: \(error)")
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "eye")
+                .font(.system(size: 48))
+                .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
+
+            Text("no workspaces yet")
+                .font(TarsyTheme.monoFont)
+                .foregroundColor(TarsyTheme.textSecondary)
+
+            Button(action: { showNewWorkspace = true }) {
+                Text("create your first workspace")
+                    .font(TarsyTheme.monoFontSmall)
+                    .foregroundColor(TarsyTheme.accentAmber)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(TarsyTheme.accentAmber, lineWidth: 1)
+                    )
+            }
+        }
+    }
+
+    private var workspaceList: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                ForEach(workspaceService.workspaces) { workspace in
+                    NavigationLink(destination: WorkspaceView(workspace: workspace)) {
+                        WorkspaceCard(workspace: workspace)
+                    }
+                    .contextMenu {
+                        NavigationLink(destination: AIContextEditorView(workspace: workspace).environmentObject(workspaceService)) {
+                            Label("edit ai context", systemImage: "brain")
+                        }
+                        NavigationLink(destination: WorkspaceSettingsView(workspace: workspace).environmentObject(workspaceService)) {
+                            Label("settings", systemImage: "gearshape")
+                        }
+                        Button(role: .destructive) {
+                            Task { try? await workspaceService.deleteWorkspace(id: workspace.id) }
+                        } label: {
+                            Label("delete", systemImage: "trash")
+                        }
+                    }
+                }
+            }
+            .padding(16)
         }
     }
 }
@@ -80,7 +145,6 @@ struct WorkspaceCard: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            // Status indicator
             Circle()
                 .fill(statusColor)
                 .frame(width: 10, height: 10)
@@ -109,6 +173,13 @@ struct WorkspaceCard: View {
             }
 
             Spacer()
+
+            // AI context indicator
+            if workspace.aiContext != nil {
+                Image(systemName: "brain")
+                    .font(.caption)
+                    .foregroundColor(TarsyTheme.accentMoss)
+            }
 
             Text(workspace.status.rawValue)
                 .font(TarsyTheme.monoFontSmall)
