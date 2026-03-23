@@ -31,6 +31,9 @@ targets:
         LSApplicationQueriesSchemes:
           - tailscale
         NSLocalNetworkUsageDescription: "Tarsy connects to your Mac on the local network to stream and send commands."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+          NSAllowsArbitraryLoads: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tarsy.ios

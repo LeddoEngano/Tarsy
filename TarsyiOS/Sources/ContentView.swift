@@ -30,6 +30,12 @@ struct ContentView: View {
                 Task { await autoConnect() }
             }
         }
+        .onChange(of: authManager.isLoading) { _, isLoading in
+            // Connect when auth finishes loading and user is already logged in
+            if !isLoading && authManager.isAuthenticated {
+                Task { await autoConnect() }
+            }
+        }
         .onAppear {
             checkTailscale()
         }
