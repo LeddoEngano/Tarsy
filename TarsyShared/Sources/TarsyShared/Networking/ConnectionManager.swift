@@ -141,7 +141,11 @@ public class ConnectionManager: ObservableObject {
                 latency = Date().timeIntervalSince(pingTime)
             }
         case .error:
-            errorMessage = packet.payload?["message"]
+            let msg = packet.payload?["message"] ?? ""
+            // Ignore harmless "Unknown action" errors for internal actions
+            if !msg.contains("Unknown action") {
+                errorMessage = msg
+            }
             onPacketReceived?(packet)
         default:
             onPacketReceived?(packet)
