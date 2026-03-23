@@ -16,18 +16,21 @@ targets:
     platform: iOS
     sources:
       - Sources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Tarsy
+        CFBundleName: Tarsy
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities:
+          - armv7
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tarsy.ios
-        GENERATE_INFOPLIST_FILE: "YES"
-        INFOPLIST_VALUES: >-
-          CFBundleDisplayName=Tarsy
-          CFBundleName=Tarsy
-          CFBundleShortVersionString=0.1.0
-          CFBundleVersion=1
-          UILaunchScreen_Generation=YES
-          UIRequiredDeviceCapabilities=[armv7]
-          UISupportedInterfaceOrientations=[UIInterfaceOrientationPortrait]
         DEVELOPMENT_TEAM: ""
     dependencies:
       - package: TarsyShared
