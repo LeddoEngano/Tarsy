@@ -26,6 +26,9 @@ class DaemonManager: ObservableObject {
         // 0. Init orchestrator
         orchestrator = WorkspaceOrchestrator(terminalManager: terminalManager)
 
+        // 0.5. Request screen capture permission once
+        await screenCapture.requestPermission()
+
         // 1. Check/install Tailscale
         await setupTailscale()
 

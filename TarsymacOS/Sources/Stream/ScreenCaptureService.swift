@@ -11,19 +11,43 @@ class ScreenCaptureService: NSObject, ObservableObject {
 
     private var stream: SCStream?
     private var streamOutput: StreamOutput?
+    private var cachedContent: SCShareableContent?
+    private var hasPermission = false
 
     var onFrame: ((CGImage) -> Void)?
 
-    func refreshWindows() async {
+    // Request permission once at startup without triggering a capture
+    func requestPermission() async {
         do {
-            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            availableWindows = content.windows.filter { window in
-                guard let title = window.title, !title.isEmpty else { return false }
-                guard window.frame.width > 100, window.frame.height > 100 else { return false }
-                return true
-            }
+            cachedContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            hasPermission = true
+            updateWindowList()
+        } catch {
+            print("[ScreenCapture] Permission error: \(error)")
+            hasPermission = false
+        }
+    }
+
+    func refreshWindows() async {
+        if !hasPermission {
+            await requestPermission()
+            return
+        }
+
+        do {
+            cachedContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            updateWindowList()
         } catch {
             print("[ScreenCapture] Failed to get windows: \(error)")
+        }
+    }
+
+    private func updateWindowList() {
+        guard let content = cachedContent else { return }
+        availableWindows = content.windows.filter { window in
+            guard let title = window.title, !title.isEmpty else { return false }
+            guard window.frame.width > 100, window.frame.height > 100 else { return false }
+            return true
         }
     }
 
@@ -54,6 +78,11 @@ class ScreenCaptureService: NSObject, ObservableObject {
     }
 
     func startCapture(window: SCWindow, fps: Int = 10, scale: CGFloat = 0.5) async throws {
+        // If already capturing, just stop the old stream first without destroying everything
+        if isCapturing {
+            try? await stream?.stopCapture()
+        }
+
         selectedWindow = window
         let filter = SCContentFilter(desktopIndependentWindow: window)
 
@@ -64,10 +93,14 @@ class ScreenCaptureService: NSObject, ObservableObject {
         config.queueDepth = 3
         config.showsCursor = true
 
-        streamOutput = StreamOutput { [weak self] image in
-            self?.onFrame?(image)
+        // Reuse stream output if possible
+        if streamOutput == nil {
+            streamOutput = StreamOutput { [weak self] image in
+                self?.onFrame?(image)
+            }
         }
 
+        // Only create new SCStream if we don't have one
         stream = SCStream(filter: filter, configuration: config, delegate: nil)
         try stream?.addStreamOutput(streamOutput!, type: .screen, sampleHandlerQueue: .global(qos: .userInteractive))
         try await stream?.startCapture()
@@ -76,9 +109,10 @@ class ScreenCaptureService: NSObject, ObservableObject {
     }
 
     func stopCapture() async {
-        try? await stream?.stopCapture()
-        stream = nil
-        streamOutput = nil
+        if let stream {
+            try? await stream.stopCapture()
+        }
+        // Don't nil out stream/streamOutput — keep for reuse
         isCapturing = false
         selectedWindow = nil
         print("[ScreenCapture] Stopped")
@@ -87,6 +121,7 @@ class ScreenCaptureService: NSObject, ObservableObject {
 
 private class StreamOutput: NSObject, SCStreamOutput {
     let handler: (CGImage) -> Void
+    private let ciContext = CIContext() // Reuse CIContext for performance
 
     init(handler: @escaping (CGImage) -> Void) {
         self.handler = handler
@@ -97,8 +132,7 @@ private class StreamOutput: NSObject, SCStreamOutput {
               let imageBuffer = sampleBuffer.imageBuffer else { return }
 
         let ciImage = CIImage(cvPixelBuffer: imageBuffer)
-        let context = CIContext()
-        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else { return }
+        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else { return }
 
         handler(cgImage)
     }
