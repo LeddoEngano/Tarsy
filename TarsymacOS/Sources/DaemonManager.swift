@@ -311,10 +311,16 @@ class DaemonManager: ObservableObject {
     // MARK: - Claude Code
 
     private func handleClaudeCreate(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"] else { return }
+        guard let path = packet.payload?["path"] else {
+            log("claudeCreate: missing path")
+            return
+        }
         let aiContext = packet.payload?["aiContext"]
+        let initialMessage = packet.payload?["message"]
         let sid = UUID().uuidString
         let workspaceName = path.components(separatedBy: "/").last ?? "workspace"
+
+        log("claudeCreate: path=\(path), sid=\(sid), hasMessage=\(initialMessage != nil)")
 
         do {
             let _ = try await terminalManager.createClaudeSession(
@@ -343,13 +349,24 @@ class DaemonManager: ObservableObject {
                 }
             )
 
+            log("claudeCreate: session created, sending response")
+
             await wsServer?.send(
                 WSPacket(action: .claudeCreate, payload: ["sessionId": sid], id: packet.id),
                 to: clientId
             )
+
+            // Send the initial message if provided
+            if let msg = initialMessage, !msg.isEmpty {
+                log("claudeCreate: sending initial message: \(msg)")
+                // Wait a moment for Claude CLI to initialize
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                await terminalManager.sendClaudeMessage(msg, to: sid)
+            }
         } catch {
+            log("claudeCreate: FAILED — \(error)")
             await wsServer?.send(
-                WSPacket(action: .error, payload: ["message": error.localizedDescription], id: packet.id),
+                WSPacket(action: .error, payload: ["message": "Claude Code error: \(error.localizedDescription)"], id: packet.id),
                 to: clientId
             )
         }

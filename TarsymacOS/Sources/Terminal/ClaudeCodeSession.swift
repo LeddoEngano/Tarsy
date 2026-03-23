@@ -34,9 +34,12 @@ actor ClaudeCodeSession {
         // Find claude CLI
         let claudePath = findClaudeCLI()
 
+        let expandedPath = (workspacePath as NSString).expandingTildeInPath
+        print("[ClaudeCode] Starting session \(id) at \(expandedPath) with CLI: \(claudePath)")
+
         process.executableURL = URL(fileURLWithPath: claudePath)
-        process.arguments = ["--dangerously-skip-permissions"]
-        process.currentDirectoryURL = URL(fileURLWithPath: (workspacePath as NSString).expandingTildeInPath)
+        process.arguments = ["--dangerously-skip-permissions", "--verbose"]
+        process.currentDirectoryURL = URL(fileURLWithPath: expandedPath)
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = errorPipe
@@ -105,20 +108,21 @@ actor ClaudeCodeSession {
 
     private func findClaudeCLI() -> String {
         let paths = [
-            "/usr/local/bin/claude",
             "/opt/homebrew/bin/claude",
+            "\(NSHomeDirectory())/.local/bin/claude",
+            "/usr/local/bin/claude",
             "\(NSHomeDirectory())/.claude/bin/claude",
-            "\(NSHomeDirectory())/.npm-global/bin/claude",
-            "\(NSHomeDirectory())/.local/bin/claude"
+            "\(NSHomeDirectory())/.npm-global/bin/claude"
         ]
 
         for path in paths {
             if FileManager.default.fileExists(atPath: path) {
+                print("[ClaudeCode] Found CLI at: \(path)")
                 return path
             }
         }
 
-        // Fallback: try PATH
-        return "/usr/bin/env"
+        print("[ClaudeCode] WARNING: claude CLI not found in known paths")
+        return "/opt/homebrew/bin/claude"
     }
 }
