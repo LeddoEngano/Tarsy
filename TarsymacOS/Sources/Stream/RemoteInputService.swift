@@ -11,8 +11,7 @@ class RemoteInputService {
     private var simulatorUDID: String?
     private var simulatorScreenWidth: CGFloat = 402  // iPhone 16 Pro default
     private var simulatorScreenHeight: CGFloat = 874
-    private var simulatorWindowHeight: CGFloat = 0  // Full window height (including title bar)
-    private var simulatorTitleBarRatio: CGFloat = 0  // Title bar height / window height
+    private var simulatorWindowHeight: CGFloat = 0
 
     // Browser/desktop state
     private var windowFocused = false
@@ -154,12 +153,8 @@ class RemoteInputService {
             }
 
             // Convert stream-relative coords to device screen points
-            guard let startCoords = streamToDeviceCoords(relativeX: start.x, relativeY: start.y),
-                  let endCoords = streamToDeviceCoords(relativeX: end.x, relativeY: end.y) else {
-                swipeStartRel = nil
-                swipeCurrentRel = nil
-                return
-            }
+            let startCoords = streamToDeviceCoords(relativeX: start.x, relativeY: start.y)
+            let endCoords = streamToDeviceCoords(relativeX: end.x, relativeY: end.y)
             let startX = startCoords.x
             let startY = startCoords.y
             let endX = endCoords.x
@@ -245,33 +240,23 @@ class RemoteInputService {
 
     // MARK: - idb Commands (Simulator)
 
-    /// Convert stream-relative coords (0-1 of full window including title bar)
-    /// to device screen coords (points) for idb
-    private func streamToDeviceCoords(relativeX: CGFloat, relativeY: CGFloat) -> (x: Int, y: Int)? {
-        // The stream shows the full Simulator window (title bar + device screen)
-        // relativeY 0.0 = top of title bar, 1.0 = bottom of window
-        // Device screen starts below the title bar
+    /// Convert stream-relative coords (0-1) to device screen coords (points) for idb
+    private func streamToDeviceCoords(relativeX: CGFloat, relativeY: CGFloat) -> (x: Int, y: Int) {
+        // Clamp to valid range
+        let rx = max(0, min(1, relativeX))
+        let ry = max(0, min(1, relativeY))
 
-        // Adjust Y to remove title bar portion
-        let adjustedY = (relativeY - simulatorTitleBarRatio) / (1.0 - simulatorTitleBarRatio)
-
-        // If tap is in the title bar area, ignore it
-        guard adjustedY >= 0 && adjustedY <= 1.0 else { return nil }
-        guard relativeX >= 0 && relativeX <= 1.0 else { return nil }
-
-        let x = Int(relativeX * simulatorScreenWidth)
-        let y = Int(adjustedY * simulatorScreenHeight)
+        // Direct mapping — Simulator window content IS the device screen
+        let x = Int(rx * simulatorScreenWidth)
+        let y = Int(ry * simulatorScreenHeight)
         return (x, y)
     }
 
     private func idbTap(relativeX: CGFloat, relativeY: CGFloat, duration: Double = 0.0) {
-        guard let coords = streamToDeviceCoords(relativeX: relativeX, relativeY: relativeY) else {
-            print("[RemoteInput] idbTap: tap in title bar area, ignoring")
-            return
-        }
+        let coords = streamToDeviceCoords(relativeX: relativeX, relativeY: relativeY)
         let x = coords.x
         let y = coords.y
-        print("[RemoteInput] idbTap: rel(\(String(format: "%.3f", relativeX)),\(String(format: "%.3f", relativeY))) → device(\(x),\(y)) titleBarRatio=\(String(format: "%.3f", simulatorTitleBarRatio))")
+        print("[RemoteInput] idbTap: rel(\(String(format: "%.3f", relativeX)),\(String(format: "%.3f", relativeY))) → device(\(x),\(y))")
         var args = ["ui", "tap", "\(x)", "\(y)"]
         if let udid = simulatorUDID {
             args.append(contentsOf: ["--udid", udid])
@@ -430,25 +415,7 @@ class RemoteInputService {
                     // The stream captures the full window. The title bar takes
                     // some portion at the top. We need to know what fraction
                     // of the window height is title bar vs device screen.
-                    if simulatorWindowHeight > 0 {
-                        // Get current window frame to know exact dimensions
-                        if let frame = getCurrentWindowFrame() {
-                            // The window contains: title bar + device screen (scaled)
-                            // Device screen aspect: w/h = screenWidth/screenHeight
-                            // The device screen fills the window width, so:
-                            // deviceHeightInWindow = windowWidth * (screenHeight/screenWidth)
-                            let deviceAspect = h / w
-                            let deviceHeightInWindow = frame.width * deviceAspect
-                            let titleBarInWindow = frame.height - deviceHeightInWindow
-                            simulatorTitleBarRatio = max(0, titleBarInWindow / frame.height)
-                            print("[RemoteInput] Window: \(Int(frame.width))x\(Int(frame.height)), device: \(Int(w))x\(Int(h)), titleBarRatio: \(String(format: "%.3f", simulatorTitleBarRatio))")
-                        } else {
-                            // Fallback: estimate ~28pt title bar
-                            simulatorTitleBarRatio = simulatorWindowHeight > 0 ? 28.0 / simulatorWindowHeight : 0.04
-                        }
-                    }
-
-                    print("[RemoteInput] Simulator screen: \(w)x\(h) points, titleBarRatio: \(String(format: "%.3f", simulatorTitleBarRatio))")
+                    print("[RemoteInput] Simulator screen: \(w)x\(h) points")
                 }
             }
         } catch {
