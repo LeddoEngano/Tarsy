@@ -280,48 +280,76 @@ struct WorkspaceView: View {
     @State private var showPhotoPicker = false
     @State private var showFilePicker = false
     @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var attachments: [Attachment] = []
+
+    struct Attachment: Identifiable {
+        let id = UUID()
+        let name: String
+        let type: AttachmentType
+        let thumbnail: UIImage?
+        let data: Data?
+
+        enum AttachmentType {
+            case image
+            case file
+        }
+    }
 
     private var inputBar: some View {
-        HStack(spacing: 8) {
-            // Attachment button
-            Button(action: { showAttachmentPicker.toggle() }) {
-                Image(systemName: "plus.circle.fill")
-                    .font(.system(size: 24))
-                    .foregroundColor(TarsyTheme.textSecondary)
-            }
-
-            // Input field with send button inside
-            HStack(spacing: 0) {
-                TextField("", text: $messageText, prompt: Text("send a command...").foregroundColor(TarsyTheme.textSecondary.opacity(0.5)))
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14, design: .monospaced))
-                    .foregroundColor(TarsyTheme.textPrimary)
-                    .padding(.leading, 16)
-                    .padding(.vertical, 10)
-                    .focused($isInputFocused)
-                    .onSubmit { sendMessage() }
-
-                // Send button inside the field
-                Button(action: { sendMessage() }) {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(messageText.isEmpty ? TarsyTheme.textSecondary : TarsyTheme.backgroundPrimary)
-                        .frame(width: 30, height: 30)
-                        .background(messageText.isEmpty ? Color.clear : TarsyTheme.accentAmber)
-                        .cornerRadius(15)
+        VStack(spacing: 0) {
+            // Attachments preview
+            if !attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(attachments) { attachment in
+                            attachmentChip(attachment)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
                 }
-                .disabled(messageText.isEmpty)
-                .padding(.trailing, 4)
+                .background(TarsyTheme.backgroundPrimary)
             }
-            .background(TarsyTheme.backgroundSecondary)
-            .cornerRadius(22)
+
+            // Input row
+            HStack(spacing: 8) {
+                Button(action: { showAttachmentPicker.toggle() }) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 24))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                }
+
+                HStack(spacing: 0) {
+                    TextField("", text: $messageText, prompt: Text("send a command...").foregroundColor(TarsyTheme.textSecondary.opacity(0.5)))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 14, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textPrimary)
+                        .padding(.leading, 16)
+                        .padding(.vertical, 10)
+                        .focused($isInputFocused)
+                        .onSubmit { sendMessage() }
+
+                    Button(action: { sendMessage() }) {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(canSend ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
+                            .frame(width: 30, height: 30)
+                            .background(canSend ? TarsyTheme.accentAmber : Color.clear)
+                            .cornerRadius(15)
+                    }
+                    .disabled(!canSend)
+                    .padding(.trailing, 4)
+                }
+                .background(TarsyTheme.backgroundSecondary)
+                .cornerRadius(22)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
         .background(TarsyTheme.backgroundPrimary)
         .confirmationDialog("Attach", isPresented: $showAttachmentPicker) {
             Button("Photo Library") { showPhotoPicker = true }
-            Button("Camera") { /* TODO: camera */ }
+            Button("Camera") { /* TODO */ }
             Button("File") { showFilePicker = true }
             Button("Cancel", role: .cancel) {}
         }
@@ -330,26 +358,90 @@ struct WorkspaceView: View {
             if let item {
                 Task {
                     if let data = try? await item.loadTransferable(type: Data.self) {
-                        let sizeKB = data.count / 1024
-                        messageText += " [image: \(sizeKB)KB]"
-                        // TODO: Upload image to Mac via WebSocket
+                        let thumb = UIImage(data: data)
+                        attachments.append(Attachment(
+                            name: "photo",
+                            type: .image,
+                            thumbnail: thumb,
+                            data: data
+                        ))
                     }
+                    selectedPhotoItem = nil
                 }
             }
         }
         .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.item]) { result in
             if case .success(let url) = result {
-                messageText += " [file: \(url.lastPathComponent)]"
+                let data = try? Data(contentsOf: url)
+                attachments.append(Attachment(
+                    name: url.lastPathComponent,
+                    type: .file,
+                    thumbnail: nil,
+                    data: data
+                ))
             }
         }
+    }
+
+    private var canSend: Bool {
+        !messageText.isEmpty || !attachments.isEmpty
+    }
+
+    @ViewBuilder
+    private func attachmentChip(_ attachment: Attachment) -> some View {
+        HStack(spacing: 6) {
+            if attachment.type == .image, let thumb = attachment.thumbnail {
+                Image(uiImage: thumb)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 32, height: 32)
+                    .cornerRadius(6)
+                    .clipped()
+            } else {
+                Image(systemName: "doc.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(TarsyTheme.accentAmber)
+                    .frame(width: 32, height: 32)
+                    .background(TarsyTheme.backgroundTertiary)
+                    .cornerRadius(6)
+            }
+
+            Text(attachment.name)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(TarsyTheme.textPrimary)
+                .lineLimit(1)
+
+            Button(action: {
+                withAnimation { attachments.removeAll { $0.id == attachment.id } }
+            }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(TarsyTheme.textSecondary)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(TarsyTheme.backgroundSecondary)
+        .cornerRadius(10)
     }
 
     // MARK: - Actions
 
     private func sendMessage() {
-        guard !messageText.isEmpty else { return }
-        let text = messageText
+        guard !messageText.isEmpty || !attachments.isEmpty else { return }
+
+        // Build message with attachment references
+        var text = messageText
+        if !attachments.isEmpty {
+            let attachmentNames = attachments.map { att in
+                att.type == .image ? "[image: \(att.name)]" : "[file: \(att.name)]"
+            }.joined(separator: " ")
+            text = text.isEmpty ? attachmentNames : "\(text) \(attachmentNames)"
+        }
+
         messageText = ""
+        let sentAttachments = attachments
+        attachments = []
         isInputFocused = false
 
         let msg = ChatMessage(
@@ -358,6 +450,7 @@ struct WorkspaceView: View {
             role: .user,
             content: text
         )
+        // TODO: Upload sentAttachments data to Mac via WebSocket
 
         Task {
             await chatService.addMessage(msg)
