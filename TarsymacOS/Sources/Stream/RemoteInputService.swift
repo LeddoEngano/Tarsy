@@ -235,7 +235,8 @@ class RemoteInputService {
         case "rotate_right":
             rotateSimulator(direction: "right")
         case "screenshot":
-            takeSimulatorScreenshot()
+            // Handled by DaemonManager for transfer to iOS
+            break
         default:
             print("[RemoteInput] Unknown button: \(button)")
         }

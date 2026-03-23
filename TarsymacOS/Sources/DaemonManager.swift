@@ -193,6 +193,8 @@ class DaemonManager: ObservableObject {
             await handleStreamStop(clientId: clientId, packet: packet)
         case .remoteTap, .remoteDoubleTap, .remoteLongPress, .remoteScroll, .remoteScrollStart, .remoteScrollEnd, .remoteDrag, .remotePinch, .remotePinchStart, .remotePinchEnd, .remoteKeyboard, .remoteButton:
             handleRemoteInput(packet: packet)
+        case .screenshotRequest:
+            await handleScreenshotRequest(clientId: clientId, packet: packet)
         default:
             await wsServer?.send(
                 WSPacket(action: .error, payload: ["message": "Unknown action: \(packet.action.rawValue)"]),
@@ -719,6 +721,67 @@ class DaemonManager: ObservableObject {
             }
         default:
             break
+        }
+    }
+
+    // MARK: - Screenshot Transfer
+
+    private func handleScreenshotRequest(clientId: String, packet: WSPacket) async {
+        let udid = packet.payload?["udid"] ?? "booted"
+        let tmpPath = NSTemporaryDirectory() + "tarsy_screenshot_\(UUID().uuidString).png"
+
+        log("screenshot: capturing simulator \(udid)")
+
+        // Take native screenshot via simctl
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["simctl", "io", udid, "screenshot", tmpPath]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+
+            guard process.terminationStatus == 0,
+                  let imageData = try? Data(contentsOf: URL(fileURLWithPath: tmpPath)),
+                  let nsImage = NSImage(data: imageData) else {
+                await wsServer?.send(
+                    WSPacket(action: .error, payload: ["message": "Screenshot failed"], id: packet.id),
+                    to: clientId
+                )
+                return
+            }
+
+            // Convert to JPEG for smaller transfer
+            guard let tiffData = nsImage.tiffRepresentation,
+                  let bitmap = NSBitmapImageRep(data: tiffData),
+                  let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {
+                return
+            }
+
+            // Send as base64
+            let base64 = jpegData.base64EncodedString()
+            let sizeKB = jpegData.count / 1024
+            log("screenshot: captured \(sizeKB)KB JPEG, sending to iOS")
+
+            await wsServer?.send(
+                WSPacket(action: .screenshotResult, payload: [
+                    "data": base64,
+                    "size": "\(sizeKB)"
+                ], id: packet.id),
+                to: clientId
+            )
+
+            // Cleanup
+            try? FileManager.default.removeItem(atPath: tmpPath)
+
+        } catch {
+            log("screenshot: FAILED — \(error)")
+            await wsServer?.send(
+                WSPacket(action: .error, payload: ["message": "Screenshot error: \(error.localizedDescription)"], id: packet.id),
+                to: clientId
+            )
         }
     }
 

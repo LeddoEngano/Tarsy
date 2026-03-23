@@ -7,6 +7,11 @@ struct InteractiveStreamView: View {
     var onClose: () -> Void
 
     @State private var tapFeedbackPoint: CGPoint? = nil
+    @State private var isCapturingScreenshot = false
+    @State private var screenshotSaved = false
+    @State private var screenshotProgress: CGFloat = 0
+    @State private var showGalleryHint = false
+    @AppStorage("tarsy_screenshot_hint_shown") private var hintAlreadyShown = false
 
     // Drag state
     @State private var lastDragTranslation: CGSize = .zero
@@ -37,7 +42,7 @@ struct InteractiveStreamView: View {
                     // Simulator device buttons — centered
                     HStack(spacing: 20) {
                         deviceButton(icon: "house.fill", action: "home")
-                        deviceButton(icon: "camera.shutter.button", action: "screenshot")
+                        screenshotButton
                         deviceButton(icon: "rotate.right", action: "rotate_right")
                     }
 
@@ -87,6 +92,19 @@ struct InteractiveStreamView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
                 .padding(.bottom, 0)
+            }
+        }
+        .overlay(alignment: .top) {
+            if showGalleryHint {
+                Text("Saved to your gallery!")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(.black.opacity(0.7))
+                    .cornerRadius(8)
+                    .padding(.top, 56)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .statusBarHidden()
@@ -268,6 +286,121 @@ struct InteractiveStreamView: View {
                 .frame(width: 36, height: 36)
                 .background(.white.opacity(0.15))
                 .cornerRadius(18)
+        }
+    }
+
+    private var screenshotButton: some View {
+        Button {
+            guard !isCapturingScreenshot else { return }
+            Haptics.light()
+            takeNativeScreenshot()
+        } label: {
+            VStack(spacing: 4) {
+                ZStack {
+                    if screenshotSaved {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(.green)
+                    } else {
+                        Image(systemName: "camera.viewfinder")
+                            .font(.system(size: 16))
+                            .foregroundColor(.white.opacity(0.8))
+                    }
+                }
+                .frame(width: 36, height: 36)
+                .background(.white.opacity(0.15))
+                .cornerRadius(18)
+
+                // Mini progress bar
+                if isCapturingScreenshot {
+                    GeometryReader { geo in
+                        Capsule()
+                            .fill(.white.opacity(0.2))
+                            .overlay(alignment: .leading) {
+                                Capsule()
+                                    .fill(TarsyTheme.accentAmber)
+                                    .frame(width: geo.size.width * screenshotProgress)
+                            }
+                    }
+                    .frame(width: 36, height: 3)
+                    .transition(.opacity)
+                }
+            }
+        }
+    }
+
+    private func takeNativeScreenshot() {
+        isCapturingScreenshot = true
+        screenshotSaved = false
+        screenshotProgress = 0
+
+        // Animate: 0 → 0.3 (capturing)
+        withAnimation(.easeOut(duration: 0.4)) {
+            screenshotProgress = 0.3
+        }
+
+        connectionManager.send(WSPacket(action: .screenshotRequest))
+
+        // Animate: 0.3 → 0.7 slowly (waiting for transfer)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            withAnimation(.linear(duration: 3.0)) {
+                screenshotProgress = 0.7
+            }
+        }
+
+        // Listen for result
+        connectionManager.addListener("screenshot") { [self] packet in
+            if packet.action == .screenshotResult,
+               let base64 = packet.payload?["data"],
+               let imageData = Data(base64Encoded: base64),
+               let image = UIImage(data: imageData) {
+
+                // Save to Photos
+                UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+
+                DispatchQueue.main.async {
+                    // Animate: → 1.0 (saved)
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        screenshotProgress = 1.0
+                    }
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            isCapturingScreenshot = false
+                        }
+                        screenshotSaved = true
+                        Haptics.success()
+
+                        // Show gallery hint only on first screenshot
+                        if !hintAlreadyShown {
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                showGalleryHint = true
+                            }
+                            hintAlreadyShown = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                                withAnimation(.easeOut(duration: 0.4)) {
+                                    showGalleryHint = false
+                                }
+                            }
+                        }
+
+                        // Reset checkmark after 2s
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                            screenshotSaved = false
+                        }
+                    }
+                }
+                connectionManager.removeListener("screenshot")
+            }
+        }
+
+        // Timeout after 10s
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+            if isCapturingScreenshot {
+                withAnimation { isCapturingScreenshot = false }
+                screenshotProgress = 0
+                connectionManager.removeListener("screenshot")
+            }
         }
     }
 

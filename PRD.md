@@ -4,7 +4,7 @@
 
 ## 1. Visao Geral
 
-Tarsy e um sistema de dois apps nativos (iOS + macOS) que permite a um desenvolvedor controlar remotamente agentes de IA rodando no seu Mac. O usuario ve em tempo real o resultado visual do trabalho (browser, simulador iOS, terminal) e interage via chat com instancias de Claude Code e OpenClaw.
+Tarsy e um sistema de dois apps nativos (iOS + macOS) que transforma o iPhone em uma IDE mobile completa para controlar agentes de IA rodando no Mac. O usuario ve em tempo real o resultado visual do trabalho (browser, simulador iOS, terminal), interage via chat com multiplos provedores de IA, faz checkpoints do codigo, e faz tudo isso de qualquer lugar do mundo — da praia, do supermercado, do sofa.
 
 ### Problema
 
@@ -12,15 +12,27 @@ Desenvolvedores que usam agentes de IA para codificar precisam estar na frente d
 - Disparar tasks de qualquer lugar
 - Ver o resultado visual (UI/frontend) remotamente
 - Manter contexto de IA por projeto sem depender de arquivos no repo
+- Ter seguranca de poder voltar atras quando algo quebra
 
 ### Solucao
 
-Dois apps Swift nativos que transformam o Mac do usuario em um server de desenvolvimento controlavel pelo iPhone, com streaming de video em tempo real e chat integrado com agentes de IA.
+Dois apps Swift nativos que transformam o Mac do usuario em um server de desenvolvimento controlavel pelo iPhone, com streaming de video em tempo real, chat integrado com multiplos agentes de IA, e ferramentas de safety net (checkpoints, diffs, rollback).
+
+### Modelo de Negocio
+
+- **Preco**: $9/mes (assinatura via App Store)
+- **O que o user paga**: o app Tarsy (iOS + macOS)
+- **O que o user traz**: suas proprias API keys dos provedores de IA (Claude, Gemini, OpenAI, etc)
+- **BYOK (Bring Your Own Key)**: zero custo de LLM para o Tarsy
+- **Free tier**: 1 workspace, todas as features (incluindo relay remoto)
+- **Pro**: workspaces ilimitados
+- **Sem trial**: o free tier ja permite experimentar o produto completo
 
 ---
 
 ## 2. Arquitetura
 
+### Atual (v1)
 ```
 [iPhone - Tarsy iOS]
   |
@@ -31,12 +43,26 @@ Dois apps Swift nativos que transformam o Mac do usuario em um server de desenvo
   | (sync)
   |
 [Supabase - Backend]
-  - Auth
-  - User config
-  - Workspace metadata
-  - AI Context (CLAUDE.md remoto)
-  - Chat history
 ```
+
+### Target (v2)
+```
+[iPhone - Tarsy iOS]
+  |
+  | (WebSocket over TLS)
+  |
+[Tarsy Tunnel] (transparente pro user)
+  |
+  | (persistent connection)
+  |
+[Mac - Tarsy macOS]
+  |
+  | (sync)
+  |
+[Supabase - Backend]
+```
+
+**Nota sobre tunneling**: O objetivo e que o user nunca saiba como a conexao funciona. Pode ser Tailscale embedded, WireGuard, relay proprio, ou qualquer outra tecnologia — o que importa e: login no Tarsy -> tudo conecta automaticamente. Zero config de rede.
 
 ### Stack
 
@@ -45,10 +71,11 @@ Dois apps Swift nativos que transformam o Mac do usuario em um server de desenvo
 | Tarsy iOS        | Swift + SwiftUI                     |
 | Tarsy macOS      | Swift + SwiftUI (menu bar app)      |
 | Backend          | Supabase (Auth, DB, Realtime, Push) |
-| Networking       | Tailscale (mesh VPN)                |
-| Video Stream     | WebRTC via ScreenCaptureKit         |
-| Terminal Mgmt    | tmux / CMUX                         |
-| AI Agents        | Claude Code, OpenClaw               |
+| Tunneling        | Transparente (Tailscale embedded / relay / WireGuard) |
+| Payments         | RevenueCat + StoreKit 2             |
+| Video Stream     | MJPEG (atual), WebRTC (futuro)      |
+| Terminal Mgmt    | PTY sessions                        |
+| AI Engines       | Claude Code (first-class), Gemini CLI, Codex CLI, Aider |
 
 ### Monorepo Swift
 
@@ -59,234 +86,343 @@ Um unico repositorio com targets compartilhados:
 
 ---
 
-## 3. Telas - Tarsy iOS
+## 3. Features Existentes (v1 - Concluido)
 
-### 3.1 Login
+### iOS
+- [x] Login via Supabase Auth
+- [x] Dashboard com workspaces em cards
+- [x] Tela de trabalho: stream de video + chat
+- [x] Sistema de tabs (multiplos terminais)
+- [x] Chat com Claude Code (output em tempo real)
+- [x] Interactive questions (multipla escolha, card paginado flutuante estilo Anthropic)
+- [x] AI Context editor (CLAUDE.md remoto)
+- [x] Thinking indicator e agent activity
+- [x] Controle remoto: touch, swipe, pinch no stream
+- [x] Push notifications (agent completa task, PR criada, etc)
+- [x] Splash screen com animacao
 
-- Autenticacao via Supabase Auth
-- Providers: email/senha, Apple Sign-In, Google Sign-In
-- Primeiro acesso:
-  - Cria conta
-  - Pede Tailscale address do Mac (ou detecta automaticamente se ambos ja estao na mesma Tailnet)
-  - Testa conexao com Tarsy macOS
-
-### 3.2 Dashboard (Workspaces)
-
-Lista de workspaces em cards. Cada card mostra:
-- Nome do projeto (ex: "EDONext", "fitless-landing")
-- Status: `idle` | `starting` | `agent running` | `awaiting review`
-- Branch atual do git
-- Ultimo comando executado
-- PR aberta (se houver)
-
-**Acoes:**
-- Tap no card -> abre Tela de Trabalho (com cold start se necessario)
-- Botao "+" -> cria novo workspace
-- Swipe -> editar config / deletar
-
-**Criar workspace do zero:**
-1. User informa: nome, repo URL (git), stack (web/mobile/backend)
-2. Tarsy macOS recebe o comando e:
-   - Clona o repo
-   - Instala dependencias (detecta package manager)
-   - Configura ambiente
-3. Workspace aparece no dashboard como `idle`
-
-**Cold start:**
-Ao tocar num workspace que esta `idle`:
-1. Tarsy macOS abre terminal no diretorio do projeto
-2. Levanta dev server (detecta o comando via config ou convencao)
-3. Abre browser/simulador conforme a stack
-4. Stream inicia automaticamente
-5. Status muda para `starting` -> `agent running`
-
-### 3.3 Tela de Trabalho
-
-Dividida em duas areas:
-
-#### Area Superior - Stream de Video
-
-- Stream WebRTC em tempo real da janela relevante:
-  - Stack web -> janela do browser (Chrome/Safari)
-  - Stack mobile -> simulador iOS
-  - Stack backend -> terminal/logs
-- Controles overlay:
-  - Fullscreen (expand stream)
-  - Screenshot (salva localmente no iPhone)
-  - Refresh (recarrega browser/simulador)
-- Aspect ratio adaptavel
-- Indicador de latencia
-
-#### Area Inferior - Tabs
-
-Sistema de tabs na parte inferior da tela:
-
-**Tabs dinamicas (terminais):**
-- Cada tab corresponde a um terminal real (tmux session) no Mac
-- Interface de chat: user digita texto, agent responde
-- Instancias de Claude Code rodando
-- Historico de mensagens persistido no Supabase
-- Botao "+" pra criar nova tab/session
-- Swipe pra fechar tab
-
-**Tab fixa - OpenClaw:**
-- Tab sempre presente com icone distinto
-- Integracao com OpenClaw (formato a definir - WebView ou API nativa)
-- Separada das sessions de Claude Code
-
-**Comportamento do chat:**
-- Campo de texto com send button
-- Suporta texto livre (comandos ou conversacao com o agent)
-- Mensagens do agent aparecem em tempo real
-- Scroll automatico com opcao de pausar
-- O agent pode executar qualquer comando sem confirmacao
+### macOS
+- [x] Menu bar app com status
+- [x] WebSocket server para comunicacao com iOS
+- [x] Screen capture (ScreenCaptureKit) com MJPEG streaming
+- [x] Terminal session manager (PTY)
+- [x] Claude Code session management
+- [x] Remote input service (touch, drag, pinch via CGEvent)
+- [x] Workspace orchestrator (clone, setup, cold start)
+- [x] Deteccao de subnet (local vs Tailscale IP)
+- [x] OpenClaw integration
 
 ---
 
-## 4. Tarsy macOS - Menu Bar App
+## 4. Features Novas (v2 - MVP Comercial)
 
-### 4.1 Instalacao e Onboarding
+### 4.1 Tunneling Transparente
 
-1. User baixa Tarsy macOS (DMG ou Homebrew)
-2. Abre o app -> tela de login (Supabase)
-3. App verifica se Tailscale esta instalado
-   - Se nao: instala automaticamente (`brew install tailscale` ou download direto)
-   - Guia o user pelo setup do Tailscale (login, join tailnet)
-4. App registra o Mac no Supabase (tailscale IP, hostname)
-5. Icone aparece na menu bar -> app roda em background
+**Objetivo**: O user instala Tarsy, faz login, e tudo conecta. Zero config de rede, zero apps terceiros visiveis.
 
-### 4.2 Menu Bar
+**Principio**: A tecnologia de tunnel e um detalhe de implementacao, nao um produto. O user nunca ve "Tailscale", "WireGuard", ou "relay" — so ve "conectado" ou "desconectado".
 
-- Icone do Tarsy na menu bar
-- Click mostra dropdown:
-  - Status: online/offline
-  - Workspaces ativos (com status)
-  - CPU/Memory usage
-  - Preferencias
-  - Quit
+**Opcoes de implementacao** (a decidir):
+- Tailscale embedded (SDK) — funciona, mas pode ter limitacoes de licenca
+- Relay server proprio (Fly.io) — mais controle, mais trabalho
+- WireGuard embedded — lightweight, open source
+- Hibrido: LAN direta quando possivel, relay quando remoto
 
-### 4.3 Servicos Internos
+**Fluxo de onboarding**:
+1. User instala Tarsy macOS, faz login
+2. Conexao estabelecida automaticamente (background)
+3. User instala Tarsy iOS, faz login
+4. Ve seus workspaces imediatamente
 
-O app macOS roda os seguintes servicos:
+**Requisitos**:
+- Latencia aceitavel para stream de video (<200ms p95)
+- Reconexao automatica quando muda de rede (wifi -> 4G -> wifi)
+- Funcionar atras de NAT, firewalls corporativos, etc
+- Zero configuracao pelo user
 
-**Stream Server:**
-- Usa ScreenCaptureKit (macOS 13+) pra capturar janelas especificas
-- Encode via VideoToolbox (hardware H.264)
-- Transmite via WebRTC para o app iOS
-- Seletor inteligente de janela baseado no workspace config
+### 4.2 Multi-Provider (Claude first-class, outros suportados)
 
-**Terminal Manager:**
-- Cria e gerencia tmux/CMUX sessions
-- Spawna instancias de Claude Code CLI
-- Spawna instancia de OpenClaw
-- Injeta comandos recebidos do iOS nas sessions corretas
-- Captura output e envia de volta
+**Objetivo**: Tarsy nao e preso a um provider. Suporta qualquer CLI de agente de IA, mas Claude e o cidadao de primeira classe.
 
-**Workspace Manager:**
-- Clone de repos (git)
-- Deteccao automatica de stack e package manager
-- Instalacao de dependencias
-- Start de dev servers
-- Abertura de browsers/simuladores
-- Cold start orchestration
+**Providers**:
+| Provider    | CLI                | Nivel de suporte                       |
+|-------------|--------------------|-----------------------------------------|
+| Claude      | `claude`           | First-class: parser completo, interactive questions, thinking indicator, todas as features |
+| Gemini      | `gemini`           | Suportado: output em tempo real, comandos basicos |
+| Codex       | `codex`            | Suportado: output em tempo real, comandos basicos |
+| Aider       | `aider`            | Suportado: output em tempo real, comandos basicos |
+| Custom      | qualquer CLI       | User configura o comando, output raw    |
 
-**API Server (WebSocket):**
-- Escuta conexoes do app iOS (via Tailscale)
-- Protocolo:
-  - `workspace:list` - lista workspaces
-  - `workspace:create` - cria novo
-  - `workspace:start` - cold start
-  - `stream:start` - inicia captura de janela
-  - `stream:stop` - para captura
-  - `terminal:create` - nova session
-  - `terminal:input` - envia comando
-  - `terminal:output` - recebe output (realtime)
-- Autenticacao via token Supabase
+**Arquitetura**:
+- `AIEngineProtocol` no macOS que abstrai o ciclo de vida de qualquer CLI:
+  - `start(workingDir:)` -> spawna o processo
+  - `send(message:)` -> envia input
+  - `onOutput(_ handler:)` -> callback de output
+  - `onAskUser(_ handler:)` -> callback de pergunta interativa (Claude-only inicialmente)
+  - `stop()` -> mata o processo
+- `ClaudeCodeEngine` (existente, refatorar) — parser rico
+- `GenericCLIEngine` — parser basico que funciona pra Gemini/Codex/Aider/qualquer CLI
+- iOS: selector de engine por workspace ou por tab
 
-**Sync Service:**
-- Mantem estado sincronizado com Supabase
-- Envia push notifications via APNs (through Supabase) quando:
-  - Agent completa uma task
-  - PR criada
-  - Build falhou
-  - Erro critico
+**Config no iOS**:
+- Settings: user adiciona API keys por provider
+- Keys ficam no Keychain do iOS e sao enviadas ao macOS sob demanda
+- Workspace settings: escolhe qual engine usar como default
+- Pode ter tabs com engines diferentes no mesmo workspace
+
+### 4.3 Paywall ($9/mes)
+
+**Objetivo**: Monetizar o app via assinatura mensal.
+
+**Stack**: RevenueCat + StoreKit 2
+
+**Modelo**:
+- **Free**:
+  - 1 workspace
+  - Todos os engines
+  - Relay/tunnel incluso
+  - Todas as features (git, voice, MCPs, etc)
+  - Sem limitacoes artificiais — o user experimenta o produto completo
+- **Pro ($9/mes)**:
+  - Workspaces ilimitados
+
+**Gatilho do paywall**: user tenta criar o segundo workspace -> paywall hard. Nesse ponto o user ja sabe que o produto funciona e entrega valor.
+
+**Implementacao**:
+- RevenueCat SDK no iOS para gerenciar assinaturas
+- Supabase armazena status da subscription (synced via webhook RevenueCat)
+- Paywall screen com design clean, foco no valor ("Unlimited workspaces for all your projects")
+- Restore purchases flow
+- Sem trial — free tier ja e a experiencia completa
+
+### 4.4 Git Safety Net (Checkpoints)
+
+**Objetivo**: Dar seguranca pro dev experimentar com agentes de IA sem medo de quebrar o projeto. Nao e um git client completo — e uma safety net.
+
+**Conceito**: Checkpoint = "aqui esta funcionando". O user salva o estado atual com um tap, experimenta a vontade, e pode voltar atras se algo quebrar.
+
+**Features**:
+- **Checkpoint** (botao principal): `git add -A && git commit -m "checkpoint"` com um tap
+  - Icone de "shield" ou "save" sempre visivel
+  - Feedback haptico ao salvar
+  - Badge mostrando quantos arquivos foram salvos
+- **Ver mudancas**: diff desde o ultimo checkpoint (o que mudou?)
+  - Lista de arquivos modificados com +/- lines count
+  - Tap no arquivo para ver diff (verde/vermelho)
+- **Rollback**: voltar pro ultimo checkpoint se algo quebrou
+  - Confirmacao antes de executar ("Isso vai desfazer X arquivos modificados")
+- **Historico de checkpoints**: lista dos ultimos checkpoints com timestamp
+- **Commit "de verdade"**: quando satisfeito, user pede pro Claude commitar e criar PR via chat (fluxo existente, nao precisa de UI nova)
+
+**UI**:
+- Botao de checkpoint flutuante ou na toolbar do workspace
+- Sheet/modal para ver mudancas e historico
+- Nao precisa de tab dedicada — e leve e acessivel de qualquer lugar
+
+**Implementacao**:
+- macOS: handlers WebSocket `git:checkpoint`, `git:diff`, `git:rollback`, `git:history`
+- iOS: UI minimalista focada em seguranca, nao em git management
+
+### 4.5 Voice to Text
+
+**Objetivo**: Ditar prompts e comandos em vez de digitar. Essencial para uso no dia a dia quando o user esta longe do teclado.
+
+**Implementacao**:
+- Apple Speech framework (on-device, sem API externa, sem custo)
+- Botao de microfone no input bar (hold to record, release to send)
+- Preview do texto transcrito antes de enviar (editavel)
+- Suporte a multiplos idiomas (detecta automatico)
+- Funciona offline (on-device processing)
+
+**UX**:
+- Hold no mic -> gravando (feedback visual: onda de audio)
+- Release -> mostra transcricao no campo de input (user pode editar antes de enviar)
+- Tap no send -> envia
+- Swipe down no mic (enquanto segura) -> cancela
+
+### 4.6 MCP/Tool Store (Guided Setup)
+
+**Objetivo**: Facilitar a configuracao de MCPs e ferramentas para o agente de IA. Iniciantes nao precisam editar JSON nem saber o que e um MCP.
+
+**Conceito**: Uma "loja" curada de integracoes dentro do Tarsy. O user toca em "GitHub", faz auth, e pronto — o agente ja pode usar.
+
+**Catalogo curado** (inicial):
+| Integracao  | Auth necessario          | Taps estimados |
+|-------------|--------------------------|----------------|
+| Filesystem  | Nenhum                   | 1 (toggle)     |
+| Browser     | Nenhum                   | 1 (toggle)     |
+| GitHub      | OAuth                    | 2-3            |
+| Slack       | OAuth                    | 2-3            |
+| Linear      | API key (com link direto)| 2              |
+| Jira        | API key                  | 2              |
+| Sentry      | API key                  | 2              |
+| Custom MCP  | User configura           | 3-4            |
+
+**Fluxo por tipo de auth**:
+- **Sem auth** (filesystem, browser): toggle on/off, one tap
+- **OAuth** (GitHub, Slack): tap "Connect" -> abre browser -> auth -> volta pro app, automatico
+- **API key** (Linear, Jira, Sentry): tap "Connect" -> tela com campo de key + link "Get your key here" -> cola -> salvo
+
+**O que acontece por baixo**:
+- Tarsy macOS recebe a config e escreve no `~/.claude.json` ou `claude_desktop_config.json` automaticamente
+- Instala o MCP server se necessario (`npx`, `pip`, etc)
+- Valida que esta funcionando (health check)
+- User nunca ve um JSON
+
+**UI**:
+- Acessivel via workspace settings ou tab dedicada
+- Grid/lista de integracoes com icones
+- Status: "Connected" (verde), "Not configured" (cinza)
+- Toggle pra ativar/desativar por workspace
+- Detail view pra configurar auth
 
 ---
 
-## 5. Supabase Schema
+## 5. Telas - Tarsy iOS (v2)
 
-### Tables
+### 5.1 Onboarding
+
+1. Splash com animacao do Tarsier
+2. "Welcome to Tarsy" - breve explicacao do produto
+3. Login (Supabase Auth: email, Apple, Google)
+4. "Install Tarsy on your Mac" - QR code ou link direto
+5. Aguarda conexao automatica via tunnel
+6. Dashboard (com 1 workspace free pra comecar)
+
+### 5.2 Dashboard (atualizado)
+
+Cards de workspace com informacoes adicionais:
+- Engine ativo (icone: Claude/Gemini/Codex)
+- Ultimo checkpoint (timestamp)
+- Status do agente (idle/running/waiting)
+
+Botao "+" pra criar workspace:
+- Free: se ja tem 1 -> paywall
+- Pro: cria normalmente
+
+### 5.3 Workspace (atualizado)
+
+Layout:
+```
++---------------------------+
+|     Stream de Video       |
+|   (touch interativo)      |
++---------------------------+
+| [Claude] [Term2] [+]     |  <- tabs
++---------------------------+
+|                           |
+|   Chat area               |
+|                           |
+|   [floating question card]|
++---------------------------+
+| [mic] [input field] [send]|  <- input bar
+|          [checkpoint btn] |  <- safety net
++---------------------------+
+```
+
+Novos elementos:
+- Botao de checkpoint sempre acessivel
+- Botao de mic no input bar
+- Selector de engine no "+" (criar tab com engine diferente)
+
+### 5.4 Settings
+
+- **Account**: email, subscription status, manage subscription
+- **AI Providers**: adicionar/remover API keys por provider
+  - Cada provider com campo de key + instrucoes + link "Get key"
+- **Integrations (MCPs)**: tool store com catalogo curado
+- **About**: versao, links, support
+
+---
+
+## 6. Tunneling - Decisao Tecnica (a definir)
+
+O tunneling e a feature mais critica do v2. A decisao de implementacao impacta:
+- Latencia do stream
+- Complexidade de onboarding
+- Custo de infra
+- Confiabilidade
+
+### Opcoes
+
+**Opcao A: Tailscale Embedded**
+- Pro: ja funciona, battle-tested, NAT traversal excelente
+- Contra: dependencia de terceiro, possivel custo de licenca pra uso embedded
+- Viabilidade: investigar Tailscale SDK / headscale (open source)
+
+**Opcao B: Relay Server Proprio**
+- Pro: controle total, sem dependencias
+- Contra: mais codigo pra manter, custo de infra, latencia do hop extra
+- Stack: Fly.io + Hono/Bun, WS proxy puro
+
+**Opcao C: WireGuard Embedded**
+- Pro: open source, lightweight, protocolo provado
+- Contra: precisa de coordination server pra NAT traversal
+- Stack: WireGuard Go/Swift bindings + coordination server proprio
+
+**Opcao D: Hibrido**
+- LAN direta quando na mesma rede (melhor latencia)
+- Relay/WireGuard quando remoto
+- Pro: melhor experiencia possivel em cada cenario
+- Contra: mais complexidade
+
+### Requisitos independente da opcao
+- Zero config pelo user
+- Reconexao automatica
+- Funcionar atras de NAT/firewall
+- TLS/criptografia em todo o caminho
+- Latencia <200ms p95 para stream
+
+---
+
+## 7. Supabase Schema (atualizado)
+
+### Novas tabelas
 
 ```sql
--- Users
-users (
-  id uuid PK (supabase auth)
-  email text
-  display_name text
-  created_at timestamp
-)
-
--- Machines (Mac do user)
-machines (
+-- Subscriptions
+subscriptions (
   id uuid PK
   user_id uuid FK -> users
-  hostname text
-  tailscale_ip text
-  status text -- 'online' | 'offline'
-  last_seen_at timestamp
-  created_at timestamp
-)
-
--- Workspaces
-workspaces (
-  id uuid PK
-  user_id uuid FK -> users
-  machine_id uuid FK -> machines
-  name text
-  repo_url text
-  local_path text
-  stack text -- 'web' | 'mobile' | 'backend' | 'fullstack'
-  status text -- 'idle' | 'starting' | 'running' | 'error'
-  current_branch text
-  dev_server_command text
-  ai_context text -- o "CLAUDE.md remoto"
-  config jsonb -- configuracoes extras
+  revenue_cat_id text
+  plan text -- 'free' | 'pro'
+  status text -- 'active' | 'expired'
+  current_period_ends_at timestamp
   created_at timestamp
   updated_at timestamp
 )
 
--- Chat History
-chat_messages (
+-- API Keys (encrypted)
+api_keys (
   id uuid PK
-  workspace_id uuid FK -> workspaces
-  tab_id text -- identificador da tab/session
-  role text -- 'user' | 'assistant'
-  content text
+  user_id uuid FK -> users
+  provider text -- 'anthropic' | 'google' | 'openai' | 'custom'
+  encrypted_key text -- encrypted at rest
   created_at timestamp
 )
 
--- Push notification tokens
-push_tokens (
+-- MCP Configs
+mcp_configs (
   id uuid PK
-  user_id uuid FK -> users
-  device_token text
+  workspace_id uuid FK -> workspaces
+  name text
+  type text -- 'browser' | 'filesystem' | 'github' | 'slack' | 'linear' | 'custom'
+  config jsonb -- auth tokens, settings
+  enabled boolean
   created_at timestamp
 )
 ```
 
-### Realtime
-
-- Subscriptions em `workspaces` para status updates
-- Subscriptions em `machines` para online/offline
-
-### Row Level Security
-
-- Cada user so ve seus proprios dados
-- Policies baseadas em `auth.uid() = user_id`
+### Tabelas existentes
+- `users`
+- `machines`
+- `workspaces` (adicionar campo `default_engine text`)
+- `chat_messages`
+- `push_tokens`
 
 ---
 
-## 6. Design Visual
+## 8. Design Visual
 
 ### Identidade
 
@@ -307,81 +443,107 @@ push_tokens (
 - Chat bubbles com fundo diferenciado por role
 - Stream com borda sutil e cantos arredondados
 - Status badges coloridos (verde=running, ambar=starting, cinza=idle)
+- Interactive questions: card paginado flutuante estilo Anthropic
+- Paywall: clean, sem overwhelm, uma unica proposta ("Unlimited workspaces")
+- Checkpoint button: prominente, sensacao de seguranca
+- Tool store: grid com icones, status claro (connected/not configured)
 
 ---
 
-## 7. Seguranca
+## 9. Seguranca
 
-- Toda comunicacao iOS <-> macOS via Tailscale (criptografada, WireGuard)
-- Auth tokens Supabase validados em ambos os lados
-- O Mac so aceita conexoes de devices na mesma Tailnet autenticados
+- Tunnel: criptografia end-to-end independente da tecnologia escolhida
+- Auth tokens Supabase validados em todos os pontos (iOS, tunnel, macOS)
+- API keys: criptografadas at rest no Supabase, Keychain no iOS
+- MCP tokens: armazenados criptografados, enviados ao macOS sob demanda
+- Conexao direta LAN quando possivel (menor superficie de ataque)
 - Chat history criptografado at rest no Supabase
-- Nenhuma porta exposta na internet publica
+- RevenueCat: server-side validation de receipts
 
 ---
 
-## 8. Requisitos Tecnicos
+## 10. Fases de Desenvolvimento (v2)
 
-### Tarsy iOS
-- iOS 17+
-- iPhone apenas (sem iPad por enquanto)
-- Swift 5.9+
-- SwiftUI
-- Dependencias: Supabase Swift SDK, WebRTC framework
+### Fase 1 - Tunneling Transparente
+- [ ] Investigar opcoes (Tailscale embedded vs relay vs WireGuard)
+- [ ] Implementar solucao escolhida
+- [ ] macOS: conectar automaticamente ao iniciar
+- [ ] iOS: conectar via tunnel em vez de config manual
+- [ ] Deteccao de LAN para conexao direta
+- [ ] Reconexao automatica ao mudar de rede
+- [ ] Testar latencia do stream
 
-### Tarsy macOS
-- macOS 14+ (Sonoma) - necessario para ScreenCaptureKit avancado
-- Swift 5.9+
-- SwiftUI
-- Dependencias: Supabase Swift SDK, WebRTC, ScreenCaptureKit
-- Permissoes: Screen Recording, Accessibility (pra controle de janelas)
+### Fase 2 - Multi-Provider
+- [ ] Definir `AIEngineProtocol` no macOS
+- [ ] Refatorar `ClaudeCodeSession` para implementar o protocolo
+- [ ] Implementar `GenericCLIEngine` (funciona pra Gemini/Codex/Aider)
+- [ ] iOS: selector de engine por tab/workspace
+- [ ] iOS: tela de API keys no Settings
+- [ ] Armazenamento seguro de keys (Keychain + Supabase encrypted)
 
----
+### Fase 3 - Paywall
+- [ ] Integrar RevenueCat SDK no iOS
+- [ ] Configurar produto no App Store Connect ($9/mes)
+- [ ] Paywall screen no iOS (aparece ao criar 2o workspace)
+- [ ] Supabase: tabela de subscriptions + webhook RevenueCat
+- [ ] Enforcar limite do free tier (1 workspace)
+- [ ] Restore purchases flow
 
-## 9. Fases de Desenvolvimento
+### Fase 4 - Voice to Text
+- [ ] Integrar Apple Speech framework
+- [ ] Botao de mic no input bar (hold to record)
+- [ ] Preview de transcricao editavel
+- [ ] Deteccao automatica de idioma
 
-### Fase 1 - Foundation
-- [ ] Setup monorepo Swift (Xcode project com targets iOS + macOS)
-- [ ] Supabase setup (auth, tables, RLS)
-- [ ] Login flow em ambos os apps
-- [ ] Tailscale auto-install no macOS
-- [ ] Conexao iOS <-> macOS via WebSocket sobre Tailscale
+### Fase 5 - Git Safety Net (Checkpoints)
+- [ ] macOS: handlers `git:checkpoint`, `git:diff`, `git:rollback`, `git:history`
+- [ ] iOS: botao de checkpoint
+- [ ] iOS: view de mudancas desde ultimo checkpoint
+- [ ] iOS: rollback com confirmacao
+- [ ] iOS: historico de checkpoints
 
-### Fase 2 - Workspaces
-- [ ] CRUD de workspaces (Supabase + UI)
-- [ ] Dashboard no iOS
-- [ ] Workspace manager no macOS (clone, setup, cold start)
-- [ ] AI Context editor
+### Fase 6 - MCP/Tool Store
+- [ ] Definir catalogo inicial de integracoes
+- [ ] macOS: auto-setup de MCPs (escreve config, instala server)
+- [ ] iOS: UI de tool store (grid com icones)
+- [ ] Fluxo de OAuth para GitHub, Slack
+- [ ] Fluxo de API key para Linear, Jira, Sentry
+- [ ] Health check de MCPs (validar que esta funcionando)
 
-### Fase 3 - Stream
-- [ ] ScreenCaptureKit captura de janela especifica
-- [ ] WebRTC streaming macOS -> iOS
-- [ ] Controles de stream (fullscreen, screenshot, refresh)
-- [ ] Selecao inteligente de janela por stack
+### Fase 7 - File Browser (nice to have)
+- [ ] macOS: `file:tree` endpoint (respeita .gitignore)
+- [ ] macOS: `file:read` endpoint
+- [ ] iOS: TreeView com lazy loading
+- [ ] File preview com syntax highlighting
 
-### Fase 4 - Terminais e Chat
-- [ ] tmux session management no macOS
-- [ ] Sistema de tabs no iOS
-- [ ] Chat interface com persistencia no Supabase
-- [ ] Integracao com Claude Code CLI
-- [ ] Push notifications
-
-### Fase 5 - OpenClaw
-- [ ] Tab fixa do OpenClaw
-- [ ] Integracao (formato a definir)
-
-### Fase 6 - Polish
-- [ ] Refinamento visual (design system completo)
+### Fase 8 - Polish & Launch
 - [ ] Performance tuning do stream
-- [ ] Error handling e recovery
-- [ ] Distribuicao (TestFlight + DMG/Homebrew)
+- [ ] Error handling e recovery robusto
+- [ ] Onboarding flow completo
+- [ ] App Store listing (screenshots, descricao, keywords)
+- [ ] Landing page (tarsy.app)
+- [ ] Distribuicao macOS (DMG + Homebrew)
 
 ---
 
-## 10. Questoes em Aberto
+## 11. Metricas de Sucesso
 
-1. **OpenClaw integration**: WebView, API nativa, ou embedd do terminal do OpenClaw?
+- **Onboarding completion rate**: % de users que completam setup (meta: >80%)
+- **Free to paid conversion**: % de free users que fazem upgrade (meta: >20%)
+- **DAU**: usuarios ativos diarios
+- **Session duration**: tempo medio por sessao
+- **Tunnel latency**: latencia p95 do stream (meta: <200ms)
+- **Churn rate**: % de cancelamento mensal (meta: <8%)
+- **Checkpoint usage**: % de sessions que usam checkpoint (indica confianca no produto)
+
+---
+
+## 12. Questoes em Aberto
+
+1. **Tunneling**: qual tecnologia usar? (Tailscale embedded vs relay vs WireGuard vs hibrido)
 2. **iPad support**: adicionar no futuro? (tela maior seria ideal pra stream)
 3. **Android**: roadmap futuro com Kotlin/Compose?
 4. **Colaboracao**: no futuro, permitir que dois devs vejam o mesmo workspace?
 5. **Gravacao**: salvar replays das sessions pra review depois?
+6. **Marketplace de MCPs**: abrir pra community contribuir integracoes?
+7. **Self-hosted**: permitir que users enterprise rodem infra propria?

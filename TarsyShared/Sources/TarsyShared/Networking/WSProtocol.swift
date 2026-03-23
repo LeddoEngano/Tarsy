@@ -29,6 +29,8 @@ public enum WSAction: String, Codable, Sendable {
     case remotePinchEnd = "remote:pinch_end"
     case remoteKeyboard = "remote:keyboard"
     case remoteButton = "remote:button"
+    case screenshotRequest = "screenshot:request"
+    case screenshotResult = "screenshot:result"
 
     // Dev Server
     case devServerStart = "devserver:start"
