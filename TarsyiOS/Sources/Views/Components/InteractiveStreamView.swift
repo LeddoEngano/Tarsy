@@ -34,6 +34,7 @@ struct InteractiveStreamView: View {
                         )
                         .gesture(tapGesture(screenSize: geo.size))
                         .gesture(dragScrollGesture(screenSize: geo.size))
+                        .gesture(pinchGesture(screenSize: geo.size))
                         .gesture(longPressGesture(screenSize: geo.size))
                 }
 
@@ -134,6 +135,24 @@ struct InteractiveStreamView: View {
                 default:
                     break
                 }
+            }
+    }
+
+    private func pinchGesture(screenSize: CGSize) -> some Gesture {
+        MagnifyGesture()
+            .onEnded { value in
+                let center = CGPoint(x: screenSize.width / 2, y: screenSize.height / 2)
+                let relative = relativePosition(from: center, screenSize: screenSize)
+                guard let rel = relative else { return }
+
+                connectionManager.send(WSPacket(
+                    action: .remotePinch,
+                    payload: [
+                        "x": String(format: "%.4f", rel.x),
+                        "y": String(format: "%.4f", rel.y),
+                        "scale": String(format: "%.2f", value.magnification)
+                    ]
+                ))
             }
     }
 

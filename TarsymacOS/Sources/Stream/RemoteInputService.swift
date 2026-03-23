@@ -6,92 +6,72 @@ class RemoteInputService {
     private var windowFrame: CGRect = .zero
     private var windowId: CGWindowID = 0
     private var ownerPid: pid_t = 0
+    private var appName: String = ""
     private var isMobileSimulator = false
 
-    /// Set the target window for input events
-    func setTargetWindow(frame: CGRect, windowId: CGWindowID, pid: pid_t, isSimulator: Bool) {
+    func setTargetWindow(frame: CGRect, windowId: CGWindowID, pid: pid_t, isSimulator: Bool, appName: String = "") {
         self.windowFrame = frame
         self.windowId = windowId
         self.ownerPid = pid
         self.isMobileSimulator = isSimulator
-        print("[RemoteInput] Target: frame=\(frame), id=\(windowId), pid=\(pid), simulator=\(isSimulator)")
+        self.appName = appName
+        print("[RemoteInput] Target: frame=\(frame), id=\(windowId), pid=\(pid), sim=\(isSimulator), app=\(appName)")
     }
 
-    /// Tap at relative position (0.0-1.0)
     func tap(relativeX: CGFloat, relativeY: CGFloat) {
         let point = absolutePoint(relativeX: relativeX, relativeY: relativeY)
-        focusTargetWindow()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        focusTargetWindow {
             let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
             down?.post(tap: .cghidEventTap)
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
-                let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
-                up?.post(tap: .cghidEventTap)
-            }
+            usleep(20_000)
+            let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
+            up?.post(tap: .cghidEventTap)
         }
     }
 
-    /// Double tap at relative position
     func doubleTap(relativeX: CGFloat, relativeY: CGFloat) {
         let point = absolutePoint(relativeX: relativeX, relativeY: relativeY)
-        focusTargetWindow()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        focusTargetWindow {
             for clickNum in [1, 2] as [Int64] {
                 let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
                 down?.setIntegerValueField(.mouseEventClickState, value: clickNum)
                 down?.post(tap: .cghidEventTap)
-
                 let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
                 up?.setIntegerValueField(.mouseEventClickState, value: clickNum)
                 up?.post(tap: .cghidEventTap)
+                usleep(10_000)
             }
         }
     }
 
-    /// Long press (right click) at relative position
     func longPress(relativeX: CGFloat, relativeY: CGFloat) {
         let point = absolutePoint(relativeX: relativeX, relativeY: relativeY)
-        focusTargetWindow()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let down = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: point, mouseButton: .right)
-            down?.post(tap: .cghidEventTap)
-
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) {
+        focusTargetWindow {
+            if self.isMobileSimulator {
+                // Simulator: long press = hold mouse down
+                let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
+                down?.post(tap: .cghidEventTap)
+                usleep(800_000) // hold 0.8s
+                let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left)
+                up?.post(tap: .cghidEventTap)
+            } else {
+                let down = CGEvent(mouseEventSource: nil, mouseType: .rightMouseDown, mouseCursorPosition: point, mouseButton: .right)
+                down?.post(tap: .cghidEventTap)
+                usleep(20_000)
                 let up = CGEvent(mouseEventSource: nil, mouseType: .rightMouseUp, mouseCursorPosition: point, mouseButton: .right)
                 up?.post(tap: .cghidEventTap)
             }
         }
     }
 
-    /// Swipe/scroll — on simulator does a drag, on browser does scroll wheel
     func scroll(relativeX: CGFloat, relativeY: CGFloat, deltaX: CGFloat, deltaY: CGFloat) {
+        let point = absolutePoint(relativeX: relativeX, relativeY: relativeY)
+
         if isMobileSimulator {
-            // Simulator: drag gesture (touch simulation)
-            let point = absolutePoint(relativeX: relativeX, relativeY: relativeY)
-            let endPoint = CGPoint(x: point.x + deltaX * 5, y: point.y + deltaY * 5)
-
-            let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
-            down?.post(tap: .cghidEventTap)
-
-            // Smooth drag
-            let steps = 8
-            for i in 1...steps {
-                let t = CGFloat(i) / CGFloat(steps)
-                let p = CGPoint(x: point.x + (endPoint.x - point.x) * t, y: point.y + (endPoint.y - point.y) * t)
-                let drag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: p, mouseButton: .left)
-                drag?.post(tap: .cghidEventTap)
-            }
-
-            let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: endPoint, mouseButton: .left)
-            up?.post(tap: .cghidEventTap)
+            // Simulator: drag = touch swipe
+            performDrag(from: point, deltaX: deltaX * 8, deltaY: deltaY * 8)
         } else {
             // Browser/desktop: scroll wheel
-            let point = absolutePoint(relativeX: relativeX, relativeY: relativeY)
-
             let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
             move?.post(tap: .cghidEventTap)
 
@@ -101,43 +81,63 @@ class RemoteInputService {
         }
     }
 
-    /// Drag from one point to another
+    /// Pinch gesture for simulator — uses Option key + drag
+    func pinch(relativeX: CGFloat, relativeY: CGFloat, scale: CGFloat) {
+        guard isMobileSimulator else { return }
+        let point = absolutePoint(relativeX: relativeX, relativeY: relativeY)
+
+        // Move mouse to center point
+        let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)
+        move?.post(tap: .cghidEventTap)
+        usleep(50_000)
+
+        // Hold Option key (simulates pinch in iOS Simulator)
+        let optionDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x3A, keyDown: true) // 0x3A = Option
+        optionDown?.post(tap: .cghidEventTap)
+        usleep(50_000)
+
+        // Drag up or down based on scale
+        let dragDistance: CGFloat = scale > 1.0 ? -30 : 30 // negative = zoom in, positive = zoom out
+        let steps = 8
+
+        let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
+        down?.post(tap: .cghidEventTap)
+
+        for i in 1...steps {
+            let t = CGFloat(i) / CGFloat(steps)
+            let p = CGPoint(x: point.x, y: point.y + dragDistance * t)
+            let drag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: p, mouseButton: .left)
+            drag?.post(tap: .cghidEventTap)
+            usleep(20_000)
+        }
+
+        let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: CGPoint(x: point.x, y: point.y + dragDistance), mouseButton: .left)
+        up?.post(tap: .cghidEventTap)
+
+        // Release Option
+        let optionUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x3A, keyDown: false)
+        optionUp?.post(tap: .cghidEventTap)
+    }
+
     func drag(fromX: CGFloat, fromY: CGFloat, toX: CGFloat, toY: CGFloat) {
         let from = absolutePoint(relativeX: fromX, relativeY: fromY)
         let to = absolutePoint(relativeX: toX, relativeY: toY)
-        focusTargetWindow()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left)
-            down?.post(tap: .cghidEventTap)
-
-            let steps = 10
-            for i in 1...steps {
-                let t = CGFloat(i) / CGFloat(steps)
-                let p = CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
-                let drag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: p, mouseButton: .left)
-                drag?.post(tap: .cghidEventTap)
-            }
-
-            let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left)
-            up?.post(tap: .cghidEventTap)
+        focusTargetWindow {
+            self.performDragAbsolute(from: from, to: to)
         }
     }
 
-    /// Type text
     func typeText(_ text: String) {
-        focusTargetWindow()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+        focusTargetWindow {
             for char in text {
                 let str = String(char)
                 let event = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
                 let chars = Array(str.utf16)
                 event?.keyboardSetUnicodeString(stringLength: chars.count, unicodeString: chars)
                 event?.post(tap: .cghidEventTap)
-
                 let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
                 up?.post(tap: .cghidEventTap)
+                usleep(5_000)
             }
         }
     }
@@ -151,36 +151,54 @@ class RemoteInputService {
         )
     }
 
-    private func focusTargetWindow() {
-        // Activate the owning app
-        if let app = NSRunningApplication(processIdentifier: ownerPid) {
-            app.activate()
+    private func performDrag(from point: CGPoint, deltaX: CGFloat, deltaY: CGFloat) {
+        let endPoint = CGPoint(x: point.x + deltaX, y: point.y + deltaY)
+        performDragAbsolute(from: point, to: endPoint)
+    }
+
+    private func performDragAbsolute(from: CGPoint, to: CGPoint) {
+        let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: from, mouseButton: .left)
+        down?.post(tap: .cghidEventTap)
+
+        let steps = 10
+        for i in 1...steps {
+            let t = CGFloat(i) / CGFloat(steps)
+            let p = CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
+            let drag = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: p, mouseButton: .left)
+            drag?.post(tap: .cghidEventTap)
+            usleep(15_000)
         }
 
-        // Use Accessibility API to raise the specific window
-        let appElement = AXUIElementCreateApplication(ownerPid)
-        var windowsRef: CFTypeRef?
-        AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef)
+        let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: to, mouseButton: .left)
+        up?.post(tap: .cghidEventTap)
+    }
 
-        if let windows = windowsRef as? [AXUIElement] {
-            for window in windows {
-                var windowIdRef: CFTypeRef?
-                // Try to match by window ID via _AXUIElementGetWindow
-                var wid: CGWindowID = 0
-                _AXUIElementGetWindow(window, &wid)
-                if wid == windowId {
-                    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-                    return
+    private func focusTargetWindow(then action: @escaping () -> Void) {
+        // Use AppleScript to bring the specific app window to front
+        DispatchQueue.global(qos: .userInteractive).async { [self] in
+            // First: activate the app
+            if let app = NSRunningApplication(processIdentifier: ownerPid) {
+                app.activate(options: [.activateIgnoringOtherApps])
+            }
+
+            // Second: use AppleScript to raise the specific window
+            if !appName.isEmpty {
+                let script = """
+                tell application "\(appName)"
+                    activate
+                end tell
+                """
+                if let appleScript = NSAppleScript(source: script) {
+                    var error: NSDictionary?
+                    appleScript.executeAndReturnError(&error)
                 }
             }
-            // Fallback: raise first window
-            if let first = windows.first {
-                AXUIElementPerformAction(first, kAXRaiseAction as CFString)
-            }
+
+            // Wait for window to come to front
+            usleep(150_000)
+
+            // Now perform the action
+            action()
         }
     }
 }
-
-// Private API to get window ID from AXUIElement
-@_silgen_name("_AXUIElementGetWindow")
-func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError

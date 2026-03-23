@@ -191,7 +191,7 @@ class DaemonManager: ObservableObject {
             await handleStreamStart(clientId: clientId, packet: packet)
         case .streamStop:
             await handleStreamStop(clientId: clientId, packet: packet)
-        case .remoteTap, .remoteDoubleTap, .remoteLongPress, .remoteScroll, .remoteDrag, .remoteKeyboard:
+        case .remoteTap, .remoteDoubleTap, .remoteLongPress, .remoteScroll, .remoteDrag, .remotePinch, .remoteKeyboard:
             handleRemoteInput(packet: packet)
         default:
             await wsServer?.send(
@@ -697,6 +697,9 @@ class DaemonManager: ObservableObject {
             let toX = Double(packet.payload?["toX"] ?? "0") ?? 0
             let toY = Double(packet.payload?["toY"] ?? "0") ?? 0
             remoteInput.drag(fromX: x, fromY: y, toX: toX, toY: toY)
+        case .remotePinch:
+            let scale = Double(packet.payload?["scale"] ?? "1") ?? 1
+            remoteInput.pinch(relativeX: x, relativeY: y, scale: scale)
         case .remoteKeyboard:
             if let text = packet.payload?["text"] {
                 remoteInput.typeText(text)
@@ -782,13 +785,15 @@ class DaemonManager: ObservableObject {
             try await screenCapture.startCapture(window: window, fps: fps, scale: scale)
 
             // Set target window for remote input
-            let isSimulator = window.owningApplication?.applicationName == "Simulator"
+            let ownerApp = window.owningApplication?.applicationName ?? ""
+            let isSimulator = ownerApp == "Simulator"
             let pid = window.owningApplication?.processID ?? 0
             remoteInput.setTargetWindow(
                 frame: window.frame,
                 windowId: CGWindowID(window.windowID),
                 pid: pid_t(pid),
-                isSimulator: isSimulator
+                isSimulator: isSimulator,
+                appName: ownerApp
             )
 
             log("streamStart: capture started")
