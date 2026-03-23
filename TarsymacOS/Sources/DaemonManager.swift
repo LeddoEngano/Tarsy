@@ -17,6 +17,7 @@ class DaemonManager: ObservableObject {
     private var orchestrator: WorkspaceOrchestrator?
     private let screenCapture = ScreenCaptureService()
     private var mjpegServer: MJPEGStreamServer?
+    private let openClaw = OpenClawService()
     private var heartbeatTimer: Timer?
 
     func start() async {
@@ -134,6 +135,10 @@ class DaemonManager: ObservableObject {
             await handleClaudeMessage(clientId: clientId, packet: packet)
         case .claudeClose:
             await handleClaudeClose(clientId: clientId, packet: packet)
+        case .openclawStatus:
+            await handleOpenClawStatus(clientId: clientId, packet: packet)
+        case .openclawMessage:
+            await handleOpenClawMessage(clientId: clientId, packet: packet)
         case .streamStart:
             await handleStreamStart(clientId: clientId, packet: packet)
         case .streamStop:
@@ -314,6 +319,60 @@ class DaemonManager: ObservableObject {
             WSPacket(action: .claudeClose, payload: ["sessionId": sessionId], id: packet.id),
             to: clientId
         )
+    }
+
+    // MARK: - OpenClaw
+
+    private func handleOpenClawStatus(clientId: String, packet: WSPacket) async {
+        let running = await openClaw.checkGateway()
+        await wsServer?.send(
+            WSPacket(action: .openclawStatus, payload: [
+                "running": running ? "true" : "false",
+                "port": "18789"
+            ], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func handleOpenClawMessage(clientId: String, packet: WSPacket) async {
+        guard let message = packet.payload?["message"] else { return }
+        let agentId = packet.payload?["agentId"] ?? "openclaw:main"
+
+        // Check if gateway is running, start if needed
+        let running = await openClaw.checkGateway()
+        if !running {
+            do {
+                try await openClaw.startGateway()
+            } catch {
+                await wsServer?.send(
+                    WSPacket(action: .error, payload: ["message": "OpenClaw gateway not running: \(error.localizedDescription)"], id: packet.id),
+                    to: clientId
+                )
+                return
+            }
+        }
+
+        do {
+            var fullResponse = ""
+            try await openClaw.sendMessage(message, agentId: agentId) { [weak self] chunk in
+                fullResponse += chunk
+                Task {
+                    await self?.wsServer?.send(
+                        WSPacket(action: .openclawOutput, payload: ["output": chunk]),
+                        to: clientId
+                    )
+                }
+            }
+            await wsServer?.send(
+                WSPacket(action: .openclawComplete, payload: ["message": fullResponse], id: packet.id),
+                to: clientId
+            )
+        } catch {
+            await wsServer?.send(
+                WSPacket(action: .error, payload: ["message": "OpenClaw error: \(error.localizedDescription)"], id: packet.id),
+                to: clientId
+            )
+        }
     }
 
     // MARK: - Stream

@@ -193,6 +193,12 @@ struct WorkspaceView: View {
                         ]
                     ))
                 }
+            } else if currentTab.type == .openclaw {
+                // Send to OpenClaw via gateway
+                connectionManager.send(WSPacket(
+                    action: .openclawMessage,
+                    payload: ["message": text]
+                ))
             } else {
                 // Regular terminal input
                 if let sessionId = currentTab.sessionId {
@@ -241,6 +247,12 @@ struct WorkspaceView: View {
                     if let sessionId = packet.payload?["sessionId"] {
                         tabs[selectedTabIndex].sessionId = sessionId
                     }
+                case .openclawOutput:
+                    if let output = packet.payload?["output"] {
+                        chatService.addAssistantChunk(workspaceId: workspace.id, tabId: "openclaw", content: output)
+                    }
+                case .openclawComplete:
+                    await chatService.saveLastAssistantMessage()
                 case .terminalOutput:
                     if let output = packet.payload?["output"] {
                         chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
