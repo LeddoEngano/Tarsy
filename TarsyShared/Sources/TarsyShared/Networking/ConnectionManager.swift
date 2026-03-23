@@ -66,16 +66,18 @@ public class ConnectionManager: ObservableObject {
         guard let host, let port else { return }
 
         // Create WebSocket connection using Network.framework (bypasses ATS)
+        // Must use URL endpoint so WebSocket has a path for the HTTP upgrade
+        guard let url = URL(string: "ws://\(host):\(port)/") else {
+            errorMessage = "Invalid WebSocket URL"
+            return
+        }
+
         let parameters = NWParameters.tcp
         let wsOptions = NWProtocolWebSocket.Options()
+        wsOptions.autoReplyPing = true
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
 
-        let endpoint = NWEndpoint.hostPort(
-            host: NWEndpoint.Host(host),
-            port: NWEndpoint.Port(rawValue: port)!
-        )
-
-        let conn = NWConnection(to: endpoint, using: parameters)
+        let conn = NWConnection(to: .url(url), using: parameters)
 
         conn.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
