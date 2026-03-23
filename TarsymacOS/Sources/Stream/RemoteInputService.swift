@@ -269,14 +269,46 @@ class RemoteInputService {
 
     private let idbQueue = DispatchQueue(label: "com.tarsy.idb", qos: .userInteractive)
 
+    private var idbPath: String?
+
+    private func findIdb() -> String {
+        if let cached = idbPath { return cached }
+        let candidates = [
+            "/Library/Frameworks/Python.framework/Versions/3.13/bin/idb",
+            "/opt/homebrew/bin/idb",
+            "/usr/local/bin/idb",
+            NSHomeDirectory() + "/.local/bin/idb",
+            NSHomeDirectory() + "/Library/Python/3.13/bin/idb",
+            NSHomeDirectory() + "/Library/Python/3.12/bin/idb",
+            NSHomeDirectory() + "/Library/Python/3.11/bin/idb"
+        ]
+        for path in candidates {
+            if FileManager.default.fileExists(atPath: path) {
+                idbPath = path
+                print("[RemoteInput] Found idb at: \(path)")
+                return path
+            }
+        }
+        idbPath = "/Library/Frameworks/Python.framework/Versions/3.13/bin/idb"
+        return idbPath!
+    }
+
     private func runIdb(_ args: [String]) {
         let argsCopy = args
-        idbQueue.async {
+        idbQueue.async { [self] in
+            let idb = findIdb()
+
+            // Run via /bin/sh to ensure proper env setup
+            let fullCommand = "\(idb) \(argsCopy.map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " "))"
+
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/Library/Frameworks/Python.framework/Versions/3.13/bin/idb")
-            process.arguments = argsCopy
-            process.standardOutput = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", fullCommand]
+            process.environment = ProcessInfo.processInfo.environment
+
+            let outPipe = Pipe()
             let errPipe = Pipe()
+            process.standardOutput = outPipe
             process.standardError = errPipe
 
             do {
@@ -285,12 +317,10 @@ class RemoteInputService {
                 if process.terminationStatus != 0 {
                     let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
                     let errStr = String(data: errData, encoding: .utf8) ?? ""
-                    print("[RemoteInput] idb failed (\(process.terminationStatus)): idb \(argsCopy.joined(separator: " ")) — \(errStr.prefix(200))")
-                } else {
-                    print("[RemoteInput] idb ok: \(argsCopy.prefix(4).joined(separator: " "))")
+                    print("[RemoteInput] idb FAIL (\(process.terminationStatus)): \(fullCommand) — \(errStr.prefix(300))")
                 }
             } catch {
-                print("[RemoteInput] idb error: \(error)")
+                print("[RemoteInput] idb ERROR: \(error) — cmd: \(fullCommand)")
             }
         }
     }

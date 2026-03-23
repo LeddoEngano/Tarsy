@@ -20,70 +20,73 @@ struct InteractiveStreamView: View {
     @State private var lastPinchScale: CGFloat = 1.0
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                Color.black.ignoresSafeArea()
+        ZStack {
+            Color.black.ignoresSafeArea()
 
-                if let frame = viewModel.currentFrame {
-                    Image(uiImage: frame)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .gesture(tapGesture(screenSize: geo.size))
-                        .gesture(dragGesture(screenSize: geo.size))
-                        .gesture(pinchGesture(screenSize: geo.size))
-                        .gesture(longPressGesture(screenSize: geo.size))
+            GeometryReader { geo in
+                ZStack {
+                    if let frame = viewModel.currentFrame {
+                        Image(uiImage: frame)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .gesture(tapGesture(screenSize: geo.size))
+                            .gesture(dragGesture(screenSize: geo.size))
+                            .gesture(pinchGesture(screenSize: geo.size))
+                            .gesture(longPressGesture(screenSize: geo.size))
+                    }
+
+                    // Tap feedback
+                    if let point = tapFeedbackPoint {
+                        Circle()
+                            .fill(TarsyTheme.accentAmber.opacity(0.4))
+                            .frame(width: 30, height: 30)
+                            .position(point)
+                            .allowsHitTesting(false)
+                    }
                 }
+            }
+            .ignoresSafeArea()
 
-                // Tap feedback
-                if let point = tapFeedbackPoint {
-                    Circle()
-                        .fill(TarsyTheme.accentAmber.opacity(0.4))
-                        .frame(width: 30, height: 30)
-                        .position(point)
-                        .allowsHitTesting(false)
-                }
-
-                // Controls — respect safe area
-                if showControls {
-                    VStack {
-                        HStack {
-                            Text("\(viewModel.fps) fps")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.6))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(.black.opacity(0.5))
-                                .cornerRadius(4)
-
-                            Spacer()
-
-                            Button(action: onClose) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.title2)
-                                    .foregroundColor(.white.opacity(0.7))
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, geo.safeAreaInsets.top + 8)
+            // Controls overlay — inside safe area
+            if showControls {
+                VStack {
+                    HStack {
+                        Text("\(viewModel.fps) fps")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.6))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.5))
+                            .cornerRadius(4)
 
                         Spacer()
 
-                        HStack(spacing: 12) {
-                            hintLabel(icon: "hand.tap", text: "tap = click")
-                            hintLabel(icon: "hand.draw", text: "drag = scroll")
-                            hintLabel(icon: "hand.tap.fill", text: "hold = right-click")
+                        Button(action: onClose) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(.white.opacity(0.7))
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(.black.opacity(0.6))
-                        .cornerRadius(12)
-                        .padding(.bottom, geo.safeAreaInsets.bottom + 8)
                     }
-                    .transition(.opacity)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+
+                    Spacer()
+
+                    HStack(spacing: 12) {
+                        hintLabel(icon: "hand.tap", text: "tap = click")
+                        hintLabel(icon: "hand.draw", text: "drag = scroll")
+                        hintLabel(icon: "hand.tap.fill", text: "hold = right-click")
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(.black.opacity(0.6))
+                    .cornerRadius(12)
+                    .padding(.bottom, 8)
                 }
+                .transition(.opacity)
             }
         }
-        .ignoresSafeArea()
         .statusBarHidden()
         .onAppear {
             autoHideControls()
