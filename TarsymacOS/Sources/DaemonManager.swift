@@ -485,34 +485,59 @@ class DaemonManager: ObservableObject {
         }
 
         let expandedPath = (path as NSString).expandingTildeInPath
+        let streamUrl = packet.payload?["streamUrl"]
 
-        // Already running?
+        // Already running? Check with a real port probe instead of just checking the shell
         if let existingId = devServerSessions[expandedPath],
            await terminalManager.isSessionAlive(existingId) {
-            await wsServer?.send(
-                WSPacket(action: .devServerStart, payload: ["status": "already_running", "sessionId": existingId], id: packet.id),
-                to: clientId
-            )
-            return
+            let actuallyServing = portFromUrl(streamUrl).map { isPortListening(port: $0) } ?? true
+            if actuallyServing {
+                await wsServer?.send(
+                    WSPacket(action: .devServerStart, payload: ["status": "running", "sessionId": existingId], id: packet.id),
+                    to: clientId
+                )
+                return
+            } else {
+                // Shell alive but server died inside it — kill and restart
+                await terminalManager.closeSession(existingId)
+                devServerSessions.removeValue(forKey: expandedPath)
+                log("devServerStart: old session alive but port closed, restarting")
+            }
         }
 
         do {
             let sessionId = try await terminalManager.createSession(workingDirectory: expandedPath)
             devServerSessions[expandedPath] = sessionId
+
+            // Monitor terminal output for server-ready signals
+            let serverReady = DevServerReadySignal()
+            await terminalManager.setOutputHandler(for: sessionId) { output in
+                Task { await serverReady.check(output) }
+            }
+
             await terminalManager.sendInput(command, to: sessionId)
             log("devServerStart: running '\(command)' in \(expandedPath)")
 
-            await wsServer?.send(
-                WSPacket(action: .devServerStart, payload: ["status": "started", "sessionId": sessionId], id: packet.id),
-                to: clientId
-            )
+            // Wait for actual confirmation: either output-based or port-based
+            let targetPort = portFromUrl(streamUrl)
+            let confirmed = await waitForDevServer(signal: serverReady, port: targetPort, timeout: 15)
 
-            // If a streamUrl was provided, open the browser to it after a short delay
-            if let streamUrl = packet.payload?["streamUrl"], !streamUrl.isEmpty {
-                Task {
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    await self.openBrowserToUrl(streamUrl)
+            if confirmed {
+                log("devServerStart: confirmed running")
+                await wsServer?.send(
+                    WSPacket(action: .devServerStart, payload: ["status": "running", "sessionId": sessionId], id: packet.id),
+                    to: clientId
+                )
+                // Open browser to streamUrl
+                if let url = streamUrl, !url.isEmpty {
+                    await openBrowserToUrl(url)
                 }
+            } else {
+                log("devServerStart: could not confirm, assuming started")
+                await wsServer?.send(
+                    WSPacket(action: .devServerStart, payload: ["status": "started_unconfirmed", "sessionId": sessionId], id: packet.id),
+                    to: clientId
+                )
             }
         } catch {
             await wsServer?.send(
@@ -527,6 +552,9 @@ class DaemonManager: ObservableObject {
         let expandedPath = (path as NSString).expandingTildeInPath
 
         if let sessionId = devServerSessions[expandedPath] {
+            // Send Ctrl+C first to gracefully stop the dev server, then close session
+            await terminalManager.sendInput("\u{03}", to: sessionId)
+            try? await Task.sleep(nanoseconds: 500_000_000)
             await terminalManager.closeSession(sessionId)
             devServerSessions.removeValue(forKey: expandedPath)
             log("devServerStop: stopped for \(expandedPath)")
@@ -541,12 +569,23 @@ class DaemonManager: ObservableObject {
     private func handleDevServerStatus(clientId: String, packet: WSPacket) async {
         guard let path = packet.payload?["path"] else { return }
         let expandedPath = (path as NSString).expandingTildeInPath
+        let streamUrl = packet.payload?["streamUrl"]
 
         var running = false
+
         if let sessionId = devServerSessions[expandedPath] {
-            running = await terminalManager.isSessionAlive(sessionId)
-            if !running {
+            let shellAlive = await terminalManager.isSessionAlive(sessionId)
+            if !shellAlive {
                 devServerSessions.removeValue(forKey: expandedPath)
+            } else if let port = portFromUrl(streamUrl) {
+                // Real check: is the port actually open?
+                running = isPortListening(port: port)
+                if !running {
+                    log("devServerStatus: shell alive but port \(port) closed")
+                }
+            } else {
+                // No port to check, trust the shell
+                running = true
             }
         }
 
@@ -556,10 +595,59 @@ class DaemonManager: ObservableObject {
         )
     }
 
+    // MARK: - Dev Server Helpers
+
     private func openBrowserToUrl(_ urlString: String) async {
         guard let url = URL(string: urlString) else { return }
         log("openBrowserToUrl: opening \(urlString)")
         NSWorkspace.shared.open(url)
+    }
+
+    private func portFromUrl(_ urlString: String?) -> UInt16? {
+        guard let urlString, let url = URL(string: urlString) else { return nil }
+        if let port = url.port { return UInt16(port) }
+        // Default ports
+        if url.scheme == "https" { return 443 }
+        return 80
+    }
+
+    private nonisolated func waitForDevServer(signal: DevServerReadySignal, port: UInt16?, timeout: Int) async -> Bool {
+        for _ in 0..<(timeout * 2) {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+
+            // Check if output contained ready signals
+            if await signal.isReady { return true }
+
+            // Check if port is open (runs on calling thread, not main)
+            if let port, isPortListening(port: port) { return true }
+        }
+        return false
+    }
+
+    private nonisolated func isPortListening(port: UInt16, host: String = "127.0.0.1") -> Bool {
+        let sock = socket(AF_INET, SOCK_STREAM, 0)
+        guard sock >= 0 else { return false }
+        defer { Darwin.close(sock) }
+
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = port.bigEndian
+        addr.sin_addr.s_addr = inet_addr(host)
+
+        let flags = fcntl(sock, F_GETFL, 0)
+        fcntl(sock, F_SETFL, flags | O_NONBLOCK)
+
+        let result = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+
+        if result == 0 { return true }
+
+        var pollFd = pollfd(fd: sock, events: Int16(POLLOUT), revents: 0)
+        let pollResult = poll(&pollFd, 1, 200)
+        return pollResult > 0 && (pollFd.revents & Int16(POLLOUT)) != 0
     }
 
     // MARK: - Stream
@@ -783,6 +871,41 @@ class DaemonManager: ObservableObject {
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task {
                 await self?.updateMachineStatus("online")
+            }
+        }
+    }
+}
+
+// MARK: - Dev Server Ready Detection
+
+actor DevServerReadySignal {
+    private(set) var isReady = false
+
+    private static let readyPatterns: [String] = [
+        "ready on",
+        "ready in",
+        "started server on",
+        "listening on",
+        "localhost:",
+        "127.0.0.1:",
+        "compiled successfully",
+        "compiled client and server",
+        "webpack compiled",
+        "vite",
+        "Local:",
+        "Network:",
+        "➜",
+        "started at",
+        "running at",
+    ]
+
+    func check(_ output: String) {
+        guard !isReady else { return }
+        let lower = output.lowercased()
+        for pattern in Self.readyPatterns {
+            if lower.contains(pattern.lowercased()) {
+                isReady = true
+                return
             }
         }
     }

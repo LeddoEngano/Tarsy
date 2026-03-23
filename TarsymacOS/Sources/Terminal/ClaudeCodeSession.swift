@@ -189,18 +189,32 @@ actor ClaudeCodeSession {
 
         if name == "AskUserQuestion" {
             if let input = block["input"] as? [String: Any] {
-                let question = input["question"] as? String ?? input["text"] as? String ?? "Question from Claude"
-                var options: [String] = []
+                // The real AskUserQuestion schema: input.questions[].question, input.questions[].options[].label
+                if let questions = input["questions"] as? [[String: Any]], let firstQ = questions.first {
+                    let question = firstQ["question"] as? String ?? "Question from Claude"
+                    var options: [String] = []
 
-                if let opts = input["options"] as? [String] { options = opts }
-                else if let choices = input["choices"] as? [String] { options = choices }
-                else if let opts = input["options"] as? [[String: Any]] {
-                    options = opts.compactMap { $0["label"] as? String ?? $0["value"] as? String }
+                    if let opts = firstQ["options"] as? [[String: Any]] {
+                        options = opts.compactMap { $0["label"] as? String }
+                    } else if let opts = firstQ["options"] as? [String] {
+                        options = opts
+                    }
+
+                    print("[ClaudeCode] AskUserQuestion: \(question), options: \(options)")
+                    onOutput?("\n📋 \(question)\n")
+                    onAskUser?(question, options)
+                } else {
+                    // Fallback: try flat structure
+                    let question = input["question"] as? String ?? "Question from Claude"
+                    var options: [String] = []
+                    if let opts = input["options"] as? [String] { options = opts }
+                    else if let opts = input["options"] as? [[String: Any]] {
+                        options = opts.compactMap { $0["label"] as? String }
+                    }
+                    print("[ClaudeCode] AskUserQuestion (flat): \(question), options: \(options)")
+                    onOutput?("\n📋 \(question)\n")
+                    onAskUser?(question, options)
                 }
-
-                print("[ClaudeCode] AskUserQuestion: \(question), options: \(options)")
-                onOutput?("\n📋 \(question)\n")
-                onAskUser?(question, options)
             }
         } else {
             // Show tool activity
