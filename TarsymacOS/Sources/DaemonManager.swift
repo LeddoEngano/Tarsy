@@ -22,6 +22,7 @@ class DaemonManager: ObservableObject {
     private var mjpegServer: MJPEGStreamServer?
     private let openClaw = OpenClawService()
     private var heartbeatTimer: Timer?
+    private var devServerSessions: [String: String] = [:] // workspacePath -> terminalSessionId
 
     func start() async {
         // 0. Init orchestrator
@@ -177,6 +178,12 @@ class DaemonManager: ObservableObject {
             await handleOpenClawStatus(clientId: clientId, packet: packet)
         case .openclawMessage:
             await handleOpenClawMessage(clientId: clientId, packet: packet)
+        case .devServerStart:
+            await handleDevServerStart(clientId: clientId, packet: packet)
+        case .devServerStop:
+            await handleDevServerStop(clientId: clientId, packet: packet)
+        case .devServerStatus:
+            await handleDevServerStatus(clientId: clientId, packet: packet)
         case .streamStart:
             await handleStreamStart(clientId: clientId, packet: packet)
         case .streamStop:
@@ -465,11 +472,108 @@ class DaemonManager: ObservableObject {
         }
     }
 
+    // MARK: - Dev Server
+
+    private func handleDevServerStart(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"],
+              let command = packet.payload?["command"], !command.isEmpty else {
+            await wsServer?.send(
+                WSPacket(action: .error, payload: ["message": "Missing path or command for dev server"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        let expandedPath = (path as NSString).expandingTildeInPath
+
+        // Already running?
+        if let existingId = devServerSessions[expandedPath],
+           await terminalManager.isSessionAlive(existingId) {
+            await wsServer?.send(
+                WSPacket(action: .devServerStart, payload: ["status": "already_running", "sessionId": existingId], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        do {
+            let sessionId = try await terminalManager.createSession(workingDirectory: expandedPath)
+            devServerSessions[expandedPath] = sessionId
+            await terminalManager.sendInput(command, to: sessionId)
+            log("devServerStart: running '\(command)' in \(expandedPath)")
+
+            await wsServer?.send(
+                WSPacket(action: .devServerStart, payload: ["status": "started", "sessionId": sessionId], id: packet.id),
+                to: clientId
+            )
+
+            // If a streamUrl was provided, open the browser to it after a short delay
+            if let streamUrl = packet.payload?["streamUrl"], !streamUrl.isEmpty {
+                Task {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    await self.openBrowserToUrl(streamUrl)
+                }
+            }
+        } catch {
+            await wsServer?.send(
+                WSPacket(action: .error, payload: ["message": "Dev server failed: \(error.localizedDescription)"], id: packet.id),
+                to: clientId
+            )
+        }
+    }
+
+    private func handleDevServerStop(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else { return }
+        let expandedPath = (path as NSString).expandingTildeInPath
+
+        if let sessionId = devServerSessions[expandedPath] {
+            await terminalManager.closeSession(sessionId)
+            devServerSessions.removeValue(forKey: expandedPath)
+            log("devServerStop: stopped for \(expandedPath)")
+        }
+
+        await wsServer?.send(
+            WSPacket(action: .devServerStop, payload: ["status": "stopped"], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func handleDevServerStatus(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else { return }
+        let expandedPath = (path as NSString).expandingTildeInPath
+
+        var running = false
+        if let sessionId = devServerSessions[expandedPath] {
+            running = await terminalManager.isSessionAlive(sessionId)
+            if !running {
+                devServerSessions.removeValue(forKey: expandedPath)
+            }
+        }
+
+        await wsServer?.send(
+            WSPacket(action: .devServerStatus, payload: ["running": running ? "true" : "false"], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func openBrowserToUrl(_ urlString: String) async {
+        guard let url = URL(string: urlString) else { return }
+        log("openBrowserToUrl: opening \(urlString)")
+        NSWorkspace.shared.open(url)
+    }
+
     // MARK: - Stream
 
     private func handleStreamStart(clientId: String, packet: WSPacket) async {
         let stack = packet.payload?["stack"] ?? "web"
-        log("streamStart: looking for window with stack=\(stack)")
+        let streamUrl = packet.payload?["streamUrl"]
+        log("streamStart: looking for window with stack=\(stack), streamUrl=\(streamUrl ?? "nil")")
+
+        // If a streamUrl is provided, open the browser to that URL first
+        if let urlString = streamUrl, !urlString.isEmpty {
+            await openBrowserToUrl(urlString)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        }
 
         // Find the right window for this stack
         var window = await screenCapture.findWindow(forStack: stack)
@@ -477,7 +581,11 @@ class DaemonManager: ObservableObject {
         // If no window found, open the default app for this stack and retry
         if window == nil {
             log("streamStart: no window found, opening app for stack \(stack)")
-            await openAppForStack(stack)
+            if let urlString = streamUrl, !urlString.isEmpty {
+                await openBrowserToUrl(urlString)
+            } else {
+                await openAppForStack(stack)
+            }
             // Wait for app to launch
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             window = await screenCapture.findWindow(forStack: stack)

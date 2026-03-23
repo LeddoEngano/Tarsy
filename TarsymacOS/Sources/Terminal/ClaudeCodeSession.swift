@@ -4,14 +4,13 @@ actor ClaudeCodeSession {
     let id: String
     let workspacePath: String
     let aiContext: String?
-    private var sessionId: String?
-    private var isProcessing = false
-    private var currentProcess: Process?
+    private var process: Process?
     private var stdinPipe: Pipe?
+    private var isRunning = false
+    private var sessionId: String?
 
     private var onOutput: (@Sendable (String) -> Void)?
     private var onComplete: (@Sendable (String) -> Void)?
-    // Called when AskUserQuestion tool is invoked — sends question + options to iOS
     private var onAskUser: (@Sendable (String, [String]) -> Void)?
 
     init(id: String, workspacePath: String, aiContext: String? = nil) {
@@ -33,106 +32,44 @@ actor ClaudeCodeSession {
     }
 
     func start() throws {
-        print("[ClaudeCode] Session \(id) ready at \(workspacePath)")
-        onOutput?("Claude Code ready. Send a message to start.\n")
-    }
-
-    func sendMessage(_ message: String) {
-        guard !message.isEmpty else { return }
-        guard !isProcessing else {
-            onOutput?("⏳ Still processing...\n")
-            return
-        }
-
-        isProcessing = true
-
-        Task {
-            await runClaude(message: message)
-            isProcessing = false
-            onComplete?("done")
-        }
-    }
-
-    /// Called when user selects an option from AskUserQuestion
-    func respondToQuestion(_ answer: String) {
-        guard let pipe = stdinPipe else {
-            print("[ClaudeCode] No stdin pipe to respond to")
-            return
-        }
-
-        // Send the user's answer as a stream-json input
-        let response: [String: Any] = [
-            "type": "user_tool_result",
-            "content": answer
-        ]
-
-        if let data = try? JSONSerialization.data(withJSONObject: response),
-           var jsonStr = String(data: data, encoding: .utf8) {
-            jsonStr += "\n"
-            if let bytes = jsonStr.data(using: .utf8) {
-                pipe.fileHandleForWriting.write(bytes)
-                print("[ClaudeCode] Sent user response: \(answer)")
-            }
-        }
-    }
-
-    func terminate() {
-        currentProcess?.terminate()
-        currentProcess = nil
-        stdinPipe = nil
-        isProcessing = false
-    }
-
-    // MARK: - Private
-
-    private func runClaude(message: String) async {
         let expandedPath = (workspacePath as NSString).expandingTildeInPath
         let claudePath = findClaudeCLI()
 
-        print("[ClaudeCode] Running: \(message.prefix(80))...")
+        print("[ClaudeCode] Starting bidirectional session \(id) at \(expandedPath)")
 
         var args = [
-            "-p", message,
             "--dangerously-skip-permissions",
+            "--input-format", "stream-json",
             "--output-format", "stream-json",
             "--verbose"
         ]
 
-        if let sid = sessionId {
-            args.append(contentsOf: ["--resume", sid])
-        }
-
-        if sessionId == nil, let ctx = aiContext, !ctx.isEmpty {
+        if let ctx = aiContext, !ctx.isEmpty {
             args.append(contentsOf: ["--system-prompt", ctx])
         }
 
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: claudePath)
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: expandedPath)
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: claudePath)
+        proc.arguments = args
+        proc.currentDirectoryURL = URL(fileURLWithPath: expandedPath)
 
         var env = ProcessInfo.processInfo.environment
         env.removeValue(forKey: "CLAUDECODE")
         env.removeValue(forKey: "CLAUDE_CODE")
         env["TERM"] = "dumb"
-        process.environment = env
+        proc.environment = env
 
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-        let inputPipe = Pipe()
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-        process.standardInput = inputPipe
-
-        self.currentProcess = process
-        self.stdinPipe = inputPipe
+        let stdin = Pipe()
+        let stdout = Pipe()
+        let stderr = Pipe()
+        proc.standardInput = stdin
+        proc.standardOutput = stdout
+        proc.standardError = stderr
 
         // Process stream-json output line by line
-        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+        stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-
-            // Each line is a JSON event
             for line in text.components(separatedBy: "\n") {
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { continue }
@@ -140,33 +77,73 @@ actor ClaudeCodeSession {
             }
         }
 
-        errorPipe.fileHandleForReading.readabilityHandler = { _ in
-            // Ignore stderr (verbose logs)
+        stderr.fileHandleForReading.readabilityHandler = { _ in }
+
+        proc.terminationHandler = { [weak self] _ in
+            Task { await self?.handleExit() }
         }
 
-        do {
-            try process.run()
+        try proc.run()
 
-            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-                DispatchQueue.global().async {
-                    process.waitUntilExit()
-                    continuation.resume()
-                }
+        self.process = proc
+        self.stdinPipe = stdin
+        self.isRunning = true
+
+        print("[ClaudeCode] Session \(id) started with PID \(proc.processIdentifier)")
+        onOutput?("Claude Code ready. Send a message to start.\n")
+    }
+
+    func sendMessage(_ message: String) {
+        guard isRunning, let pipe = stdinPipe else {
+            print("[ClaudeCode] Cannot send — not running")
+            return
+        }
+
+        print("[ClaudeCode] Sending message: \(message.prefix(80))...")
+
+        // Send as stream-json user message
+        let msg: [String: Any] = [
+            "type": "user",
+            "content": message
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: msg),
+           var jsonStr = String(data: data, encoding: .utf8) {
+            jsonStr += "\n"
+            if let bytes = jsonStr.data(using: .utf8) {
+                pipe.fileHandleForWriting.write(bytes)
             }
-
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            outputPipe.fileHandleForReading.readabilityHandler = nil
-            errorPipe.fileHandleForReading.readabilityHandler = nil
-
-            self.currentProcess = nil
-            self.stdinPipe = nil
-
-            print("[ClaudeCode] Exit code: \(process.terminationStatus)")
-        } catch {
-            print("[ClaudeCode] Failed: \(error)")
-            onOutput?("Error: \(error.localizedDescription)\n")
         }
     }
+
+    func respondToQuestion(_ answer: String) {
+        guard isRunning, let pipe = stdinPipe else { return }
+
+        print("[ClaudeCode] Responding to question: \(answer)")
+
+        // Send user response for AskUserQuestion
+        let msg: [String: Any] = [
+            "type": "user",
+            "content": answer
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: msg),
+           var jsonStr = String(data: data, encoding: .utf8) {
+            jsonStr += "\n"
+            if let bytes = jsonStr.data(using: .utf8) {
+                pipe.fileHandleForWriting.write(bytes)
+            }
+        }
+    }
+
+    func terminate() {
+        process?.terminate()
+        process = nil
+        stdinPipe = nil
+        isRunning = false
+    }
+
+    // MARK: - Stream Event Handling
 
     private func handleStreamEvent(_ jsonLine: String) {
         guard let data = jsonLine.data(using: .utf8),
@@ -175,31 +152,30 @@ actor ClaudeCodeSession {
 
         switch type {
         case "assistant":
-            // Extract text content from assistant message
             if let message = json["message"] as? [String: Any],
                let content = message["content"] as? [[String: Any]] {
                 for block in content {
-                    if let blockType = block["type"] as? String {
-                        if blockType == "text", let text = block["text"] as? String {
-                            onOutput?(text)
-                        }
-                        if blockType == "tool_use" {
-                            handleToolUse(block)
-                        }
+                    guard let blockType = block["type"] as? String else { continue }
+                    if blockType == "text", let text = block["text"] as? String {
+                        onOutput?(text)
+                    }
+                    if blockType == "tool_use" {
+                        handleToolUse(block)
                     }
                 }
             }
 
         case "result":
-            // Final result — extract session_id
             if let sid = json["session_id"] as? String {
                 sessionId = sid
             }
-            // Send the final result text if we haven't already
-            if let result = json["result"] as? String {
-                // Only send if it's different from what we already streamed
-                // (the stream already sent the text via assistant events)
-                _ = result
+
+        case "system":
+            if let subtype = json["subtype"] as? String, subtype == "init" {
+                if let sid = json["session_id"] as? String {
+                    sessionId = sid
+                    print("[ClaudeCode] Session initialized: \(sid)")
+                }
             }
 
         default:
@@ -210,17 +186,14 @@ actor ClaudeCodeSession {
     private func handleToolUse(_ block: [String: Any]) {
         guard let name = block["name"] as? String else { return }
 
-        if name == "AskUserQuestion" || name == "askUserQuestion" {
+        if name == "AskUserQuestion" {
             if let input = block["input"] as? [String: Any] {
                 let question = input["question"] as? String ?? input["text"] as? String ?? "Question from Claude"
                 var options: [String] = []
 
-                // Extract options from various possible formats
-                if let opts = input["options"] as? [String] {
-                    options = opts
-                } else if let choices = input["choices"] as? [String] {
-                    options = choices
-                } else if let opts = input["options"] as? [[String: Any]] {
+                if let opts = input["options"] as? [String] { options = opts }
+                else if let choices = input["choices"] as? [String] { options = choices }
+                else if let opts = input["options"] as? [[String: Any]] {
                     options = opts.compactMap { $0["label"] as? String ?? $0["value"] as? String }
                 }
 
@@ -229,15 +202,21 @@ actor ClaudeCodeSession {
                 onAskUser?(question, options)
             }
         } else {
-            // Other tool use — show what's happening
+            // Show tool activity
             if let input = block["input"] as? [String: Any] {
-                let description = input["command"] as? String
+                let desc = input["command"] as? String
                     ?? input["file_path"] as? String
                     ?? input["query"] as? String
                     ?? name
-                onOutput?("🔧 \(name): \(description)\n")
+                onOutput?("🔧 \(name): \(desc)\n")
             }
         }
+    }
+
+    private func handleExit() {
+        isRunning = false
+        onComplete?("Session ended")
+        print("[ClaudeCode] Session \(id) exited")
     }
 
     private func findClaudeCLI() -> String {

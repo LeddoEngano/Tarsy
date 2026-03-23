@@ -22,6 +22,11 @@ actor TerminalSessionManager {
         sessions.removeValue(forKey: sessionId)
     }
 
+    func isSessionAlive(_ sessionId: String) -> Bool {
+        guard let session = sessions[sessionId] else { return false }
+        return session.process.isRunning
+    }
+
     func listSessions() -> [String] {
         Array(sessions.keys)
     }
