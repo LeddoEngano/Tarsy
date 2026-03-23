@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 @MainActor
 public class ConnectionManager: ObservableObject {
@@ -7,8 +8,7 @@ public class ConnectionManager: ObservableObject {
     @Published public var latency: TimeInterval = 0
     @Published public var errorMessage: String?
 
-    private var webSocket: URLSessionWebSocketTask?
-    private var session: URLSession?
+    private var connection: NWConnection?
     private var pingTimer: Timer?
     private var reconnectTimer: Timer?
     private var lastPingTime: Date?
@@ -37,78 +37,99 @@ public class ConnectionManager: ObservableObject {
         reconnectTimer = nil
         pingTimer?.invalidate()
         pingTimer = nil
-        webSocket?.cancel(with: .goingAway, reason: nil)
-        webSocket = nil
+        connection?.cancel()
+        connection = nil
         isConnected = false
         isReconnecting = false
     }
 
     public func send(_ packet: WSPacket) {
-        guard let data = try? packet.encode(),
-              let text = String(data: data, encoding: .utf8) else { return }
+        guard let connection,
+              let data = try? packet.encode() else { return }
 
-        webSocket?.send(.string(text)) { [weak self] error in
+        let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
+        let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])
+
+        connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { [weak self] error in
             if let error {
                 print("[WS] Send error: \(error)")
                 Task { @MainActor in
                     self?.handleDisconnect()
                 }
             }
-        }
+        })
     }
 
     // MARK: - Private
 
     private func performConnect() {
-        guard let host, let port, let token = authToken else { return }
+        guard let host, let port else { return }
 
-        let url = URL(string: "ws://\(host):\(port)")!
-        session = URLSession(configuration: .default)
-        webSocket = session?.webSocketTask(with: url)
-        webSocket?.resume()
+        // Create WebSocket connection using Network.framework (bypasses ATS)
+        let parameters = NWParameters.tcp
+        let wsOptions = NWProtocolWebSocket.Options()
+        parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
 
-        let authPacket = WSPacket(action: .auth, payload: ["token": token])
-        send(authPacket)
+        let endpoint = NWEndpoint.hostPort(
+            host: NWEndpoint.Host(host),
+            port: NWEndpoint.Port(rawValue: port)!
+        )
 
-        receiveLoop()
-        startPing()
+        let conn = NWConnection(to: endpoint, using: parameters)
+
+        conn.stateUpdateHandler = { [weak self] state in
+            Task { @MainActor in
+                switch state {
+                case .ready:
+                    print("[WS] Connected to \(host):\(port)")
+                    // Send auth
+                    if let token = self?.authToken {
+                        self?.send(WSPacket(action: .auth, payload: ["token": token]))
+                    }
+                    self?.receiveLoop()
+                    self?.startPing()
+                case .failed(let error):
+                    print("[WS] Connection failed: \(error)")
+                    self?.handleDisconnect()
+                case .waiting(let error):
+                    print("[WS] Waiting: \(error)")
+                default:
+                    break
+                }
+            }
+        }
+
+        conn.start(queue: .global(qos: .userInitiated))
+        self.connection = conn
     }
 
     private func receiveLoop() {
-        webSocket?.receive { [weak self] result in
+        connection?.receiveMessage { [weak self] content, context, isComplete, error in
             Task { @MainActor in
-                switch result {
-                case .success(let message):
-                    self?.handleMessage(message)
-                    self?.receiveLoop()
-                case .failure(let error):
+                if let error {
                     print("[WS] Receive error: \(error)")
                     self?.handleDisconnect()
+                    return
                 }
+
+                if let data = content, let packet = try? WSPacket.decode(from: data) {
+                    self?.handlePacket(packet)
+                }
+
+                // Continue receiving
+                self?.receiveLoop()
             }
         }
     }
 
-    private func handleMessage(_ message: URLSessionWebSocketTask.Message) {
-        let data: Data
-        switch message {
-        case .string(let text):
-            guard let d = text.data(using: .utf8) else { return }
-            data = d
-        case .data(let d):
-            data = d
-        @unknown default:
-            return
-        }
-
-        guard let packet = try? WSPacket.decode(from: data) else { return }
-
+    private func handlePacket(_ packet: WSPacket) {
         switch packet.action {
         case .authSuccess:
             isConnected = true
             isReconnecting = false
             reconnectAttempts = 0
             errorMessage = nil
+            print("[WS] Authenticated successfully")
         case .authFail:
             isConnected = false
             errorMessage = "authentication failed"
@@ -126,9 +147,10 @@ public class ConnectionManager: ObservableObject {
     }
 
     private func handleDisconnect() {
+        guard isConnected || reconnectAttempts == 0 else { return }
         isConnected = false
-        webSocket?.cancel(with: .abnormalClosure, reason: nil)
-        webSocket = nil
+        connection?.cancel()
+        connection = nil
         pingTimer?.invalidate()
         pingTimer = nil
 
@@ -144,7 +166,7 @@ public class ConnectionManager: ObservableObject {
 
         isReconnecting = true
         reconnectAttempts += 1
-        let delay = min(Double(reconnectAttempts) * 2, 30) // Exponential backoff, max 30s
+        let delay = min(Double(reconnectAttempts) * 2, 30)
 
         reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
