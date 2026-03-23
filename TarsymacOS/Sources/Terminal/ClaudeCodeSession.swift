@@ -3,18 +3,19 @@ import Foundation
 actor ClaudeCodeSession {
     let id: String
     let workspacePath: String
-    private var process: Process?
-    private var inputPipe: Pipe?
-    private var outputPipe: Pipe?
-    private var errorPipe: Pipe?
+    let aiContext: String?
+    private var masterFd: Int32 = -1
+    private var childPid: pid_t = 0
     private var isRunning = false
+    private var readSource: DispatchSourceRead?
 
     private var onOutput: (@Sendable (String) -> Void)?
     private var onComplete: (@Sendable (String) -> Void)?
 
-    init(id: String, workspacePath: String) {
+    init(id: String, workspacePath: String, aiContext: String? = nil) {
         self.id = id
         self.workspacePath = workspacePath
+        self.aiContext = aiContext
     }
 
     func setHandlers(
@@ -25,88 +26,117 @@ actor ClaudeCodeSession {
         self.onComplete = onComplete
     }
 
-    func start(aiContext: String? = nil) throws {
-        let process = Process()
-        let inputPipe = Pipe()
-        let outputPipe = Pipe()
-        let errorPipe = Pipe()
-
-        // Find claude CLI
+    func start() throws {
+        let expandedPath = (workspacePath as NSString).expandingTildeInPath
         let claudePath = findClaudeCLI()
 
-        let expandedPath = (workspacePath as NSString).expandingTildeInPath
-        print("[ClaudeCode] Starting session \(id) at \(expandedPath) with CLI: \(claudePath)")
+        print("[ClaudeCode] Starting interactive session \(id) at \(expandedPath)")
 
-        process.executableURL = URL(fileURLWithPath: claudePath)
-        process.arguments = ["--dangerously-skip-permissions"]
-        process.currentDirectoryURL = URL(fileURLWithPath: expandedPath)
-        process.standardInput = inputPipe
-        process.standardOutput = outputPipe
-        process.standardError = errorPipe
-
+        // Build environment
         var env = ProcessInfo.processInfo.environment
-        env["TERM"] = "dumb"
-        // Remove CLAUDECODE env var to prevent "nested session" error
         env.removeValue(forKey: "CLAUDECODE")
         env.removeValue(forKey: "CLAUDE_CODE")
-        // Inject AI context as system prompt via env if available
+        env["TERM"] = "xterm-256color"
+        env["COLUMNS"] = "120"
+        env["LINES"] = "40"
+
         if let ctx = aiContext, !ctx.isEmpty {
             env["CLAUDE_SYSTEM_PROMPT"] = ctx
         }
-        process.environment = env
 
-        outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Task { await self?.handleOutput(text) }
+        // Convert env to C format
+        let envStrings = env.map { "\($0.key)=\($0.value)" }
+        let cEnv = envStrings.map { strdup($0) } + [nil]
+        defer { cEnv.forEach { if let p = $0 { free(p) } } }
+
+        // Build args
+        let args = [claudePath, "--dangerously-skip-permissions"]
+        let cArgs = args.map { strdup($0) } + [nil]
+        defer { cArgs.forEach { if let p = $0 { free(p) } } }
+
+        // Set window size
+        var winSize = winsize(ws_row: 40, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0)
+
+        // Fork with PTY
+        var masterFd: Int32 = 0
+        let pid = forkpty(&masterFd, nil, nil, &winSize)
+
+        if pid < 0 {
+            throw ClaudeError.forkFailed
         }
 
-        errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Task { await self?.handleOutput(text) }
+        if pid == 0 {
+            // Child process
+            chdir(expandedPath)
+            execve(claudePath, cArgs, cEnv)
+            _exit(1)
         }
 
-        process.terminationHandler = { [weak self] proc in
-            Task { await self?.handleTermination(exitCode: proc.terminationStatus) }
-        }
-
-        try process.run()
-
-        self.process = process
-        self.inputPipe = inputPipe
-        self.outputPipe = outputPipe
-        self.errorPipe = errorPipe
+        // Parent process
+        self.masterFd = masterFd
+        self.childPid = pid
         self.isRunning = true
 
-        print("[ClaudeCode] Session \(id) started in \(workspacePath)")
+        // Read output from PTY
+        let source = DispatchSource.makeReadSource(fileDescriptor: masterFd, queue: .global(qos: .userInteractive))
+        source.setEventHandler { [weak self] in
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            let bytesRead = read(masterFd, &buffer, buffer.count)
+            if bytesRead > 0 {
+                if let text = String(bytes: buffer[0..<bytesRead], encoding: .utf8) {
+                    // Strip ANSI escape codes for clean output
+                    let clean = text.stripANSI()
+                    if !clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Task { await self?.handleOutput(clean) }
+                    }
+                }
+            } else if bytesRead <= 0 {
+                Task { await self?.handleExit() }
+            }
+        }
+        source.setCancelHandler {
+            close(masterFd)
+        }
+        source.resume()
+        self.readSource = source
+
+        print("[ClaudeCode] Interactive session \(id) started with PID \(pid)")
     }
 
     func sendMessage(_ message: String) {
-        guard isRunning, let pipe = inputPipe else { return }
-        guard let data = "\(message)\n".data(using: .utf8) else { return }
-        pipe.fileHandleForWriting.write(data)
+        guard isRunning, masterFd >= 0 else {
+            print("[ClaudeCode] Cannot send — session not running")
+            return
+        }
+
+        let input = message + "\n"
+        print("[ClaudeCode] Sending input to session \(id): \(message.prefix(50))...")
+
+        input.withCString { ptr in
+            write(masterFd, ptr, strlen(ptr))
+        }
     }
 
     func terminate() {
-        process?.terminate()
-        cleanup()
+        if childPid > 0 {
+            kill(childPid, SIGTERM)
+        }
+        readSource?.cancel()
+        readSource = nil
+        isRunning = false
+        print("[ClaudeCode] Session \(id) terminated")
     }
 
     private func handleOutput(_ text: String) {
         onOutput?(text)
     }
 
-    private func handleTermination(exitCode: Int32) {
+    private func handleExit() {
         isRunning = false
-        onComplete?("Session ended with exit code: \(exitCode)")
-        cleanup()
-    }
-
-    private func cleanup() {
-        outputPipe?.fileHandleForReading.readabilityHandler = nil
-        errorPipe?.fileHandleForReading.readabilityHandler = nil
-        isRunning = false
+        readSource?.cancel()
+        readSource = nil
+        onComplete?("Session ended")
+        print("[ClaudeCode] Session \(id) exited")
     }
 
     private func findClaudeCLI() -> String {
@@ -117,15 +147,29 @@ actor ClaudeCodeSession {
             "\(NSHomeDirectory())/.claude/bin/claude",
             "\(NSHomeDirectory())/.npm-global/bin/claude"
         ]
-
         for path in paths {
-            if FileManager.default.fileExists(atPath: path) {
-                print("[ClaudeCode] Found CLI at: \(path)")
-                return path
+            if FileManager.default.fileExists(atPath: path) { return path }
+        }
+        return "/opt/homebrew/bin/claude"
+    }
+
+    enum ClaudeError: LocalizedError {
+        case forkFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .forkFailed: return "Failed to create PTY for Claude Code"
             }
         }
+    }
+}
 
-        print("[ClaudeCode] WARNING: claude CLI not found in known paths")
-        return "/opt/homebrew/bin/claude"
+extension String {
+    func stripANSI() -> String {
+        // Remove ANSI escape sequences (colors, cursor movement, etc.)
+        guard let regex = try? NSRegularExpression(pattern: "\\x1b\\[[0-9;]*[a-zA-Z]|\\x1b\\][^\u{07}]*\u{07}|\\x1b\\[\\?[0-9;]*[a-zA-Z]", options: []) else {
+            return self
+        }
+        return regex.stringByReplacingMatches(in: self, range: NSRange(startIndex..., in: self), withTemplate: "")
     }
 }

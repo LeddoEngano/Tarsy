@@ -39,18 +39,18 @@ actor TerminalSessionManager {
         onOutput: @escaping @Sendable (String) -> Void,
         onComplete: @escaping @Sendable (String) -> Void
     ) throws -> String {
-        let session = ClaudeCodeSession(id: id, workspacePath: workspacePath)
+        let session = ClaudeCodeSession(id: id, workspacePath: workspacePath, aiContext: aiContext)
         claudeSessions[id] = session
 
         Task {
             await session.setHandlers(
                 onOutput: onOutput,
-                onComplete: { [weak self] msg in
+                onComplete: { [weak self] (msg: String) in
                     onComplete(msg)
                     Task { await self?.removeClaudeSession(id) }
                 }
             )
-            try await session.start(aiContext: aiContext)
+            try await session.start()
         }
 
         return id
