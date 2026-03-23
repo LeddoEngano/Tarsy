@@ -4,10 +4,8 @@ actor ClaudeCodeSession {
     let id: String
     let workspacePath: String
     let aiContext: String?
-    private var masterFd: Int32 = -1
-    private var childPid: pid_t = 0
-    private var isRunning = false
-    private var readSource: DispatchSourceRead?
+    private var conversationId: String?
+    private var isProcessing = false
 
     private var onOutput: (@Sendable (String) -> Void)?
     private var onComplete: (@Sendable (String) -> Void)?
@@ -27,116 +25,128 @@ actor ClaudeCodeSession {
     }
 
     func start() throws {
-        let expandedPath = (workspacePath as NSString).expandingTildeInPath
-        let claudePath = findClaudeCLI()
-
-        print("[ClaudeCode] Starting interactive session \(id) at \(expandedPath)")
-
-        // Build environment
-        var env = ProcessInfo.processInfo.environment
-        env.removeValue(forKey: "CLAUDECODE")
-        env.removeValue(forKey: "CLAUDE_CODE")
-        env["TERM"] = "xterm-256color"
-        env["COLUMNS"] = "120"
-        env["LINES"] = "40"
-
-        if let ctx = aiContext, !ctx.isEmpty {
-            env["CLAUDE_SYSTEM_PROMPT"] = ctx
-        }
-
-        // Convert env to C format
-        let envStrings = env.map { "\($0.key)=\($0.value)" }
-        let cEnv = envStrings.map { strdup($0) } + [nil]
-        defer { cEnv.forEach { if let p = $0 { free(p) } } }
-
-        // Build args
-        let args = [claudePath, "--dangerously-skip-permissions"]
-        let cArgs = args.map { strdup($0) } + [nil]
-        defer { cArgs.forEach { if let p = $0 { free(p) } } }
-
-        // Set window size
-        var winSize = winsize(ws_row: 40, ws_col: 120, ws_xpixel: 0, ws_ypixel: 0)
-
-        // Fork with PTY
-        var masterFd: Int32 = 0
-        let pid = forkpty(&masterFd, nil, nil, &winSize)
-
-        if pid < 0 {
-            throw ClaudeError.forkFailed
-        }
-
-        if pid == 0 {
-            // Child process
-            chdir(expandedPath)
-            execve(claudePath, cArgs, cEnv)
-            _exit(1)
-        }
-
-        // Parent process
-        self.masterFd = masterFd
-        self.childPid = pid
-        self.isRunning = true
-
-        // Read output from PTY
-        let source = DispatchSource.makeReadSource(fileDescriptor: masterFd, queue: .global(qos: .userInteractive))
-        source.setEventHandler { [weak self] in
-            var buffer = [UInt8](repeating: 0, count: 4096)
-            let bytesRead = read(masterFd, &buffer, buffer.count)
-            if bytesRead > 0 {
-                if let text = String(bytes: buffer[0..<bytesRead], encoding: .utf8) {
-                    // Strip ANSI escape codes for clean output
-                    let clean = text.stripANSI()
-                    if !clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Task { await self?.handleOutput(clean) }
-                    }
-                }
-            } else if bytesRead <= 0 {
-                Task { await self?.handleExit() }
-            }
-        }
-        source.setCancelHandler {
-            close(masterFd)
-        }
-        source.resume()
-        self.readSource = source
-
-        print("[ClaudeCode] Interactive session \(id) started with PID \(pid)")
+        // No-op for print mode — session is ready immediately
+        print("[ClaudeCode] Session \(id) ready (print mode) at \(workspacePath)")
+        onOutput?("Claude Code ready. Send a message to start.\n")
     }
 
     func sendMessage(_ message: String) {
-        guard isRunning, masterFd >= 0 else {
-            print("[ClaudeCode] Cannot send — session not running")
+        guard !message.isEmpty else { return }
+        guard !isProcessing else {
+            onOutput?("⏳ Still processing previous request...\n")
             return
         }
 
-        let input = message + "\n"
-        print("[ClaudeCode] Sending input to session \(id): \(message.prefix(50))...")
+        isProcessing = true
 
-        input.withCString { ptr in
-            write(masterFd, ptr, strlen(ptr))
+        Task {
+            let expandedPath = (workspacePath as NSString).expandingTildeInPath
+            let claudePath = findClaudeCLI()
+
+            print("[ClaudeCode] Processing message in session \(id): \(message.prefix(80))...")
+
+            // Build args: use -p (print mode) for clean output
+            var args = ["-p", message, "--dangerously-skip-permissions"]
+
+            // Resume conversation if we have a previous session
+            if let cid = conversationId {
+                args.append(contentsOf: ["--resume", cid])
+            }
+
+            // System prompt from AI context
+            if conversationId == nil, let ctx = aiContext, !ctx.isEmpty {
+                args.append(contentsOf: ["--system-prompt", ctx])
+            }
+
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: claudePath)
+            process.arguments = args
+            process.currentDirectoryURL = URL(fileURLWithPath: expandedPath)
+
+            var env = ProcessInfo.processInfo.environment
+            env.removeValue(forKey: "CLAUDECODE")
+            env.removeValue(forKey: "CLAUDE_CODE")
+            env["TERM"] = "dumb"
+            process.environment = env
+
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
+            process.standardOutput = outputPipe
+            process.standardError = errorPipe
+
+            // Stream stdout in real-time
+            outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                let data = handle.availableData
+                guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+                Task { await self?.onOutput?(text) }
+            }
+
+            // Capture stderr for conversation ID and errors
+            let stderrAccumulator = StderrAccumulator()
+            errorPipe.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+                stderrAccumulator.append(text)
+            }
+
+            do {
+                try process.run()
+
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    DispatchQueue.global().async {
+                        process.waitUntilExit()
+                        continuation.resume()
+                    }
+                }
+
+                // Flush pipes
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                outputPipe.fileHandleForReading.readabilityHandler = nil
+                errorPipe.fileHandleForReading.readabilityHandler = nil
+
+                // Try to extract conversation ID from stderr for --resume
+                let stderr = stderrAccumulator.value
+                if let cid = extractConversationId(from: stderr) {
+                    conversationId = cid
+                    print("[ClaudeCode] Got conversation ID: \(cid)")
+                }
+
+                if process.terminationStatus != 0 && !stderr.isEmpty {
+                    onOutput?("\n⚠️ \(stderr.trimmingCharacters(in: .whitespacesAndNewlines))\n")
+                }
+
+                print("[ClaudeCode] Message processed, exit code: \(process.terminationStatus)")
+
+            } catch {
+                print("[ClaudeCode] Failed: \(error)")
+                onOutput?("\n❌ Error: \(error.localizedDescription)\n")
+            }
+
+            isProcessing = false
+            onComplete?("done")
         }
     }
 
     func terminate() {
-        if childPid > 0 {
-            kill(childPid, SIGTERM)
-        }
-        readSource?.cancel()
-        readSource = nil
-        isRunning = false
         print("[ClaudeCode] Session \(id) terminated")
     }
 
-    private func handleOutput(_ text: String) {
-        onOutput?(text)
-    }
+    private func extractConversationId(from stderr: String) -> String? {
+        // Claude CLI outputs conversation/session ID to stderr
+        // Look for patterns like "conversation: abc123" or session IDs
+        let patterns = [
+            #"(?:conversation|session|resume)[:\s]+([a-zA-Z0-9_-]{8,})"#,
+            #"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"#
+        ]
 
-    private func handleExit() {
-        isRunning = false
-        readSource?.cancel()
-        readSource = nil
-        onComplete?("Session ended")
-        print("[ClaudeCode] Session \(id) exited")
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+               let match = regex.firstMatch(in: stderr, range: NSRange(stderr.startIndex..., in: stderr)),
+               let range = Range(match.range(at: 1), in: stderr) {
+                return String(stderr[range])
+            }
+        }
+        return nil
     }
 
     private func findClaudeCLI() -> String {
@@ -152,24 +162,11 @@ actor ClaudeCodeSession {
         }
         return "/opt/homebrew/bin/claude"
     }
-
-    enum ClaudeError: LocalizedError {
-        case forkFailed
-
-        var errorDescription: String? {
-            switch self {
-            case .forkFailed: return "Failed to create PTY for Claude Code"
-            }
-        }
-    }
 }
 
-extension String {
-    func stripANSI() -> String {
-        // Remove ANSI escape sequences (colors, cursor movement, etc.)
-        guard let regex = try? NSRegularExpression(pattern: "\\x1b\\[[0-9;]*[a-zA-Z]|\\x1b\\][^\u{07}]*\u{07}|\\x1b\\[\\?[0-9;]*[a-zA-Z]", options: []) else {
-            return self
-        }
-        return regex.stringByReplacingMatches(in: self, range: NSRange(startIndex..., in: self), withTemplate: "")
-    }
+private class StderrAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value = ""
+    var value: String { lock.lock(); defer { lock.unlock() }; return _value }
+    func append(_ text: String) { lock.lock(); _value += text; lock.unlock() }
 }
