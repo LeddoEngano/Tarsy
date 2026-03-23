@@ -35,3 +35,7 @@ Pods/
 # Environment
 .env
 .env.local
+
+# Credentials
+.credentials/
+supabase/.temp/
