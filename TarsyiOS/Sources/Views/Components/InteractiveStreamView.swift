@@ -20,84 +20,74 @@ struct InteractiveStreamView: View {
     @State private var lastPinchScale: CGFloat = 1.0
 
     var body: some View {
-        GeometryReader { outerGeo in
-            let safeTop = outerGeo.safeAreaInsets.top
-            let safeBottom = outerGeo.safeAreaInsets.bottom
+        ZStack {
+            // Black background fills entire screen including under notch
+            Color.black.ignoresSafeArea()
 
-            ZStack {
-                Color.black.ignoresSafeArea()
-
-                // Stream image — padded to avoid notch/home indicator
-                VStack(spacing: 0) {
-                    Spacer().frame(height: safeTop)
-
-                    GeometryReader { geo in
-                        ZStack {
-                            if let frame = viewModel.currentFrame {
-                                Image(uiImage: frame)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    .gesture(tapGesture(screenSize: geo.size))
-                                    .gesture(dragGesture(screenSize: geo.size))
-                                    .gesture(pinchGesture(screenSize: geo.size))
-                                    .gesture(longPressGesture(screenSize: geo.size))
-                            }
-
-                            if let point = tapFeedbackPoint {
-                                Circle()
-                                    .fill(TarsyTheme.accentAmber.opacity(0.4))
-                                    .frame(width: 30, height: 30)
-                                    .position(point)
-                                    .allowsHitTesting(false)
-                            }
-                        }
-                    }
-
-                    Spacer().frame(height: safeBottom)
-                }
-
-                // Controls overlay
+            // Stream + controls — respects safe area naturally
+            VStack(spacing: 0) {
+                // Controls top bar
                 if showControls {
-                    VStack {
-                        HStack {
-                            Text("\(viewModel.fps) fps")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.6))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(.black.opacity(0.5))
-                                .cornerRadius(4)
-
-                            Spacer()
-
-                            Button(action: onClose) {
-                                Image(systemName: "xmark.circle.fill")
-                                    .font(.title2)
-                                    .foregroundColor(.white.opacity(0.7))
-                            }
-                        }
-                        .padding(.horizontal)
-                        .padding(.top, safeTop + 4)
+                    HStack {
+                        Text("\(viewModel.fps) fps")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.6))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(.black.opacity(0.5))
+                            .cornerRadius(4)
 
                         Spacer()
 
-                        HStack(spacing: 12) {
-                            hintLabel(icon: "hand.tap", text: "tap = click")
-                            hintLabel(icon: "hand.draw", text: "drag = scroll")
-                            hintLabel(icon: "hand.tap.fill", text: "hold = right-click")
+                        Button(action: onClose) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(.white.opacity(0.7))
                         }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(.black.opacity(0.6))
-                        .cornerRadius(12)
-                        .padding(.bottom, safeBottom + 4)
                     }
-                    .transition(.opacity)
+                    .padding(.horizontal)
+                    .padding(.top, 4)
+                }
+
+                // Stream image — takes remaining space between safe areas
+                GeometryReader { geo in
+                    ZStack {
+                        if let frame = viewModel.currentFrame {
+                            Image(uiImage: frame)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .gesture(tapGesture(screenSize: geo.size))
+                                .gesture(dragGesture(screenSize: geo.size))
+                                .gesture(pinchGesture(screenSize: geo.size))
+                                .gesture(longPressGesture(screenSize: geo.size))
+                        }
+
+                        if let point = tapFeedbackPoint {
+                            Circle()
+                                .fill(TarsyTheme.accentAmber.opacity(0.4))
+                                .frame(width: 30, height: 30)
+                                .position(point)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                }
+
+                // Hint bar at bottom
+                if showControls {
+                    HStack(spacing: 12) {
+                        hintLabel(icon: "hand.tap", text: "tap = click")
+                        hintLabel(icon: "hand.draw", text: "drag = scroll")
+                        hintLabel(icon: "hand.tap.fill", text: "hold = right-click")
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.6))
+                    .cornerRadius(12)
+                    .padding(.bottom, 4)
                 }
             }
         }
-        .ignoresSafeArea()
         .statusBarHidden()
         .onAppear {
             autoHideControls()
