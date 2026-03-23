@@ -28,6 +28,9 @@ targets:
           - armv7
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        LSApplicationQueriesSchemes:
+          - tailscale
+        NSLocalNetworkUsageDescription: "Tarsy connects to your Mac on the local network to stream and send commands."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tarsy.ios

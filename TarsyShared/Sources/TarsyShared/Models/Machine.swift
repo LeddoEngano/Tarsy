@@ -4,7 +4,8 @@ public struct Machine: Codable, Identifiable, Sendable {
     public let id: UUID
     public let userId: UUID
     public let hostname: String
-    public let tailscaleIp: String
+    public let tailscaleIp: String?
+    public let localIp: String?
     public let status: MachineStatus
     public let lastSeenAt: Date?
     public let createdAt: Date
@@ -19,6 +20,7 @@ public struct Machine: Codable, Identifiable, Sendable {
         case userId = "user_id"
         case hostname
         case tailscaleIp = "tailscale_ip"
+        case localIp = "local_ip"
         case status
         case lastSeenAt = "last_seen_at"
         case createdAt = "created_at"

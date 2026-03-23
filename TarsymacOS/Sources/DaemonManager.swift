@@ -483,9 +483,34 @@ class DaemonManager: ObservableObject {
 
     // MARK: - Machine Registration
 
+    private func getLocalIP() -> String? {
+        var address: String?
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return nil }
+        defer { freeifaddrs(ifaddr) }
+
+        for ptr in sequence(first: firstAddr, next: { $0.pointee.ifa_next }) {
+            let interface = ptr.pointee
+            let addrFamily = interface.ifa_addr.pointee.sa_family
+            if addrFamily == UInt8(AF_INET) {
+                let name = String(cString: interface.ifa_name)
+                if name == "en0" || name == "en1" { // WiFi interfaces
+                    var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                    getnameinfo(interface.ifa_addr, socklen_t(interface.ifa_addr.pointee.sa_len),
+                               &hostname, socklen_t(hostname.count), nil, 0, NI_NUMERICHOST)
+                    address = String(cString: hostname)
+                }
+            }
+        }
+        return address
+    }
+
     private func registerMachine() async {
-        guard let ip = tailscaleIP else { return }
         let hostname = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        let localIp = getLocalIP()
+
+        // Can register with either tailscale IP or local IP
+        guard tailscaleIP != nil || localIp != nil else { return }
 
         do {
             let session = try await supabase.auth.session
@@ -498,19 +523,26 @@ class DaemonManager: ObservableObject {
                 .execute()
                 .value
 
+            var updateData: [String: String] = [
+                "hostname": hostname,
+                "status": "online",
+                "last_seen_at": ISO8601DateFormatter().string(from: Date())
+            ]
+            if let ip = tailscaleIP { updateData["tailscale_ip"] = ip }
+            if let lip = localIp { updateData["local_ip"] = lip }
+
             if let machine = existing.first {
-                // Update existing
                 machineId = machine.id
                 try await supabase
                     .from("machines")
-                    .update(["tailscale_ip": ip, "hostname": hostname, "status": "online", "last_seen_at": ISO8601DateFormatter().string(from: Date())])
+                    .update(updateData)
                     .eq("id", value: machine.id.uuidString)
                     .execute()
             } else {
-                // Create new
+                updateData["user_id"] = session.user.id.uuidString
                 let result: Machine = try await supabase
                     .from("machines")
-                    .insert(["user_id": session.user.id.uuidString, "hostname": hostname, "tailscale_ip": ip, "status": "online"])
+                    .insert(updateData)
                     .select()
                     .single()
                     .execute()
