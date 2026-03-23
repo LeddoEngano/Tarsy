@@ -4,6 +4,7 @@ import TarsyShared
 struct MenuBarView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var daemonManager: DaemonManager
+    @Environment(\.openWindow) var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -26,9 +27,10 @@ struct MenuBarView: View {
             Divider()
 
             if !authManager.isAuthenticated {
-                Text("Not signed in")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.secondary)
+                Button("Sign In...") {
+                    openWindow(id: "onboarding")
+                }
+                .font(.system(size: 12, design: .monospaced))
             } else {
                 // Active workspaces
                 if daemonManager.activeWorkspaces.isEmpty {
@@ -64,6 +66,14 @@ struct MenuBarView: View {
                             .foregroundColor(.secondary)
                     }
                     HStack {
+                        Text("ws port:")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                        Text("\(TarsyConfig.websocketPort)")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+                    HStack {
                         Text("clients:")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.secondary)
@@ -76,10 +86,17 @@ struct MenuBarView: View {
 
             Divider()
 
+            Button("Open Setup...") {
+                openWindow(id: "onboarding")
+            }
+            .font(.system(size: 12, design: .monospaced))
+
             Button("Settings...") {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
             .font(.system(size: 12, design: .monospaced))
+
+            Divider()
 
             Button("Quit Tarsy") {
                 daemonManager.stop()
