@@ -4,9 +4,11 @@ import Security
 
 struct AppSettingsView: View {
     @Environment(\.dismiss) var dismiss
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
     @State private var apiKeys: [APIKeyEntry] = []
     @State private var editingProvider: AIEngineType?
     @State private var keyInput = ""
+    @State private var showPaywall = false
 
     var body: some View {
         NavigationStack {
@@ -15,6 +17,64 @@ struct AppSettingsView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
+                        // Subscription Section
+                        sectionHeader("Subscription")
+
+                        VStack(spacing: 1) {
+                            Button(action: {
+                                if !subscriptionManager.isPro {
+                                    showPaywall = true
+                                }
+                            }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: subscriptionManager.isPro ? "crown.fill" : "crown")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(subscriptionManager.isPro ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
+                                        .frame(width: 28)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(subscriptionManager.isPro ? "Tarsy Pro" : "Free Plan")
+                                            .font(TarsyTheme.monoFontSmall)
+                                            .foregroundColor(TarsyTheme.textPrimary)
+
+                                        if subscriptionManager.isPro, let exp = subscriptionManager.expirationDate {
+                                            Text("renews \(exp.formatted(.dateTime.month().day()))")
+                                                .font(.system(size: 9, design: .monospaced))
+                                                .foregroundColor(TarsyTheme.textSecondary)
+                                        } else {
+                                            Text("1 workspace limit")
+                                                .font(.system(size: 9, design: .monospaced))
+                                                .foregroundColor(TarsyTheme.textSecondary)
+                                        }
+                                    }
+
+                                    Spacer()
+
+                                    if subscriptionManager.isPro {
+                                        Text("active")
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundColor(TarsyTheme.accentMoss)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(TarsyTheme.accentMoss.opacity(0.15))
+                                            .cornerRadius(4)
+                                    } else {
+                                        Text("upgrade")
+                                            .font(.system(size: 10, design: .monospaced))
+                                            .foregroundColor(TarsyTheme.accentAmber)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(TarsyTheme.accentAmber.opacity(0.15))
+                                            .cornerRadius(4)
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 12)
+                                .background(TarsyTheme.backgroundSecondary)
+                            }
+                        }
+                        .cornerRadius(10)
+
                         // API Keys Section
                         sectionHeader("AI Provider Keys")
 
@@ -71,6 +131,9 @@ struct AppSettingsView: View {
                 deleteKey(for: provider)
                 editingProvider = nil
             }
+        }
+        .fullScreenCover(isPresented: $showPaywall) {
+            PaywallView()
         }
     }
 

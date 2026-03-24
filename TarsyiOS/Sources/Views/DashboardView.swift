@@ -6,8 +6,10 @@ struct DashboardView: View {
     @EnvironmentObject var workspaceService: WorkspaceService
     @EnvironmentObject var machineService: MachineService
 
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
     @State private var showNewWorkspace = false
     @State private var showSettings = false
+    @State private var showPaywall = false
 
     var body: some View {
         NavigationStack {
@@ -32,7 +34,13 @@ struct DashboardView: View {
                     Spacer()
 
                     HStack(spacing: 16) {
-                        Button(action: { showNewWorkspace = true }) {
+                        Button(action: {
+                            if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
+                                showNewWorkspace = true
+                            } else {
+                                showPaywall = true
+                            }
+                        }) {
                             Image(systemName: "plus")
                                 .foregroundColor(TarsyTheme.accentAmber)
                         }
@@ -79,6 +87,9 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $showSettings) {
             AppSettingsView()
+        }
+        .fullScreenCover(isPresented: $showPaywall) {
+            PaywallView()
         }
         .task {
             await machineService.fetchMachine()

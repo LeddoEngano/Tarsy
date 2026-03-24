@@ -103,6 +103,11 @@ public enum WSAction: String, Codable, Sendable {
     case relayMachineOffline = "relay:machine_offline"
     case relayStreamFrame = "relay:stream_frame"
 
+    // Sudo
+    case sudoRequest = "sudo:request"
+    case sudoResponse = "sudo:response"
+    case sudoResult = "sudo:result"
+
     // System
     case auth
     case authSuccess = "auth:success"

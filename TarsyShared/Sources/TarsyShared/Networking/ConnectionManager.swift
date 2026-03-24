@@ -34,6 +34,8 @@ public class ConnectionManager: ObservableObject {
     public var onPacketReceived: ((WSPacket) -> Void)?
     public var onStreamFrameReceived: ((Data) -> Void)? // Binary MJPEG frames from relay
     public var onScreenshotReceived: ((Data) -> Void)? // Binary screenshot from relay (prefixed with "SCRN")
+    /// Called when a sudoRequest arrives. Set this to show a password prompt and call the completion with the password.
+    public var onSudoRequest: ((WSPacket) -> Void)?
     private var packetListeners: [String: (WSPacket) -> Void] = [:]
 
     public init() {}
@@ -352,6 +354,9 @@ public class ConnectionManager: ObservableObject {
             if let pingTime = lastPingTime {
                 latency = Date().timeIntervalSince(pingTime)
             }
+        case .sudoRequest:
+            onSudoRequest?(packet)
+            notifyListeners(packet)
         case .error:
             let msg = packet.payload?["message"] ?? ""
             if !msg.contains("Unknown action") {

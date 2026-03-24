@@ -2,6 +2,7 @@ import Foundation
 import TarsyShared
 import Supabase
 import AppKit
+import IOKit.pwr_mgt
 
 @MainActor
 class DaemonManager: ObservableObject {
@@ -25,10 +26,19 @@ class DaemonManager: ObservableObject {
     private let relayClient = RelayClient()
     private var heartbeatTimer: Timer?
     private var devServerSessions: [String: String] = [:] // workspacePath -> terminalSessionId
+    private var displaySleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
+    private var systemSleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
+    private var lastActiveClientId: String = "relay"
 
     func start() async {
         // 0. Init orchestrator
         orchestrator = WorkspaceOrchestrator(terminalManager: terminalManager)
+
+        // Wire up sudo password manager to send requests to iOS
+        SudoPasswordManager.shared.sendPacket = { [weak self] packet in
+            guard let self else { return }
+            await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
+        }
 
         // 1. Check/install Tailscale
         await setupTailscale()
@@ -45,10 +55,12 @@ class DaemonManager: ObservableObject {
         // 5. Start heartbeat
         startHeartbeat()
 
+        preventSleep()
         isRunning = true
     }
 
     func stop() {
+        allowSleep()
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
         Task {
@@ -56,6 +68,46 @@ class DaemonManager: ObservableObject {
             await updateMachineStatus("offline")
         }
         isRunning = false
+    }
+
+    // MARK: - Sleep Prevention
+
+    private func preventSleep() {
+        let reason = "Tarsy is streaming the screen to remote clients" as CFString
+
+        // Prevent display from sleeping on idle
+        let displayResult = IOPMAssertionCreateWithName(
+            kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            reason,
+            &displaySleepAssertionID
+        )
+
+        // Prevent system sleep even with lid closed (requires power adapter)
+        let systemResult = IOPMAssertionCreateWithName(
+            kIOPMAssertionTypePreventSystemSleep as CFString,
+            IOPMAssertionLevel(kIOPMAssertionLevelOn),
+            reason,
+            &systemSleepAssertionID
+        )
+
+        if displayResult == kIOReturnSuccess && systemResult == kIOReturnSuccess {
+            log("Sleep prevention enabled (display + system/lid-close)")
+        } else {
+            log("Sleep prevention partial — display: \(displayResult), system: \(systemResult)")
+        }
+    }
+
+    private func allowSleep() {
+        if displaySleepAssertionID != 0 {
+            IOPMAssertionRelease(displaySleepAssertionID)
+            displaySleepAssertionID = IOPMAssertionID(0)
+        }
+        if systemSleepAssertionID != 0 {
+            IOPMAssertionRelease(systemSleepAssertionID)
+            systemSleepAssertionID = IOPMAssertionID(0)
+        }
+        log("Sleep prevention disabled")
     }
 
     // MARK: - Tailscale
@@ -187,6 +239,7 @@ class DaemonManager: ObservableObject {
     // MARK: - Packet Handling
 
     private func handlePacket(clientId: String, packet: WSPacket) async {
+        lastActiveClientId = clientId
         switch packet.action {
         case .workspaceList:
             await handleWorkspaceList(clientId: clientId, packet: packet)
@@ -263,6 +316,11 @@ class DaemonManager: ObservableObject {
             await handleFileTree(clientId: clientId, packet: packet)
         case .fileRead:
             await handleFileRead(clientId: clientId, packet: packet)
+        // Sudo
+        case .sudoRequest:
+            await handleSudoRequest(clientId: clientId, packet: packet)
+        case .sudoResponse:
+            SudoPasswordManager.shared.handlePasswordResponse(packet: packet)
         default:
             await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Unknown action: \(packet.action.rawValue)"]),
@@ -320,13 +378,28 @@ class DaemonManager: ObservableObject {
 
     private func handleWorkspaceStart(clientId: String, packet: WSPacket) async {
         guard let path = packet.payload?["path"] else { return }
-        let devCmd = packet.payload?["devCommand"]
+        var devCmd = packet.payload?["devCommand"]
+
+        // If dev command needs sudo, ask for password before starting
+        let expandedPath = (path as NSString).expandingTildeInPath
+        if let cmd = devCmd {
+            guard let rewritten = await SudoPasswordManager.shared.rewriteCommandIfSudo(cmd, workingDirectory: expandedPath) else {
+                log("workspaceStart: sudo password cancelled")
+                await sendToClientOrRelay(
+                    WSPacket(action: .sudoResult, payload: ["status": "cancelled"], id: packet.id),
+                    to: clientId
+                )
+                return
+            }
+            devCmd = rewritten
+        }
 
         do {
             let sessionId = try await orchestrator?.coldStart(localPath: path, devServerCommand: devCmd) ?? ""
             await terminalManager.setOutputHandler(for: sessionId) { [weak self] output in
                 Task {
-                    await self?.wsServer?.send(
+                    await self?.detectSudoPromptInOutput(output, sessionId: sessionId)
+                    await self?.sendToClientOrRelay(
                         WSPacket(action: .terminalOutput, payload: ["sessionId": sessionId, "output": output]),
                         to: clientId
                     )
@@ -360,7 +433,9 @@ class DaemonManager: ObservableObject {
             let sessionId = try await terminalManager.createSession(workingDirectory: path)
             await terminalManager.setOutputHandler(for: sessionId) { [weak self] output in
                 Task {
-                    await self?.wsServer?.send(
+                    // Detect sudo password prompts in terminal output
+                    await self?.detectSudoPromptInOutput(output, sessionId: sessionId)
+                    await self?.sendToClientOrRelay(
                         WSPacket(action: .terminalOutput, payload: ["sessionId": sessionId, "output": output]),
                         to: clientId
                     )
@@ -381,7 +456,18 @@ class DaemonManager: ObservableObject {
     private func handleTerminalInput(clientId: String, packet: WSPacket) async {
         guard let sessionId = packet.payload?["sessionId"],
               let input = packet.payload?["input"] else { return }
-        await terminalManager.sendInput(input, to: sessionId)
+
+        // Intercept commands containing sudo — ask for password and rewrite with sudo -S
+        guard let rewritten = await SudoPasswordManager.shared.rewriteCommandIfSudo(input) else {
+            log("terminalInput: sudo password cancelled")
+            await sendToClientOrRelay(
+                WSPacket(action: .sudoResult, payload: ["sessionId": sessionId, "status": "cancelled"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        await terminalManager.sendInput(rewritten, to: sessionId)
     }
 
     private func handleTerminalClose(clientId: String, packet: WSPacket) async {
@@ -391,6 +477,55 @@ class DaemonManager: ObservableObject {
             WSPacket(action: .terminalClose, payload: ["sessionId": sessionId], id: packet.id),
             to: clientId
         )
+    }
+
+    // MARK: - Sudo
+
+    private func handleSudoRequest(clientId: String, packet: WSPacket) async {
+        guard let command = packet.payload?["command"] else {
+            await sendToClientOrRelay(
+                WSPacket(action: .error, payload: ["message": "Missing command for sudo"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        let reason = packet.payload?["reason"] ?? "Un comando requiere permisos de administrador:\nsudo \(command)"
+
+        do {
+            let (output, exitCode) = try await SudoPasswordManager.shared.runWithSudo(command, reason: reason)
+            await sendToClientOrRelay(
+                WSPacket(action: .sudoResult, payload: [
+                    "output": String(output.prefix(4000)),
+                    "exitCode": "\(exitCode)",
+                    "status": exitCode == 0 ? "success" : "failed"
+                ], id: packet.id),
+                to: clientId
+            )
+        } catch SudoPasswordManager.SudoError.cancelled {
+            await sendToClientOrRelay(
+                WSPacket(action: .sudoResult, payload: ["status": "cancelled"], id: packet.id),
+                to: clientId
+            )
+        } catch {
+            await sendToClientOrRelay(
+                WSPacket(action: .error, payload: ["message": "Sudo failed: \(error.localizedDescription)"], id: packet.id),
+                to: clientId
+            )
+        }
+    }
+
+    /// Detects sudo password prompts in terminal output and shows the native dialog.
+    func detectSudoPromptInOutput(_ output: String, sessionId: String) {
+        Task { @MainActor in
+            await SudoPasswordManager.shared.handleSudoPromptIfNeeded(
+                output: output,
+                sessionId: sessionId,
+                sendInput: { [weak self] password in
+                    await self?.terminalManager.sendInput(password, to: sessionId)
+                }
+            )
+        }
     }
 
     // MARK: - Claude Code
@@ -588,18 +723,34 @@ class DaemonManager: ObservableObject {
             await terminalManager.setOutputHandler(for: sessionId) { [weak self] output in
                 Task {
                     await serverReady.check(output)
+                    await self?.detectSudoPromptInOutput(output, sessionId: sessionId)
                     await MainActor.run { self?.log("devServer[\(sessionId.prefix(8))]: \(output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))") }
                 }
             }
 
+            // If command needs sudo (check package.json scripts too), ask for password before sending
+            var needsSudo = false
+            guard let rewrittenCmd = await SudoPasswordManager.shared.rewriteCommandIfSudo(command, workingDirectory: expandedPath) else {
+                log("devServerStart: sudo password cancelled")
+                await sendToClientOrRelay(
+                    WSPacket(action: .sudoResult, payload: ["status": "cancelled"], id: packet.id),
+                    to: clientId
+                )
+                return
+            }
+            needsSudo = (rewrittenCmd != command)
+
             // Source shell config first to ensure PATH has npm/node/pnpm/etc.
-            let fullCommand = "source ~/.zshrc 2>/dev/null; source ~/.zprofile 2>/dev/null; \(command)"
+            let fullCommand = "source ~/.zshrc 2>/dev/null; source ~/.zprofile 2>/dev/null; \(rewrittenCmd)"
+
             await terminalManager.sendInput(fullCommand, to: sessionId)
-            log("devServerStart: running '\(command)' in \(expandedPath)")
+            log("devServerStart: running '\(command)' in \(expandedPath)\(needsSudo ? " (with sudo)" : "")")
 
             // Wait for actual confirmation: either output-based or port-based
+            // Give more time if sudo is involved (user might need to enter password via fallback)
             let targetPort = portFromUrl(streamUrl)
-            let confirmed = await waitForDevServer(signal: serverReady, port: targetPort, timeout: 15)
+            let timeout: Int = needsSudo ? 30 : 15
+            let confirmed = await waitForDevServer(signal: serverReady, port: targetPort, timeout: timeout)
 
             if confirmed {
                 log("devServerStart: confirmed running")

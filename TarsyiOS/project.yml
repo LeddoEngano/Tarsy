@@ -23,11 +23,17 @@ targets:
         CFBundleName: Tarsy
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
+        CFBundleIconName: AppIcon
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities:
           - armv7
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         LSApplicationQueriesSchemes:
           - tailscale
         NSLocalNetworkUsageDescription: "Tarsy connects to your Mac on the local network to stream and send commands."

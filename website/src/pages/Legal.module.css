@@ -1,0 +1,50 @@
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 120px 24px 80px;
+}
+
+.page h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--accent-amber);
+  margin-bottom: 8px;
+  letter-spacing: 2px;
+}
+
+.lastUpdated {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 40px;
+}
+
+.page h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 32px;
+  margin-bottom: 12px;
+}
+
+.page p,
+.page li {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.8;
+  margin-bottom: 12px;
+}
+
+.page ul {
+  list-style: none;
+  padding-left: 16px;
+}
+
+.page ul li::before {
+  content: '>';
+  color: var(--accent-amber);
+  margin-right: 8px;
+}
+
+.page a {
+  color: var(--accent-amber);
+}

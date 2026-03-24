@@ -437,14 +437,23 @@ struct StreamPlayerView: View {
 
         connectionManager.send(WSPacket(action: .devServerStart, payload: payload))
 
+        var waitingForSudo = false
         connectionManager.addListener("devserver") { packet in
             if packet.action == .devServerStart {
                 let status = packet.payload?["status"] ?? ""
                 DispatchQueue.main.async {
                     isDevServerStarting = false
-                    isDevServerRunning = (status == "running" || status == "already_running")
+                    isDevServerRunning = (status == "running" || status == "already_running" || status == "started_unconfirmed")
                 }
                 connectionManager.removeListener("devserver")
+            } else if packet.action == .sudoResult, packet.payload?["status"] == "cancelled" {
+                DispatchQueue.main.async {
+                    isDevServerStarting = false
+                }
+                connectionManager.removeListener("devserver")
+            } else if packet.action == .sudoRequest {
+                // Sudo dialog is being shown — extend timeout
+                waitingForSudo = true
             } else if packet.action == .error {
                 DispatchQueue.main.async {
                     isDevServerStarting = false
@@ -453,9 +462,12 @@ struct StreamPlayerView: View {
             }
         }
 
-        // Timeout: if no response in 20s, stop waiting
+        // Timeout: if no response in 20s (60s if sudo involved), stop waiting
         Task {
             try? await Task.sleep(nanoseconds: 20_000_000_000)
+            if waitingForSudo {
+                try? await Task.sleep(nanoseconds: 40_000_000_000)
+            }
             if isDevServerStarting {
                 isDevServerStarting = false
                 connectionManager.removeListener("devserver")

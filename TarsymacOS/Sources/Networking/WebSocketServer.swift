@@ -128,7 +128,10 @@ actor WebSocketServer {
                 }
 
                 print("[WSServer] Received: \(packet.action.rawValue) from \(clientId)")
-                await self.onPacketReceived?(clientId, packet)
+                // Fire-and-forget: don't block the receive loop waiting for packet handling.
+                // This allows new messages (like sudoResponse) to arrive while a handler is suspended.
+                let handler = self.onPacketReceived
+                Task { await handler?(clientId, packet) }
                 await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)
             }
         }

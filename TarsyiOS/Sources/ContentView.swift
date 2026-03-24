@@ -6,6 +6,11 @@ struct ContentView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
     @EnvironmentObject var machineService: MachineService
 
+    @State private var showSudoAlert = false
+    @State private var sudoPassword = ""
+    @State private var sudoReason = ""
+    @State private var sudoRequestId = ""
+
     var body: some View {
         ZStack {
             Group {
@@ -31,6 +36,34 @@ struct ContentView: View {
             if !isLoading && authManager.isAuthenticated && !connectionManager.isConnected {
                 Task { await autoConnect() }
             }
+        }
+        .onAppear {
+            connectionManager.onSudoRequest = { packet in
+                sudoReason = packet.payload?["reason"] ?? "A command requires administrator privileges."
+                sudoRequestId = packet.id
+                showSudoAlert = true
+            }
+        }
+        .alert("Administrator Password", isPresented: $showSudoAlert) {
+            SecureField("Password", text: $sudoPassword)
+            Button("OK") {
+                connectionManager.send(WSPacket(
+                    action: .sudoResponse,
+                    payload: ["password": sudoPassword],
+                    id: sudoRequestId
+                ))
+                sudoPassword = ""
+            }
+            Button("Cancel", role: .cancel) {
+                connectionManager.send(WSPacket(
+                    action: .sudoResponse,
+                    payload: [:],
+                    id: sudoRequestId
+                ))
+                sudoPassword = ""
+            }
+        } message: {
+            Text(sudoReason)
         }
     }
 
