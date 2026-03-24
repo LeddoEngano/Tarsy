@@ -1,0 +1,13 @@
+{
+  "name": "tarsy",
+  "private": true,
+  "workspaces": [
+    "relay",
+    "website"
+  ],
+  "scripts": {
+    "dev:relay": "npm run dev --workspace=relay",
+    "dev:website": "npm run dev --workspace=website",
+    "build:website": "npm run build --workspace=website"
+  }
+}

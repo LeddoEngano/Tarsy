@@ -32,6 +32,11 @@ Pods/
 .AppleDouble
 .LSOverride
 
+# Node
+node_modules/
+package-lock.json
+.next/
+
 # Environment
 .env
 .env.local
