@@ -1,4 +1,8 @@
-import styles from './Legal.module.css'
+import styles from "../legal.module.css";
+
+export const metadata = {
+  title: "Privacy Policy - Tarsy",
+};
 
 export default function Privacy() {
   return (
@@ -6,7 +10,7 @@ export default function Privacy() {
       <h1>PRIVACY POLICY</h1>
       <p className={styles.lastUpdated}>Last updated: March 24, 2026</p>
 
-      <p>OPALLOO INOVACOES LTDA ("we", "us", or "our") operates the Tarsy mobile application and companion macOS application (the "Service"). This page informs you of our policies regarding the collection, use, and disclosure of personal information when you use our Service.</p>
+      <p>OPALLOO INOVACOES LTDA (&quot;we&quot;, &quot;us&quot;, or &quot;our&quot;) operates the Tarsy mobile application and companion macOS application (the &quot;Service&quot;). This page informs you of our policies regarding the collection, use, and disclosure of personal information when you use our Service.</p>
 
       <h2>1. Information We Collect</h2>
       <p>We collect the following types of information:</p>
@@ -51,7 +55,7 @@ export default function Privacy() {
         <li><strong>Fly.io:</strong> For relay server infrastructure</li>
       </ul>
 
-      <h2>8. Children's Privacy</h2>
+      <h2>8. Children&apos;s Privacy</h2>
       <p>Our Service is not directed to anyone under the age of 13. We do not knowingly collect personal information from children under 13.</p>
 
       <h2>9. Your Rights</h2>
@@ -64,10 +68,10 @@ export default function Privacy() {
       </ul>
 
       <h2>10. Changes to This Policy</h2>
-      <p>We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last updated" date.</p>
+      <p>We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the &quot;Last updated&quot; date.</p>
 
       <h2>11. Contact Us</h2>
       <p>If you have any questions about this Privacy Policy, please contact us at <a href="mailto:support@tarsy.app">support@tarsy.app</a>.</p>
     </div>
-  )
+  );
 }

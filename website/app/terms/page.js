@@ -1,4 +1,8 @@
-import styles from './Legal.module.css'
+import styles from "../legal.module.css";
+
+export const metadata = {
+  title: "Terms of Use - Tarsy",
+};
 
 export default function Terms() {
   return (
@@ -6,7 +10,7 @@ export default function Terms() {
       <h1>TERMS OF USE</h1>
       <p className={styles.lastUpdated}>Last updated: March 24, 2026</p>
 
-      <p>These Terms of Use ("Terms") govern your use of the Tarsy application and related services (the "Service") provided by OPALLOO INOVACOES LTDA ("we", "us", or "our"). By using the Service, you agree to these Terms.</p>
+      <p>These Terms of Use (&quot;Terms&quot;) govern your use of the Tarsy application and related services (the &quot;Service&quot;) provided by OPALLOO INOVACOES LTDA (&quot;we&quot;, &quot;us&quot;, or &quot;our&quot;). By using the Service, you agree to these Terms.</p>
 
       <h2>1. Acceptance of Terms</h2>
       <p>By downloading, installing, or using Tarsy, you agree to be bound by these Terms. If you do not agree, do not use the Service.</p>
@@ -23,7 +27,7 @@ export default function Terms() {
       </ul>
 
       <h2>4. Subscriptions & Payments</h2>
-      <p>Tarsy offers a subscription plan ("Tarsy Pro") with the following terms:</p>
+      <p>Tarsy offers a subscription plan (&quot;Tarsy Pro&quot;) with the following terms:</p>
       <ul>
         <li>Subscriptions are billed monthly through the Apple App Store</li>
         <li>Payment is charged to your Apple ID account at confirmation of purchase</li>
@@ -53,7 +57,7 @@ export default function Terms() {
       <p>The Service integrates with third-party AI providers (Claude, GPT, Gemini, Grok). Your use of these services is subject to their respective terms and conditions. We are not responsible for the availability, accuracy, or output of third-party AI services.</p>
 
       <h2>9. Disclaimer of Warranties</h2>
-      <p>The Service is provided "AS IS" and "AS AVAILABLE" without warranties of any kind, either express or implied. We do not warrant that the Service will be uninterrupted, error-free, or secure. You use the Service at your own risk.</p>
+      <p>The Service is provided &quot;AS IS&quot; and &quot;AS AVAILABLE&quot; without warranties of any kind, either express or implied. We do not warrant that the Service will be uninterrupted, error-free, or secure. You use the Service at your own risk.</p>
 
       <h2>10. Limitation of Liability</h2>
       <p>To the maximum extent permitted by law, OPALLOO INOVACOES LTDA shall not be liable for any indirect, incidental, special, consequential, or punitive damages arising from your use of the Service, including but not limited to loss of data, loss of profits, or damage to your devices or code.</p>
@@ -70,5 +74,5 @@ export default function Terms() {
       <h2>14. Contact</h2>
       <p>For questions about these Terms, contact us at <a href="mailto:support@tarsy.app">support@tarsy.app</a>.</p>
     </div>
-  )
+  );
 }

@@ -1,11 +1,15 @@
-import styles from './Contact.module.css'
+import styles from "./contact.module.css";
+
+export const metadata = {
+  title: "Contact Us - Tarsy",
+};
 
 export default function Contact() {
   return (
     <div className={styles.section}>
       <h1>CONTACT US</h1>
       <p className={styles.subtitle}>
-        Have questions, feedback, or need support? We'd love to hear from you.
+        Have questions, feedback, or need support? We&apos;d love to hear from you.
       </p>
       <div className={styles.card}>
         <div className={styles.item}>
@@ -24,5 +28,5 @@ export default function Contact() {
         </div>
       </div>
     </div>
-  )
+  );
 }
