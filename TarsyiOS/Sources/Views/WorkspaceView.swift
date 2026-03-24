@@ -3,6 +3,19 @@ import TarsyShared
 import PhotosUI
 import UniformTypeIdentifiers
 
+private extension View {
+    @ViewBuilder
+    func if_iOS26GlassEffect() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: .rect(cornerRadius: 20))
+        } else {
+            self
+                .background(TarsyTheme.backgroundSecondary)
+                .cornerRadius(20)
+        }
+    }
+}
+
 struct WorkspaceView: View {
     let workspace: Workspace
     @EnvironmentObject var connectionManager: ConnectionManager
@@ -20,9 +33,13 @@ struct WorkspaceView: View {
     @State private var agentActivity: String? = nil // Current tool use activity
     @StateObject private var chatService = ChatService()
     @State private var showGitSheet = false
+    @State private var showFileExplorer = false
     @State private var checkpointFeedback: String? = nil
     @State private var isRecording = false
     @StateObject private var voiceInput = VoiceInputManager()
+    @State private var engineModel = ""
+    @State private var contextPercent: Double = 0
+    @State private var currentBranch = ""
 
     private var currentTab: TerminalTab {
         tabs[selectedTabIndex]
@@ -47,7 +64,9 @@ struct WorkspaceView: View {
                     ))
                 }
                     .frame(maxWidth: .infinity)
-                    .frame(height: UIScreen.main.bounds.height * 0.35)
+                    .frame(height: isInputFocused ? 0 : UIScreen.main.bounds.height * 0.35)
+                    .clipped()
+                    .animation(.easeInOut(duration: 0.25), value: isInputFocused)
 
                 // Tabs bar
                 tabBar
@@ -108,6 +127,10 @@ struct WorkspaceView: View {
             GitSafetyNetView(workspace: workspace)
                 .environmentObject(connectionManager)
         }
+        .sheet(isPresented: $showFileExplorer) {
+            FileExplorerView(workspace: workspace)
+                .environmentObject(connectionManager)
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -121,25 +144,37 @@ struct WorkspaceView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: { createCheckpoint() }) {
-                    Image(systemName: "shield.checkered")
-                        .foregroundColor(TarsyTheme.accentMoss)
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button(action: { showGitSheet = true }) {
-                        Label("git safety net", systemImage: "shield.checkered")
+                HStack(spacing: 6) {
+                    Button(action: { createCheckpoint() }) {
+                        ZStack(alignment: .bottomTrailing) {
+                            Image("GitCommitIcon")
+                                .renderingMode(.original)
+                                .resizable()
+                                .frame(width: 22, height: 22)
+                            Image(systemName: "plus")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(Color(red: 0.133, green: 0.773, blue: 0.369))
+                                .offset(x: -10, y: -1)
+                        }
                     }
-                    NavigationLink(destination: AIContextEditorView(workspace: workspace).environmentObject(workspaceService)) {
-                        Label("ai context", systemImage: "brain")
+
+                    Menu {
+                        Button(action: { showGitSheet = true }) {
+                            Label("git", systemImage: "arrow.triangle.branch")
+                        }
+                        Button(action: { showFileExplorer = true }) {
+                            Label("file explorer", systemImage: "folder")
+                        }
+                        NavigationLink(destination: AIContextEditorView(workspace: workspace).environmentObject(workspaceService)) {
+                            Label("ai context", systemImage: "brain")
+                        }
+                        NavigationLink(destination: WorkspaceSettingsView(workspace: workspace).environmentObject(workspaceService)) {
+                            Label("settings", systemImage: "gearshape")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundColor(TarsyTheme.accentAmber)
                     }
-                    NavigationLink(destination: WorkspaceSettingsView(workspace: workspace).environmentObject(workspaceService)) {
-                        Label("settings", systemImage: "gearshape")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .foregroundColor(TarsyTheme.accentAmber)
                 }
             }
         }
@@ -379,48 +414,124 @@ struct WorkspaceView: View {
                 .background(TarsyTheme.backgroundPrimary)
             }
 
-            // Input row
-            HStack(spacing: 8) {
-                Button(action: { showAttachmentPicker.toggle() }) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 24))
-                        .foregroundColor(TarsyTheme.textSecondary)
-                }
+            // Input bar
+            VStack(spacing: 0) {
+                // Text field
+                TextField("", text: $messageText, prompt: Text("send a command...").foregroundColor(TarsyTheme.textSecondary.opacity(0.35)), axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 16))
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .lineLimit(1...5)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 14)
+                    .padding(.bottom, 8)
+                    .focused($isInputFocused)
+                    .onSubmit { sendMessage() }
 
-                // Mic button
-                Button(action: { toggleVoiceInput() }) {
-                    Image(systemName: isRecording ? "mic.fill" : "mic")
-                        .font(.system(size: 18))
-                        .foregroundColor(isRecording ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
-                        .symbolEffect(.pulse, isActive: isRecording)
-                }
-
+                // Action buttons row
                 HStack(spacing: 0) {
-                    TextField("", text: $messageText, prompt: Text("send a command...").foregroundColor(TarsyTheme.textSecondary.opacity(0.5)))
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textPrimary)
-                        .padding(.leading, 16)
-                        .padding(.vertical, 10)
-                        .focused($isInputFocused)
-                        .onSubmit { sendMessage() }
+                    Button(action: { showAttachmentPicker.toggle() }) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 18, weight: .medium))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .frame(width: 36, height: 36)
+                    }
+
+                    Spacer()
+
+                    if isRecording {
+                        HStack(spacing: 5) {
+                            Circle()
+                                .fill(TarsyTheme.accentTerracotta)
+                                .frame(width: 6, height: 6)
+                                .opacity(recDotVisible ? 1 : 0.15)
+                            Text(recordingTimerText)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(TarsyTheme.accentTerracotta)
+                                .monospacedDigit()
+                        }
+                        .transition(.opacity)
+                    }
+
+                    Image(systemName: isRecording ? "mic.fill" : "mic")
+                        .font(.system(size: 16))
+                        .foregroundColor(isRecording ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
+                        .frame(width: 36, height: 36)
+                        .gesture(
+                            LongPressGesture(minimumDuration: 0.15)
+                                .onEnded { _ in startVoiceInput() }
+                                .sequenced(before: DragGesture(minimumDistance: 0)
+                                    .onEnded { _ in stopVoiceInput() }
+                                )
+                        )
 
                     Button(action: { sendMessage() }) {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(canSend ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
-                            .frame(width: 30, height: 30)
-                            .background(canSend ? TarsyTheme.accentAmber : Color.clear)
-                            .cornerRadius(15)
+                            .foregroundColor(canSend ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary.opacity(0.5))
+                            .frame(width: 32, height: 32)
+                            .background(canSend ? TarsyTheme.accentAmber : TarsyTheme.backgroundSecondary)
+                            .cornerRadius(16)
                     }
                     .disabled(!canSend)
-                    .padding(.trailing, 4)
                 }
-                .background(TarsyTheme.backgroundSecondary)
-                .cornerRadius(22)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
+                .animation(.easeInOut(duration: 0.2), value: isRecording)
             }
+            .overlay(
+                RoundedRectangle(cornerRadius: 20)
+                    .stroke(isRecording ? TarsyTheme.accentAmber : Color.clear, lineWidth: 1.5)
+            )
+            .if_iOS26GlassEffect()
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+
+            // Info bar
+            HStack(spacing: 0) {
+                // Branch + pull
+                Button(action: { pullBranch() }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 9))
+                        Text(currentBranch.isEmpty ? workspace.currentBranch ?? "main" : currentBranch)
+                            .lineLimit(1)
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 7))
+                    }
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textSecondary)
+                }
+
+                Text("  |  ")
+                    .font(.system(size: 10))
+                    .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
+
+                // Engine + model
+                HStack(spacing: 3) {
+                    Image(systemName: currentTab.engineType?.iconName ?? "brain.head.profile")
+                        .font(.system(size: 9))
+                    Text(engineDisplayName)
+                        .lineLimit(1)
+                }
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(TarsyTheme.textSecondary)
+
+                if contextPercent > 0 {
+                    Text("  |  ")
+                        .font(.system(size: 10))
+                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
+
+                    // Context %
+                    Text("\(Int(contextPercent))% ctx")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(contextPercent > 80 ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 4)
         }
         .background(TarsyTheme.backgroundPrimary)
         .confirmationDialog("Attach", isPresented: $showAttachmentPicker) {
@@ -456,6 +567,12 @@ struct WorkspaceView: View {
                     data: data
                 ))
             }
+        }
+        .confirmationDialog("Voice Language", isPresented: $showLanguagePicker, titleVisibility: .visible) {
+            ForEach(VoiceInputManager.supportedLanguages, id: \.code) { lang in
+                Button(lang.name) { pickLanguageAndStart(lang.code) }
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -506,27 +623,37 @@ struct WorkspaceView: View {
     private func sendMessage() {
         guard !messageText.isEmpty || !attachments.isEmpty else { return }
 
-        // Build message with attachment references
-        var text = messageText
-        if !attachments.isEmpty {
-            let attachmentNames = attachments.map { att in
-                att.type == .image ? "[image: \(att.name)]" : "[file: \(att.name)]"
-            }.joined(separator: " ")
-            text = text.isEmpty ? attachmentNames : "\(text) \(attachmentNames)"
-        }
-
+        let text = messageText
         messageText = ""
         let sentAttachments = attachments
         attachments = []
         isInputFocused = false
 
+        // Collect base64-encoded images from attachments
+        var imageDataList: [String] = []
+        for att in sentAttachments where att.type == .image {
+            if let data = att.data {
+                imageDataList.append(data.base64EncodedString())
+            }
+        }
+
+        // Display text for chat UI
+        let displayText: String
+        if !sentAttachments.isEmpty {
+            let attachmentNames = sentAttachments.map { att in
+                att.type == .image ? "[image: \(att.name)]" : "[file: \(att.name)]"
+            }.joined(separator: " ")
+            displayText = text.isEmpty ? attachmentNames : "\(text) \(attachmentNames)"
+        } else {
+            displayText = text
+        }
+
         let msg = ChatMessage(
             workspaceId: workspace.id,
             tabId: currentTab.id,
             role: .user,
-            content: text
+            content: displayText
         )
-        // TODO: Upload sentAttachments data to Mac via WebSocket
 
         Task {
             await chatService.addMessage(msg)
@@ -534,38 +661,45 @@ struct WorkspaceView: View {
             isAgentThinking = true
             print("[Chat] sendMessage: tab=\(currentTab.type), sessionId=\(currentTab.sessionId ?? "nil"), connected=\(connectionManager.isConnected), path=\(workspace.localPath)")
 
+            // Build payload with optional images
+            let messageText = text.isEmpty && !imageDataList.isEmpty ? "Here is a screenshot of the current screen." : text
+            var imagesPayload: String? = nil
+            if !imageDataList.isEmpty {
+                // JSON array of base64 strings
+                if let jsonData = try? JSONSerialization.data(withJSONObject: imageDataList),
+                   let jsonStr = String(data: jsonData, encoding: .utf8) {
+                    imagesPayload = jsonStr
+                }
+            }
+
             if currentTab.type == .claude || currentTab.type == .engine {
                 let engineType = currentTab.engineType ?? .claude
                 if let sessionId = currentTab.sessionId {
                     print("[Chat] Sending engineMessage to session \(sessionId)")
-                    connectionManager.send(WSPacket(
-                        action: .engineMessage,
-                        payload: ["sessionId": sessionId, "message": text, "engineType": engineType.rawValue]
-                    ))
+                    var payload = ["sessionId": sessionId, "message": messageText, "engineType": engineType.rawValue]
+                    if let images = imagesPayload { payload["images"] = images }
+                    connectionManager.send(WSPacket(action: .engineMessage, payload: payload))
                 } else {
                     print("[Chat] Sending engineCreate type=\(engineType.rawValue) path=\(workspace.localPath)")
-                    connectionManager.send(WSPacket(
-                        action: .engineCreate,
-                        payload: [
-                            "path": workspace.localPath,
-                            "engineType": engineType.rawValue,
-                            "aiContext": workspace.aiContext ?? "",
-                            "message": text
-                        ]
-                    ))
+                    var payload = [
+                        "path": workspace.localPath,
+                        "engineType": engineType.rawValue,
+                        "aiContext": workspace.aiContext ?? "",
+                        "message": messageText
+                    ]
+                    if let images = imagesPayload { payload["images"] = images }
+                    connectionManager.send(WSPacket(action: .engineCreate, payload: payload))
                 }
             } else if currentTab.type == .openclaw {
-                // Send to OpenClaw via gateway
                 connectionManager.send(WSPacket(
                     action: .openclawMessage,
-                    payload: ["message": text]
+                    payload: ["message": messageText]
                 ))
             } else {
-                // Regular terminal input
                 if let sessionId = currentTab.sessionId {
                     connectionManager.send(WSPacket(
                         action: .terminalInput,
-                        payload: ["sessionId": sessionId, "input": text]
+                        payload: ["sessionId": sessionId, "input": messageText]
                     ))
                 }
             }
@@ -607,9 +741,13 @@ struct WorkspaceView: View {
         let count = tabs.filter { $0.engineType == engineType || ($0.type == .claude && engineType == .claude) }.count + 1
         let tabType: TerminalTab.TabType = engineType == .claude ? .claude : .engine
         let title = count > 1 ? "\(engineType.displayName) \(count)" : engineType.displayName
-        let tab = TerminalTab(id: "\(engineType.rawValue)-\(count)", title: title, isFixed: false, type: tabType, sessionId: nil, engineType: engineType)
+        let uniqueId = "\(engineType.rawValue)-\(UUID().uuidString.prefix(8))"
+        let tab = TerminalTab(id: uniqueId, title: title, isFixed: false, type: tabType, sessionId: nil, engineType: engineType)
         tabs.append(tab)
         selectedTabIndex = tabs.count - 1
+        Task {
+            await chatService.loadMessages(workspaceId: workspace.id, tabId: uniqueId)
+        }
     }
 
     private func closeTab(at index: Int) {
@@ -674,6 +812,35 @@ struct WorkspaceView: View {
                         chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
                     }
 
+                // Engine status (model, tokens, context %)
+                case .engineStatus:
+                    if let model = packet.payload?["model"] {
+                        engineModel = model
+                    }
+                    if let input = packet.payload?["inputTokens"].flatMap({ Int($0) }),
+                       let output = packet.payload?["outputTokens"].flatMap({ Int($0) }) {
+                        let total = input + output
+                        // Context window sizes by model family
+                        let windowSize: Int
+                        if engineModel.contains("opus") { windowSize = 1_000_000 }
+                        else if engineModel.contains("sonnet") { windowSize = 200_000 }
+                        else if engineModel.contains("haiku") { windowSize = 200_000 }
+                        else { windowSize = 200_000 }
+                        contextPercent = Double(total) / Double(windowSize) * 100
+                    }
+
+                // Git pull result
+                case .gitPullResult:
+                    if packet.payload?["success"] == "true" {
+                        Haptics.success()
+                    }
+
+                // Branch update
+                case .gitBranchesResult:
+                    if let branch = packet.payload?["current"] {
+                        currentBranch = branch
+                    }
+
                 default:
                     break
                 }
@@ -708,19 +875,77 @@ struct WorkspaceView: View {
         }
     }
 
+    private var engineDisplayName: String {
+        let engine = currentTab.engineType ?? .claude
+        if engineModel.isEmpty { return engine.displayName }
+        // Shorten model name: "claude-opus-4-6-20260301" -> "Opus 4.6"
+        let model = engineModel
+            .replacingOccurrences(of: "claude-", with: "")
+            .replacingOccurrences(of: "20\\d{6}", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "-", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+            .capitalized
+        return model.isEmpty ? engine.displayName : model
+    }
+
+    private func pullBranch() {
+        Haptics.light()
+        connectionManager.send(WSPacket(action: .gitPull, payload: ["path": workspace.localPath]))
+    }
+
     // MARK: - Voice Input
 
-    private func toggleVoiceInput() {
-        if isRecording {
-            voiceInput.stopRecording()
-            isRecording = false
+    @State private var textBeforeVoice = ""
+    @State private var showLanguagePicker = false
+    @State private var recordingSeconds = 0
+    @State private var recordingTimer: Timer?
+    @State private var recDotVisible = true
+
+    private var recordingTimerText: String {
+        let m = recordingSeconds / 60
+        let s = recordingSeconds % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
+    private func startVoiceInput() {
+        textBeforeVoice = messageText
+        voiceInput.startRecording { transcription in
+            messageText = textBeforeVoice + (textBeforeVoice.isEmpty ? "" : " ") + transcription
+        }
+        if voiceInput.needsLanguageSelection {
+            showLanguagePicker = true
         } else {
-            voiceInput.startRecording { transcription in
-                messageText += transcription
-            }
             isRecording = true
+            recordingSeconds = 0
+            recDotVisible = true
+            recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+                Task { @MainActor in
+                    recordingSeconds += 1
+                    recDotVisible.toggle()
+                }
+            }
             Haptics.light()
         }
+    }
+
+    private func stopVoiceInput() {
+        guard isRecording else { return }
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        voiceInput.stopRecording()
+        isRecording = false
+        Haptics.light()
+    }
+
+    private func pickLanguageAndStart(_ code: String) {
+        voiceInput.setLanguage(code)
+        voiceInput.needsLanguageSelection = false
+        showLanguagePicker = false
+        voiceInput.startRecording { transcription in
+            messageText = textBeforeVoice + (textBeforeVoice.isEmpty ? "" : " ") + transcription
+        }
+        isRecording = true
+        Haptics.light()
     }
 
     // MARK: - Git Safety Net

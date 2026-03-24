@@ -71,7 +71,7 @@ public enum WSAction: String, Codable, Sendable {
     case engineAskUser = "engine:ask_user"
     case engineUserResponse = "engine:user_response"
 
-    // Git Safety Net
+    // Git
     case gitCheckpoint = "git:checkpoint"
     case gitCheckpointResult = "git:checkpoint_result"
     case gitDiff = "git:diff"
@@ -80,6 +80,23 @@ public enum WSAction: String, Codable, Sendable {
     case gitRollbackResult = "git:rollback_result"
     case gitHistory = "git:history"
     case gitHistoryResult = "git:history_result"
+    case gitFileDiff = "git:file_diff"
+    case gitFileDiffResult = "git:file_diff_result"
+    case gitBranches = "git:branches"
+    case gitBranchesResult = "git:branches_result"
+    case gitCheckout = "git:checkout"
+    case gitCheckoutResult = "git:checkout_result"
+    case gitPull = "git:pull"
+    case gitPullResult = "git:pull_result"
+
+    // File Explorer
+    case fileTree = "file:tree"
+    case fileTreeResult = "file:tree_result"
+    case fileRead = "file:read"
+    case fileReadResult = "file:read_result"
+
+    // Engine Status (model, tokens, context %)
+    case engineStatus = "engine:status"
 
     // Relay
     case relayMachineOnline = "relay:machine_online"

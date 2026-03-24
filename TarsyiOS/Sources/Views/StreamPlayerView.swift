@@ -176,36 +176,22 @@ struct StreamPlayerView: View {
             TarsyTheme.backgroundSecondary
 
             if isActive, let frame = viewModel.currentFrame {
-                Image(uiImage: frame)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .onTapGesture(count: 2) {
-                        isFullscreen.toggle()
-                    }
+                VStack(spacing: 0) {
+                    Image(uiImage: frame)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .onTapGesture(count: 2) {
+                            isFullscreen.toggle()
+                        }
+                    Spacer(minLength: 0)
+                }
 
                 // Overlay controls
-                VStack {
-                    HStack {
-                        // Gear icon — dev server status
+                HStack {
+                    // Left column: gear + action buttons
+                    VStack(spacing: 8) {
                         devServerGear
 
-                        Spacer()
-
-                        // FPS badge
-                        Text("\(viewModel.fps) fps")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(TarsyTheme.textSecondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(TarsyTheme.backgroundPrimary.opacity(0.7))
-                            .cornerRadius(4)
-                    }
-                    Spacer()
-                    HStack(spacing: 16) {
-                        // Go to... (only for non-mobile stacks)
-                        if workspace.stack != .mobile {
-                            goToButton
-                        }
                         // Screenshot
                         streamButton("camera.viewfinder") {
                             saveScreenshot()
@@ -217,6 +203,29 @@ struct StreamPlayerView: View {
                         // Stop
                         streamButton("stop.fill") {
                             stopStream()
+                        }
+
+                        Spacer()
+                    }
+
+                    Spacer()
+
+                    // Right column: FPS + go to
+                    VStack {
+                        // FPS badge
+                        Text("\(viewModel.fps) fps")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(TarsyTheme.backgroundPrimary.opacity(0.7))
+                            .cornerRadius(4)
+
+                        Spacer()
+
+                        // Go to... (only for non-mobile stacks)
+                        if workspace.stack != .mobile {
+                            goToButton
                         }
                     }
                 }
@@ -262,8 +271,8 @@ struct StreamPlayerView: View {
         }
         .cornerRadius(12)
         .padding(.horizontal, 12)
-        .padding(.top, 8)
-        .padding(.bottom, 8)
+        .padding(.top, 0)
+        .padding(.bottom, 10)
         .fullScreenCover(isPresented: $isFullscreen) {
             InteractiveStreamView(
                 viewModel: viewModel,
@@ -287,7 +296,7 @@ struct StreamPlayerView: View {
                 .font(.system(size: 14))
                 .foregroundColor(gearColor)
                 .rotationEffect(.degrees(gearRotation))
-                .padding(8)
+                .frame(width: 30, height: 30)
                 .background(TarsyTheme.backgroundPrimary.opacity(0.7))
                 .cornerRadius(6)
         }
@@ -545,9 +554,9 @@ struct StreamPlayerView: View {
     private func streamButton(_ icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.caption)
+                .font(.system(size: 14))
                 .foregroundColor(.white)
-                .padding(8)
+                .frame(width: 30, height: 30)
                 .background(TarsyTheme.backgroundPrimary.opacity(0.7))
                 .cornerRadius(6)
         }

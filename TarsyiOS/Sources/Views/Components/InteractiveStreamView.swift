@@ -1,6 +1,75 @@
 import SwiftUI
 import TarsyShared
 
+// MARK: - Hidden Keyboard Capture
+
+struct HiddenKeyboardField: UIViewRepresentable {
+    var onText: (String) -> Void
+    var onBackspace: () -> Void
+    @Binding var isActive: Bool
+
+    func makeUIView(context: Context) -> HiddenTextField {
+        let tf = HiddenTextField()
+        tf.delegate = context.coordinator
+        tf.autocorrectionType = .no
+        tf.autocapitalizationType = .none
+        tf.spellCheckingType = .no
+        tf.smartQuotesType = .no
+        tf.smartDashesType = .no
+        tf.smartInsertDeleteType = .no
+        tf.keyboardType = .default
+        tf.returnKeyType = .default
+        tf.inputAssistantItem.leadingBarButtonGroups = []
+        tf.inputAssistantItem.trailingBarButtonGroups = []
+        return tf
+    }
+
+    func updateUIView(_ uiView: HiddenTextField, context: Context) {
+        if isActive && !uiView.isFirstResponder {
+            uiView.becomeFirstResponder()
+        } else if !isActive && uiView.isFirstResponder {
+            uiView.resignFirstResponder()
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onText: onText, onBackspace: onBackspace)
+    }
+
+    class Coordinator: NSObject, UITextFieldDelegate {
+        var onText: (String) -> Void
+        var onBackspace: () -> Void
+
+        init(onText: @escaping (String) -> Void, onBackspace: @escaping () -> Void) {
+            self.onText = onText
+            self.onBackspace = onBackspace
+        }
+
+        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+            if string.isEmpty {
+                onBackspace()
+            } else {
+                onText(string)
+            }
+            DispatchQueue.main.async {
+                textField.text = " "
+            }
+            return false
+        }
+
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            onText("\n")
+            return false
+        }
+    }
+}
+
+class HiddenTextField: UITextField {
+    override var canBecomeFirstResponder: Bool { true }
+    override func caretRect(for position: UITextPosition) -> CGRect { .zero }
+    override func selectionRects(for range: UITextRange) -> [UITextSelectionRect] { [] }
+}
+
 struct InteractiveStreamView: View {
     @ObservedObject var viewModel: MJPEGStreamViewModel
     var connectionManager: ConnectionManager
@@ -22,16 +91,39 @@ struct InteractiveStreamView: View {
     @State private var isPinchActive = false
     @State private var lastPinchScale: CGFloat = 1.0
 
+    // Keyboard state
+    @State private var isKeyboardActive = false
+
+    // Measured image content size (from SwiftUI layout)
+    @State private var imageContentSize: CGSize = .zero
+
     var body: some View {
         ZStack {
             // Black background fills entire screen including under notch
             Color.black.ignoresSafeArea()
 
+            // Hidden text field for keyboard capture
+            HiddenKeyboardField(
+                onText: { text in
+                    connectionManager.send(WSPacket(
+                        action: .remoteKeyboard,
+                        payload: ["text": text]
+                    ))
+                },
+                onBackspace: {
+                    connectionManager.send(WSPacket(
+                        action: .remoteKeyboard,
+                        payload: ["text": "\u{8}"]
+                    ))
+                },
+                isActive: $isKeyboardActive
+            )
+            .frame(width: 0, height: 0)
+
             // Stream + controls — respects safe area naturally
             VStack(spacing: 0) {
                 // Top bar — always visible
                 HStack(spacing: 0) {
-                    // FPS — fixed width so it doesn't push buttons
                     Text("\(viewModel.fps) fps")
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(.white.opacity(0.5))
@@ -39,16 +131,13 @@ struct InteractiveStreamView: View {
 
                     Spacer()
 
-                    // Simulator device buttons — centered
                     HStack(spacing: 20) {
                         deviceButton(icon: "house.fill", action: "home")
                         screenshotButton
-                        deviceButton(icon: "rotate.right", action: "rotate_right")
                     }
 
                     Spacer()
 
-                    // Close button — fixed width to match FPS
                     Button(action: onClose) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 22))
@@ -66,11 +155,18 @@ struct InteractiveStreamView: View {
                             Image(uiImage: frame)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
+                                .background(
+                                    GeometryReader { imageGeo in
+                                        Color.clear
+                                            .onAppear { imageContentSize = imageGeo.size }
+                                            .onChange(of: imageGeo.size) { _, s in imageContentSize = s }
+                                    }
+                                )
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .gesture(tapGesture(screenSize: geo.size))
-                                .gesture(dragGesture(screenSize: geo.size))
-                                .gesture(pinchGesture(screenSize: geo.size))
-                                .gesture(longPressGesture(screenSize: geo.size))
+                                .gesture(tapGesture(containerSize: geo.size))
+                                .gesture(dragGesture(containerSize: geo.size))
+                                .gesture(pinchGesture(containerSize: geo.size))
+                                .gesture(longPressGesture(containerSize: geo.size))
                         }
 
                         if let point = tapFeedbackPoint {
@@ -88,10 +184,23 @@ struct InteractiveStreamView: View {
                     hintLabel(icon: "hand.tap", text: "tap")
                     hintLabel(icon: "hand.draw", text: "scroll")
                     hintLabel(icon: "hand.tap.fill", text: "hold")
+
+                    Spacer()
+
+                    Button {
+                        isKeyboardActive.toggle()
+                        Haptics.light()
+                    } label: {
+                        Image(systemName: isKeyboardActive ? "keyboard.fill" : "keyboard")
+                            .font(.system(size: 16))
+                            .foregroundColor(isKeyboardActive ? TarsyTheme.accentAmber : .white.opacity(0.7))
+                            .frame(width: 36, height: 28)
+                            .background(isKeyboardActive ? TarsyTheme.accentAmber.opacity(0.2) : .white.opacity(0.1))
+                            .cornerRadius(6)
+                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
-                .padding(.bottom, 0)
             }
         }
         .overlay(alignment: .top) {
@@ -132,10 +241,10 @@ struct InteractiveStreamView: View {
 
     // MARK: - Tap
 
-    private func tapGesture(screenSize: CGSize) -> some Gesture {
+    private func tapGesture(containerSize: CGSize) -> some Gesture {
         SpatialTapGesture()
             .onEnded { value in
-                guard let rel = relativePosition(from: value.location, screenSize: screenSize) else { return }
+                guard let rel = relativePosition(from: value.location, containerSize: containerSize) else { return }
                 showTapFeedback(at: value.location)
                 Haptics.light()
                 connectionManager.send(WSPacket(
@@ -147,12 +256,12 @@ struct InteractiveStreamView: View {
 
     // MARK: - Long Press
 
-    private func longPressGesture(screenSize: CGSize) -> some Gesture {
+    private func longPressGesture(containerSize: CGSize) -> some Gesture {
         LongPressGesture(minimumDuration: 0.5)
             .sequenced(before: SpatialTapGesture())
             .onEnded { value in
                 if case .second(true, let tap) = value, let tap {
-                    guard let rel = relativePosition(from: tap.location, screenSize: screenSize) else { return }
+                    guard let rel = relativePosition(from: tap.location, containerSize: containerSize) else { return }
                     Haptics.medium()
                     connectionManager.send(WSPacket(
                         action: .remoteLongPress,
@@ -164,13 +273,12 @@ struct InteractiveStreamView: View {
 
     // MARK: - Drag (Swipe/Scroll) — Stateful
 
-    private func dragGesture(screenSize: CGSize) -> some Gesture {
+    private func dragGesture(containerSize: CGSize) -> some Gesture {
         DragGesture(minimumDistance: 8)
             .onChanged { value in
-                guard let rel = relativePosition(from: value.startLocation, screenSize: screenSize) else { return }
+                guard let rel = relativePosition(from: value.startLocation, containerSize: containerSize) else { return }
 
                 if !isDragActive {
-                    // First drag event — send start
                     isDragActive = true
                     lastDragTranslation = .zero
                     connectionManager.send(WSPacket(
@@ -179,12 +287,10 @@ struct InteractiveStreamView: View {
                     ))
                 }
 
-                // Throttle to 30Hz
                 let now = CFAbsoluteTimeGetCurrent()
                 guard now - lastScrollSendTime > 0.033 else { return }
                 lastScrollSendTime = now
 
-                // Incremental delta (not cumulative)
                 let dx = value.translation.width - lastDragTranslation.width
                 let dy = value.translation.height - lastDragTranslation.height
                 lastDragTranslation = value.translation
@@ -210,11 +316,11 @@ struct InteractiveStreamView: View {
 
     // MARK: - Pinch — Stateful
 
-    private func pinchGesture(screenSize: CGSize) -> some Gesture {
+    private func pinchGesture(containerSize: CGSize) -> some Gesture {
         MagnifyGesture()
             .onChanged { value in
-                let center = CGPoint(x: screenSize.width / 2, y: screenSize.height / 2)
-                guard let rel = relativePosition(from: center, screenSize: screenSize) else { return }
+                let center = CGPoint(x: containerSize.width / 2, y: containerSize.height / 2)
+                guard let rel = relativePosition(from: center, containerSize: containerSize) else { return }
 
                 if !isPinchActive {
                     isPinchActive = true
@@ -243,28 +349,16 @@ struct InteractiveStreamView: View {
 
     // MARK: - Position Mapping
 
-    private func relativePosition(from point: CGPoint, screenSize: CGSize) -> CGPoint? {
-        guard let frame = viewModel.currentFrame else { return nil }
-        let imageAspect = frame.size.width / frame.size.height
-        let screenAspect = screenSize.width / screenSize.height
+    private func relativePosition(from point: CGPoint, containerSize: CGSize) -> CGPoint? {
+        guard imageContentSize.width > 0, imageContentSize.height > 0 else { return nil }
 
-        let displaySize: CGSize
-        let origin: CGPoint
+        let origin = CGPoint(
+            x: (containerSize.width - imageContentSize.width) / 2,
+            y: (containerSize.height - imageContentSize.height) / 2
+        )
 
-        if imageAspect > screenAspect {
-            let w = screenSize.width
-            let h = w / imageAspect
-            displaySize = CGSize(width: w, height: h)
-            origin = CGPoint(x: 0, y: (screenSize.height - h) / 2)
-        } else {
-            let h = screenSize.height
-            let w = h * imageAspect
-            displaySize = CGSize(width: w, height: h)
-            origin = CGPoint(x: (screenSize.width - w) / 2, y: 0)
-        }
-
-        let relX = (point.x - origin.x) / displaySize.width
-        let relY = (point.y - origin.y) / displaySize.height
+        let relX = (point.x - origin.x) / imageContentSize.width
+        let relY = (point.y - origin.y) / imageContentSize.height
         guard relX >= 0, relX <= 1, relY >= 0, relY <= 1 else { return nil }
         return CGPoint(x: relX, y: relY)
     }

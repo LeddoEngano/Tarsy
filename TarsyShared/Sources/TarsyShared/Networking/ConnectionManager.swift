@@ -33,6 +33,7 @@ public class ConnectionManager: ObservableObject {
 
     public var onPacketReceived: ((WSPacket) -> Void)?
     public var onStreamFrameReceived: ((Data) -> Void)? // Binary MJPEG frames from relay
+    public var onScreenshotReceived: ((Data) -> Void)? // Binary screenshot from relay (prefixed with "SCRN")
     private var packetListeners: [String: (WSPacket) -> Void] = [:]
 
     public init() {}
@@ -308,8 +309,14 @@ public class ConnectionManager: ObservableObject {
                             self?.handlePacket(packet)
                         }
                     case .data(let data):
-                        // Binary data = MJPEG frame from Mac via relay
-                        self?.onStreamFrameReceived?(data)
+                        // Check for "SCRN" prefix = screenshot, otherwise = stream frame
+                        let prefix = data.prefix(4)
+                        if prefix.count == 4 && String(data: prefix, encoding: .utf8) == "SCRN" {
+                            let jpegData = data.dropFirst(4)
+                            self?.onScreenshotReceived?(Data(jpegData))
+                        } else {
+                            self?.onStreamFrameReceived?(data)
+                        }
                     @unknown default:
                         break
                     }

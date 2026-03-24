@@ -30,6 +30,14 @@ struct AppSettingsView: View {
                             .foregroundColor(TarsyTheme.textSecondary)
                             .padding(.horizontal, 4)
 
+                        // Voice Language
+                        sectionHeader("Voice Input")
+
+                        VStack(spacing: 1) {
+                            voiceLanguageRow
+                        }
+                        .cornerRadius(10)
+
                         // About Section
                         sectionHeader("About")
 
@@ -131,6 +139,49 @@ struct AppSettingsView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(TarsyTheme.backgroundSecondary)
+    }
+
+    @State private var showVoiceLanguagePicker = false
+
+    private var currentVoiceLanguageName: String {
+        let code = UserDefaults.standard.string(forKey: VoiceInputManager.languageKey) ?? ""
+        return VoiceInputManager.supportedLanguages.first(where: { $0.code == code })?.name ?? "Not set"
+    }
+
+    private var voiceLanguageRow: some View {
+        Button(action: { showVoiceLanguagePicker = true }) {
+            HStack(spacing: 12) {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 16))
+                    .foregroundColor(TarsyTheme.accentAmber)
+                    .frame(width: 28)
+
+                Text("Language")
+                    .font(TarsyTheme.monoFontSmall)
+                    .foregroundColor(TarsyTheme.textPrimary)
+
+                Spacer()
+
+                Text(currentVoiceLanguageName)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textSecondary)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10))
+                    .foregroundColor(TarsyTheme.textSecondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(TarsyTheme.backgroundSecondary)
+        }
+        .confirmationDialog("Voice Language", isPresented: $showVoiceLanguagePicker, titleVisibility: .visible) {
+            ForEach(VoiceInputManager.supportedLanguages, id: \.code) { lang in
+                Button(lang.name) {
+                    UserDefaults.standard.set(lang.code, forKey: VoiceInputManager.languageKey)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     // MARK: - Keychain

@@ -14,6 +14,7 @@ actor ClaudeCodeSession: AIEngine {
     private var onOutput: (@Sendable (String) -> Void)?
     private var onComplete: (@Sendable (String) -> Void)?
     private var onAskUser: (@Sendable (String, [String]) -> Void)?
+    private var onStatusUpdate: (@Sendable (String, Int, Int) -> Void)? // model, inputTokens, outputTokens
 
     init(id: String, workspacePath: String, aiContext: String? = nil) {
         self.id = id
@@ -31,6 +32,10 @@ actor ClaudeCodeSession: AIEngine {
 
     func setAskUserHandler(_ handler: @escaping @Sendable (String, [String]) -> Void) {
         self.onAskUser = handler
+    }
+
+    func setStatusHandler(_ handler: @escaping @Sendable (String, Int, Int) -> Void) {
+        self.onStatusUpdate = handler
     }
 
     func start() throws {
@@ -97,17 +102,47 @@ actor ClaudeCodeSession: AIEngine {
     }
 
     func sendMessage(_ message: String) {
+        sendMessage(message, imagesJson: nil)
+    }
+
+    func sendMessage(_ message: String, imagesJson: String?) {
         guard let pipe = stdinPipe else {
             print("[ClaudeCode] Cannot send — no stdin pipe")
             return
         }
 
-        print("[ClaudeCode] Sending message (isRunning=\(isRunning)): \(message.prefix(80))...")
+        print("[ClaudeCode] Sending message (isRunning=\(isRunning), hasImages=\(imagesJson != nil)): \(message.prefix(80))...")
 
-        // Send as stream-json user message
+        // Build content: if images are provided, use multimodal content blocks
+        let content: Any
+        if let imagesJson = imagesJson,
+           let imagesData = imagesJson.data(using: .utf8),
+           let base64Strings = try? JSONSerialization.jsonObject(with: imagesData) as? [String],
+           !base64Strings.isEmpty {
+            var blocks: [[String: Any]] = []
+            // Add image blocks first
+            for b64 in base64Strings {
+                blocks.append([
+                    "type": "image",
+                    "source": [
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": b64
+                    ]
+                ])
+            }
+            // Add text block
+            if !message.isEmpty {
+                blocks.append(["type": "text", "text": message])
+            }
+            content = blocks
+        } else {
+            content = message
+        }
+
         let msg: [String: Any] = [
             "type": "user",
-            "message": ["role": "user", "content": message]
+            "message": ["role": "user", "content": content]
         ]
 
         if let data = try? JSONSerialization.data(withJSONObject: msg),
@@ -155,15 +190,24 @@ actor ClaudeCodeSession: AIEngine {
 
         switch type {
         case "assistant":
-            if let message = json["message"] as? [String: Any],
-               let content = message["content"] as? [[String: Any]] {
-                for block in content {
-                    guard let blockType = block["type"] as? String else { continue }
-                    if blockType == "text", let text = block["text"] as? String {
-                        onOutput?(text)
-                    }
-                    if blockType == "tool_use" {
-                        handleToolUse(block)
+            if let message = json["message"] as? [String: Any] {
+                // Extract model info
+                if let model = message["model"] as? String {
+                    let usage = message["usage"] as? [String: Any]
+                    let inputTokens = usage?["input_tokens"] as? Int ?? 0
+                    let outputTokens = usage?["output_tokens"] as? Int ?? 0
+                    onStatusUpdate?(model, inputTokens, outputTokens)
+                }
+
+                if let content = message["content"] as? [[String: Any]] {
+                    for block in content {
+                        guard let blockType = block["type"] as? String else { continue }
+                        if blockType == "text", let text = block["text"] as? String {
+                            onOutput?(text)
+                        }
+                        if blockType == "tool_use" {
+                            handleToolUse(block)
+                        }
                     }
                 }
             }
@@ -171,6 +215,15 @@ actor ClaudeCodeSession: AIEngine {
         case "result":
             if let sid = json["session_id"] as? String {
                 sessionId = sid
+            }
+            // Also check for usage in result events
+            if let usage = json["usage"] as? [String: Any] {
+                let model = json["model"] as? String ?? ""
+                let inputTokens = usage["input_tokens"] as? Int ?? 0
+                let outputTokens = usage["output_tokens"] as? Int ?? 0
+                if !model.isEmpty {
+                    onStatusUpdate?(model, inputTokens, outputTokens)
+                }
             }
 
         case "system":

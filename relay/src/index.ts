@@ -159,6 +159,7 @@ const server = Bun.serve({
       removeConnection(ws);
     },
 
+    maxPayloadLength: 4 * 1024 * 1024, // 4MB max message size
     perMessageDeflate: false, // Keep off for binary MJPEG frames
   },
 });

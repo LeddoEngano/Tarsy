@@ -62,8 +62,12 @@ actor TerminalSessionManager {
         return id
     }
 
-    func sendClaudeMessage(_ message: String, to sessionId: String) async {
-        await claudeSessions[sessionId]?.sendMessage(message)
+    func setClaudeStatusHandler(sessionId: String, handler: @escaping @Sendable (String, Int, Int) -> Void) async {
+        await claudeSessions[sessionId]?.setStatusHandler(handler)
+    }
+
+    func sendClaudeMessage(_ message: String, images imagesJson: String? = nil, to sessionId: String) async {
+        await claudeSessions[sessionId]?.sendMessage(message, imagesJson: imagesJson)
     }
 
     func respondToClaudeQuestion(_ answer: String, sessionId: String) async {

@@ -250,6 +250,19 @@ class DaemonManager: ObservableObject {
             await handleGitRollback(clientId: clientId, packet: packet)
         case .gitHistory:
             await handleGitHistory(clientId: clientId, packet: packet)
+        case .gitFileDiff:
+            await handleGitFileDiff(clientId: clientId, packet: packet)
+        case .gitBranches:
+            await handleGitBranches(clientId: clientId, packet: packet)
+        case .gitCheckout:
+            await handleGitCheckout(clientId: clientId, packet: packet)
+        case .gitPull:
+            await handleGitPull(clientId: clientId, packet: packet)
+        // File Explorer
+        case .fileTree:
+            await handleFileTree(clientId: clientId, packet: packet)
+        case .fileRead:
+            await handleFileRead(clientId: clientId, packet: packet)
         default:
             await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Unknown action: \(packet.action.rawValue)"]),
@@ -466,7 +479,8 @@ class DaemonManager: ObservableObject {
     private func handleClaudeMessage(clientId: String, packet: WSPacket) async {
         guard let sessionId = packet.payload?["sessionId"],
               let message = packet.payload?["message"] else { return }
-        await terminalManager.sendClaudeMessage(message, to: sessionId)
+        let imagesJson = packet.payload?["images"]
+        await terminalManager.sendClaudeMessage(message, images: imagesJson, to: sessionId)
     }
 
     private func handleClaudeClose(clientId: String, packet: WSPacket) async {
@@ -1164,13 +1178,29 @@ class DaemonManager: ObservableObject {
                     }
                 )
 
+                // Set status handler for model/usage info
+                await terminalManager.setClaudeStatusHandler(sessionId: sid) { [weak self] model, inputTokens, outputTokens in
+                    Task {
+                        await self?.sendToClientOrRelay(
+                            WSPacket(action: .engineStatus, payload: [
+                                "sessionId": sid,
+                                "model": model,
+                                "inputTokens": "\(inputTokens)",
+                                "outputTokens": "\(outputTokens)"
+                            ]),
+                            to: clientId
+                        )
+                    }
+                }
+
                 await sendToClientOrRelay(
                     WSPacket(action: .engineCreate, payload: ["sessionId": sid, "engineType": "claude"], id: packet.id),
                     to: clientId
                 )
 
                 if let msg = initialMessage, !msg.isEmpty {
-                    await terminalManager.sendClaudeMessage(msg, to: sid)
+                    let imagesJson = packet.payload?["images"]
+                    await terminalManager.sendClaudeMessage(msg, images: imagesJson, to: sid)
                 }
             } catch {
                 log("engineCreate error: \(error)")
@@ -1221,9 +1251,10 @@ class DaemonManager: ObservableObject {
         guard let sessionId = packet.payload?["sessionId"],
               let message = packet.payload?["message"] else { return }
         let engineType = packet.payload?["engineType"] ?? ""
+        let imagesJson = packet.payload?["images"]
 
         if engineType == "claude" {
-            await terminalManager.sendClaudeMessage(message, to: sessionId)
+            await terminalManager.sendClaudeMessage(message, images: imagesJson, to: sessionId)
         } else {
             await terminalManager.sendEngineMessage(message, to: sessionId)
         }
@@ -1346,23 +1377,27 @@ class DaemonManager: ObservableObject {
     }
 
     private func runGitCommand(_ args: [String], at path: String) async -> (success: Bool, output: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: path)
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+                process.arguments = args
+                process.currentDirectoryURL = URL(fileURLWithPath: path)
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+                let pipe = Pipe()
+                process.standardOutput = pipe
+                process.standardError = pipe
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return (process.terminationStatus == 0, output)
-        } catch {
-            return (false, error.localizedDescription)
+                do {
+                    try process.run()
+                    process.waitUntilExit()
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    continuation.resume(returning: (process.terminationStatus == 0, output))
+                } catch {
+                    continuation.resume(returning: (false, error.localizedDescription))
+                }
+            }
         }
     }
 
@@ -1371,6 +1406,266 @@ class DaemonManager: ObservableObject {
         payload["success"] = success ? "true" : "false"
         if let err = error { payload["error"] = err }
         await sendToClientOrRelay(WSPacket(action: action, payload: payload, id: packetId), to: clientId)
+    }
+
+    private func handleGitFileDiff(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"],
+              let file = packet.payload?["file"] else { return }
+        let expandedPath = (path as NSString).expandingTildeInPath
+
+        // Try unstaged diff first
+        let result = await runGitCommand(["diff", "-U3", "--", file], at: expandedPath)
+        if !result.output.isEmpty {
+            await sendToClientOrRelay(
+                WSPacket(action: .gitFileDiffResult, payload: [
+                    "file": file, "diff": String(result.output.prefix(100000)), "success": "true"
+                ], id: packet.id), to: clientId)
+            return
+        }
+
+        // Try staged diff
+        let staged = await runGitCommand(["diff", "--cached", "-U3", "--", file], at: expandedPath)
+        if !staged.output.isEmpty {
+            await sendToClientOrRelay(
+                WSPacket(action: .gitFileDiffResult, payload: [
+                    "file": file, "diff": String(staged.output.prefix(100000)), "success": "true"
+                ], id: packet.id), to: clientId)
+            return
+        }
+
+        // Untracked or new file — show entire content as added
+        let fullPath = "\(expandedPath)/\(file)"
+        if let content = try? String(contentsOfFile: fullPath, encoding: .utf8) {
+            let lines = content.components(separatedBy: "\n")
+            let fakeDiff = lines.map { "+\($0)" }.joined(separator: "\n")
+            await sendToClientOrRelay(
+                WSPacket(action: .gitFileDiffResult, payload: [
+                    "file": file,
+                    "diff": "@@ -0,0 +1,\(lines.count) @@\n\(String(fakeDiff.prefix(100000)))",
+                    "success": "true"
+                ], id: packet.id), to: clientId)
+        } else {
+            // Binary or unreadable
+            await sendToClientOrRelay(
+                WSPacket(action: .gitFileDiffResult, payload: [
+                    "file": file, "diff": "@@ Binary file @@", "success": "true"
+                ], id: packet.id), to: clientId)
+        }
+    }
+
+    private func handleGitBranches(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else { return }
+        let expandedPath = (path as NSString).expandingTildeInPath
+
+        let current = await runGitCommand(["rev-parse", "--abbrev-ref", "HEAD"], at: expandedPath)
+        let local = await runGitCommand(["branch", "--format=%(refname:short)"], at: expandedPath)
+        let remote = await runGitCommand(["branch", "-r", "--format=%(refname:short)"], at: expandedPath)
+
+        let localBranches = local.output.components(separatedBy: "\n").filter { !$0.isEmpty }
+        let remoteBranches = remote.output.components(separatedBy: "\n")
+            .filter { !$0.isEmpty && !$0.contains("HEAD") }
+            .map { $0.replacingOccurrences(of: "origin/", with: "") }
+
+        // Deduplicate
+        var allBranches = localBranches
+        for rb in remoteBranches {
+            if !allBranches.contains(rb) { allBranches.append(rb) }
+        }
+
+        let json = (try? JSONSerialization.data(withJSONObject: allBranches))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
+        await sendToClientOrRelay(
+            WSPacket(action: .gitBranchesResult, payload: [
+                "current": current.output,
+                "branches": json,
+                "success": "true"
+            ], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func handleGitCheckout(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"],
+              let branch = packet.payload?["branch"] else { return }
+        let expandedPath = (path as NSString).expandingTildeInPath
+
+        let result = await runGitCommand(["checkout", branch], at: expandedPath)
+
+        await sendGitResult(action: .gitCheckoutResult, clientId: clientId, packetId: packet.id,
+                           success: result.success,
+                           data: ["branch": branch],
+                           error: result.success ? nil : result.output)
+    }
+
+    private func handleGitPull(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else { return }
+        let expandedPath = (path as NSString).expandingTildeInPath
+
+        let result = await runGitCommand(["pull"], at: expandedPath)
+
+        await sendGitResult(action: .gitPullResult, clientId: clientId, packetId: packet.id,
+                           success: result.success,
+                           data: ["output": result.output],
+                           error: result.success ? nil : result.output)
+    }
+
+    // MARK: - File Explorer
+
+    private func handleFileTree(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else {
+            log("fileTree: missing path")
+            return
+        }
+        let expandedPath = (path as NSString).expandingTildeInPath
+        log("fileTree: scanning \(expandedPath)")
+
+        // Scan using FileManager (no external process, no sandbox issues)
+        let allFiles: [String] = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let fm = FileManager.default
+                let ignoredDirs: Set<String> = [".git", "node_modules", ".next", "build", ".build",
+                                                 ".expo", "__pycache__", ".swiftpm", "DerivedData",
+                                                 ".cache", "dist", "Pods", ".gradle", "venv", ".venv"]
+                var files: [String] = []
+                let baseURL = URL(fileURLWithPath: expandedPath)
+
+                guard let enumerator = fm.enumerator(
+                    at: baseURL,
+                    includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+                    options: []
+                ) else {
+                    continuation.resume(returning: [])
+                    return
+                }
+
+                for case let url as URL in enumerator {
+                    let name = url.lastPathComponent
+                    if ignoredDirs.contains(name) {
+                        enumerator.skipDescendants()
+                        continue
+                    }
+                    let isDir = (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                    if !isDir {
+                        let relativePath = url.path.replacingOccurrences(of: expandedPath + "/", with: "")
+                        files.append(relativePath)
+                    }
+                }
+                continuation.resume(returning: files.sorted())
+            }
+        }
+
+        log("fileTree: found \(allFiles.count) files")
+
+        // Build tree structure
+        var tree: [[String: Any]] = []
+        var dirs = Set<String>()
+
+        for file in allFiles {
+            let components = file.components(separatedBy: "/")
+            // Add directory entries
+            var dirPath = ""
+            for i in 0..<(components.count - 1) {
+                dirPath += (dirPath.isEmpty ? "" : "/") + components[i]
+                if !dirs.contains(dirPath) {
+                    dirs.insert(dirPath)
+                    tree.append([
+                        "name": components[i],
+                        "path": dirPath,
+                        "type": "dir",
+                        "depth": i
+                    ])
+                }
+            }
+            // Add file entry
+            let ext = (file as NSString).pathExtension
+            tree.append([
+                "name": components.last ?? file,
+                "path": file,
+                "type": "file",
+                "ext": ext,
+                "depth": components.count - 1
+            ])
+        }
+
+        let json = (try? JSONSerialization.data(withJSONObject: tree))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
+        log("fileTree: found \(tree.count) entries, json size=\(json.count) bytes")
+
+        await sendToClientOrRelay(
+            WSPacket(action: .fileTreeResult, payload: [
+                "tree": json,
+                "success": "true"
+            ], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func handleFileRead(clientId: String, packet: WSPacket) async {
+        guard let basePath = packet.payload?["path"],
+              let filePath = packet.payload?["file"] else { return }
+        let expandedBase = (basePath as NSString).expandingTildeInPath
+        let fullPath = "\(expandedBase)/\(filePath)"
+
+        guard FileManager.default.fileExists(atPath: fullPath) else {
+            await sendToClientOrRelay(
+                WSPacket(action: .fileReadResult, payload: ["success": "false", "error": "File not found"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        do {
+            let content = try String(contentsOfFile: fullPath, encoding: .utf8)
+            let ext = (filePath as NSString).pathExtension
+            let lang = languageFromExtension(ext)
+
+            await sendToClientOrRelay(
+                WSPacket(action: .fileReadResult, payload: [
+                    "content": String(content.prefix(500000)),
+                    "language": lang,
+                    "file": filePath,
+                    "success": "true"
+                ], id: packet.id),
+                to: clientId
+            )
+        } catch {
+            await sendToClientOrRelay(
+                WSPacket(action: .fileReadResult, payload: ["success": "false", "error": "Binary or unreadable file"], id: packet.id),
+                to: clientId
+            )
+        }
+    }
+
+    private func languageFromExtension(_ ext: String) -> String {
+        switch ext.lowercased() {
+        case "swift": return "swift"
+        case "js", "jsx": return "javascript"
+        case "ts", "tsx": return "typescript"
+        case "py": return "python"
+        case "rb": return "ruby"
+        case "go": return "go"
+        case "rs": return "rust"
+        case "java": return "java"
+        case "kt": return "kotlin"
+        case "c", "h": return "c"
+        case "cpp", "cc", "cxx", "hpp": return "cpp"
+        case "cs": return "csharp"
+        case "json": return "json"
+        case "yaml", "yml": return "yaml"
+        case "toml": return "toml"
+        case "xml", "plist": return "xml"
+        case "html", "htm": return "html"
+        case "css": return "css"
+        case "scss", "sass": return "scss"
+        case "md", "markdown": return "markdown"
+        case "sh", "bash", "zsh": return "bash"
+        case "sql": return "sql"
+        case "dockerfile": return "dockerfile"
+        case "graphql", "gql": return "graphql"
+        default: return "text"
+        }
     }
 
     // MARK: - Heartbeat

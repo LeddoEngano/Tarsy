@@ -11,6 +11,7 @@ class RemoteInputService {
     private var simulatorUDID: String?
     private var simulatorScreenWidth: CGFloat = 402  // iPhone 16 Pro default
     private var simulatorScreenHeight: CGFloat = 874
+    private var simulatorWindowWidth: CGFloat = 0
     private var simulatorWindowHeight: CGFloat = 0
 
     private let simulatorCropHeight: CGFloat = 52 // Must match ScreenCaptureService
@@ -32,6 +33,7 @@ class RemoteInputService {
         self.windowFocused = false
 
         if isSimulator {
+            self.simulatorWindowWidth = frame.width
             self.simulatorWindowHeight = frame.height
             detectSimulatorInfo()
         }
@@ -244,20 +246,23 @@ class RemoteInputService {
 
     private func rotateSimulator(direction: String) {
         idbQueue.async {
-            let keyChar = direction == "left" ? (UnicodeScalar(0x2190)!) : (UnicodeScalar(0x2192)!) // ← or →
-            let script = """
-            tell application "System Events"
-                tell process "Simulator"
-                    keystroke (ASCII character \(direction == "left" ? 28 : 29)) using command down
-                end tell
-            end tell
-            """
-            if let appleScript = NSAppleScript(source: script) {
-                var error: NSDictionary?
-                appleScript.executeAndReturnError(&error)
-                if let err = error {
-                    print("[RemoteInput] Rotate failed: \(err)")
+            let menuItem = direction == "left" ? "Rotate Left" : "Rotate Right"
+            let script = "tell application \"System Events\" to tell process \"Simulator\" to click menu item \"\(menuItem)\" of menu \"Device\" of menu bar 1"
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", script]
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+            do {
+                try process.run()
+                process.waitUntilExit()
+                if process.terminationStatus != 0 {
+                    let errData = (process.standardError as? Pipe)?.fileHandleForReading.readDataToEndOfFile()
+                    let errStr = errData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                    print("[RemoteInput] Rotate failed: \(errStr)")
                 }
+            } catch {
+                print("[RemoteInput] Rotate error: \(error)")
             }
         }
     }
@@ -281,7 +286,13 @@ class RemoteInputService {
 
     func typeText(_ text: String) {
         if isMobileSimulator {
-            idbTypeText(text)
+            if text == "\u{8}" {
+                idbKeyPress(keycode: 42) // HID backspace
+            } else if text == "\n" {
+                idbKeyPress(keycode: 40) // HID return
+            } else {
+                idbTypeText(text)
+            }
         } else {
             inputQueue.async { [self] in
                 ensureWindowFocused()
@@ -302,14 +313,64 @@ class RemoteInputService {
     // MARK: - idb Commands (Simulator)
 
     /// Convert stream-relative coords (0-1) to device screen coords (points) for idb.
-    /// The stream is now cropped to exclude the Simulator title bar,
-    /// so relative coords map directly to device screen.
+    /// The stream image may include device bezels and letterboxing at any zoom level.
     private func streamToDeviceCoords(relativeX: CGFloat, relativeY: CGFloat) -> (x: Int, y: Int) {
         let rx = max(0, min(1, relativeX))
         let ry = max(0, min(1, relativeY))
-        let x = Int(rx * simulatorScreenWidth)
-        let y = Int(ry * simulatorScreenHeight)
-        return (x, y)
+
+        let imageWidth = simulatorWindowWidth
+        let imageHeight = simulatorWindowHeight - simulatorCropHeight
+
+        guard imageWidth > 0, imageHeight > 0 else {
+            return (Int(rx * simulatorScreenWidth), Int(ry * simulatorScreenHeight))
+        }
+
+        let screenW = simulatorScreenWidth
+        let screenH = simulatorScreenHeight
+
+        let screenLeft: CGFloat
+        let screenTop: CGFloat
+        let zoom: CGFloat
+
+        if imageWidth >= screenW {
+            // Point Accurate or larger — image is bigger than screen
+            // Bezels are the extra space around the screen
+            let bezelH = (imageWidth - screenW) / 2
+            let totalVBezel = imageHeight - screenH
+            let bezelTop_ = totalVBezel * 0.57
+            screenLeft = bezelH
+            screenTop = bezelTop_
+            zoom = 1.0
+        } else {
+            // Zoomed out — device artwork is aspect-fit inside the image.
+            // The artwork includes screen + bezels.
+            // Bezel estimates (proportional to screen size):
+            //   horizontal: ~2% per side, top: ~5%, bottom: ~1.6%
+            let artWidth = screenW * 1.04
+            let artHeight = screenH * 1.066
+
+            let artZoom = min(imageWidth / artWidth, imageHeight / artHeight)
+
+            let artRenderW = artWidth * artZoom
+            let artRenderH = artHeight * artZoom
+            let artOffsetX = (imageWidth - artRenderW) / 2
+            let artOffsetY = (imageHeight - artRenderH) / 2
+
+            let bezelH_1x = screenW * 0.02
+            let bezelTop_1x = screenH * 0.05
+
+            screenLeft = artOffsetX + bezelH_1x * artZoom
+            screenTop = artOffsetY + bezelTop_1x * artZoom
+            zoom = artZoom
+        }
+
+        let deviceX = (rx * imageWidth - screenLeft) / zoom
+        let deviceY = (ry * imageHeight - screenTop) / zoom
+
+        return (
+            max(0, min(Int(screenW) - 1, Int(deviceX))),
+            max(0, min(Int(screenH) - 1, Int(deviceY)))
+        )
     }
 
     private func idbTap(relativeX: CGFloat, relativeY: CGFloat, duration: Double = 0.0) {
@@ -338,6 +399,14 @@ class RemoteInputService {
 
     private func idbTypeText(_ text: String) {
         var args = ["ui", "text", text]
+        if let udid = simulatorUDID {
+            args.append(contentsOf: ["--udid", udid])
+        }
+        runIdb(args)
+    }
+
+    private func idbKeyPress(keycode: Int) {
+        var args = ["ui", "key", "\(keycode)"]
         if let udid = simulatorUDID {
             args.append(contentsOf: ["--udid", udid])
         }
