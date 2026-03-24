@@ -71,6 +71,33 @@ class MJPEGStreamViewModel: ObservableObject {
         fps = 0
     }
 
+    /// Receive a raw JPEG frame from relay (binary WebSocket message)
+    func receiveRelayFrame(_ data: Data) {
+        if fpsTimer == nil {
+            fpsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.fps = self?.frameCount ?? 0
+                    self?.frameCount = 0
+                }
+            }
+        }
+
+        processingQueue.async { [weak self] in
+            guard let self else { return }
+            let now = CFAbsoluteTimeGetCurrent()
+            guard now - self.lastFrameTime >= self.minFrameInterval else { return }
+            self.lastFrameTime = now
+
+            if let image = UIImage(data: data) {
+                DispatchQueue.main.async {
+                    self.currentFrame = image
+                    self.isConnected = true
+                    self.frameCount += 1
+                }
+            }
+        }
+    }
+
     private func receiveData() {
         connection?.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
             guard let self else { return }
@@ -175,8 +202,10 @@ struct StreamPlayerView: View {
                     }
                     Spacer()
                     HStack(spacing: 16) {
-                        // Go to...
-                        goToButton
+                        // Go to... (only for non-mobile stacks)
+                        if workspace.stack != .mobile {
+                            goToButton
+                        }
                         // Screenshot
                         streamButton("camera.viewfinder") {
                             saveScreenshot()
@@ -475,21 +504,28 @@ struct StreamPlayerView: View {
         // Send stream:start via WebSocket — Mac will start capture + MJPEG server
         connectionManager.send(WSPacket(action: .streamStart, payload: payload))
 
-        // Listen for stream:start response which confirms server is ready
-        connectionManager.addListener("stream") { [self] packet in
-            if packet.action == .streamStart, let port = packet.payload?["port"] {
-                if let ip = machineService.bestIP {
-                    viewModel.connect(host: ip, port: UInt16(port) ?? 8643)
-                }
-                connectionManager.removeListener("stream")
+        if connectionManager.connectionMode == .relay {
+            // Relay mode: frames come via binary WebSocket messages
+            connectionManager.onStreamFrameReceived = { [weak viewModel] data in
+                viewModel?.receiveRelayFrame(data)
             }
-        }
+        } else {
+            // LAN mode: connect directly to MJPEG HTTP server
+            connectionManager.addListener("stream") { [self] packet in
+                if packet.action == .streamStart, let port = packet.payload?["port"] {
+                    if let ip = machineService.bestIP {
+                        viewModel.connect(host: ip, port: UInt16(port) ?? 8643)
+                    }
+                    connectionManager.removeListener("stream")
+                }
+            }
 
-        // Fallback: if no response in 3s, try connecting anyway
-        Task {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            if !viewModel.isConnected, let ip = machineService.bestIP {
-                viewModel.connect(host: ip, port: 8643)
+            // Fallback: if no response in 3s, try connecting anyway
+            Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                if !viewModel.isConnected, let ip = machineService.bestIP {
+                    viewModel.connect(host: ip, port: 8643)
+                }
             }
         }
     }

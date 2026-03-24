@@ -1,14 +1,27 @@
 import Foundation
 import Network
 
+public enum ConnectionMode: String {
+    case lan = "LAN"
+    case relay = "Relay"
+    case disconnected = "Disconnected"
+}
+
 @MainActor
 public class ConnectionManager: ObservableObject {
     @Published public var isConnected = false
     @Published public var isReconnecting = false
     @Published public var latency: TimeInterval = 0
     @Published public var errorMessage: String?
+    @Published public var connectionMode: ConnectionMode = .disconnected
 
+    // LAN connection (Network.framework)
     private var connection: NWConnection?
+
+    // Relay connection (URLSession WebSocket)
+    private var relayTask: URLSessionWebSocketTask?
+    private var relaySession: URLSession?
+
     private var pingTimer: Timer?
     private var reconnectTimer: Timer?
     private var lastPingTime: Date?
@@ -19,6 +32,7 @@ public class ConnectionManager: ObservableObject {
     private let maxReconnectAttempts = 10
 
     public var onPacketReceived: ((WSPacket) -> Void)?
+    public var onStreamFrameReceived: ((Data) -> Void)? // Binary MJPEG frames from relay
     private var packetListeners: [String: (WSPacket) -> Void] = [:]
 
     public init() {}
@@ -32,6 +46,8 @@ public class ConnectionManager: ObservableObject {
         packetListeners.removeValue(forKey: id)
     }
 
+    // MARK: - LAN Connection (existing behavior)
+
     public func connect(to host: String, port: UInt16, token: String) {
         self.host = host
         self.port = port
@@ -39,7 +55,35 @@ public class ConnectionManager: ObservableObject {
         reconnectAttempts = 0
         errorMessage = nil
 
-        performConnect()
+        performLANConnect()
+    }
+
+    // MARK: - Relay Connection
+
+    public func connectViaRelay(token: String) {
+        self.authToken = token
+        reconnectAttempts = 0
+        errorMessage = nil
+
+        performRelayConnect()
+    }
+
+    // MARK: - Smart Connect (try LAN first, fallback to relay)
+
+    public func smartConnect(lanHost: String?, port: UInt16, token: String) {
+        self.authToken = token
+        self.port = port
+        reconnectAttempts = 0
+        errorMessage = nil
+
+        if let host = lanHost {
+            self.host = host
+            print("[WS] Trying LAN connection to \(host):\(port)...")
+            performLANConnectWithRelayFallback()
+        } else {
+            print("[WS] No LAN host available, connecting via relay...")
+            performRelayConnect()
+        }
     }
 
     public func disconnect() {
@@ -49,38 +93,45 @@ public class ConnectionManager: ObservableObject {
         pingTimer = nil
         connection?.cancel()
         connection = nil
+        relayTask?.cancel(with: .goingAway, reason: nil)
+        relayTask = nil
         isConnected = false
         isReconnecting = false
+        connectionMode = .disconnected
     }
 
     public func send(_ packet: WSPacket) {
-        guard let connection,
-              let data = try? packet.encode() else {
-            print("[WS] Send failed: connection=\(self.connection != nil), action=\(packet.action.rawValue)")
+        guard let data = try? packet.encode() else {
+            print("[WS] Encode failed for \(packet.action.rawValue)")
             return
         }
         print("[WS] Sending: \(packet.action.rawValue)")
 
+        if connectionMode == .relay {
+            sendViaRelay(data)
+        } else {
+            sendViaLAN(data)
+        }
+    }
+
+    // MARK: - LAN Transport
+
+    private func sendViaLAN(_ data: Data) {
+        guard let connection else { return }
         let metadata = NWProtocolWebSocket.Metadata(opcode: .text)
         let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])
 
         connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { [weak self] error in
             if let error {
-                print("[WS] Send error: \(error)")
-                Task { @MainActor in
-                    self?.handleDisconnect()
-                }
+                print("[WS] LAN send error: \(error)")
+                Task { @MainActor in self?.handleDisconnect() }
             }
         })
     }
 
-    // MARK: - Private
-
-    private func performConnect() {
+    private func performLANConnect() {
         guard let host, let port else { return }
 
-        // Create WebSocket connection using Network.framework (bypasses ATS)
-        // Must use URL endpoint so WebSocket has a path for the HTTP upgrade
         guard let url = URL(string: "ws://\(host):\(port)/") else {
             errorMessage = "Invalid WebSocket URL"
             return
@@ -97,18 +148,18 @@ public class ConnectionManager: ObservableObject {
             Task { @MainActor in
                 switch state {
                 case .ready:
-                    print("[WS] Connected to \(host):\(port)")
-                    // Send auth
+                    print("[WS] LAN connected to \(host):\(port)")
+                    self?.connectionMode = .lan
                     if let token = self?.authToken {
                         self?.send(WSPacket(action: .auth, payload: ["token": token]))
                     }
-                    self?.receiveLoop()
+                    self?.receiveLANLoop()
                     self?.startPing()
                 case .failed(let error):
-                    print("[WS] Connection failed: \(error)")
+                    print("[WS] LAN connection failed: \(error)")
                     self?.handleDisconnect()
                 case .waiting(let error):
-                    print("[WS] Waiting: \(error)")
+                    print("[WS] LAN waiting: \(error)")
                 default:
                     break
                 }
@@ -119,11 +170,69 @@ public class ConnectionManager: ObservableObject {
         self.connection = conn
     }
 
-    private func receiveLoop() {
+    private func performLANConnectWithRelayFallback() {
+        guard let host, let port else { return }
+
+        guard let url = URL(string: "ws://\(host):\(port)/") else {
+            performRelayConnect()
+            return
+        }
+
+        let parameters = NWParameters.tcp
+        let wsOptions = NWProtocolWebSocket.Options()
+        wsOptions.autoReplyPing = true
+        parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
+
+        let conn = NWConnection(to: .url(url), using: parameters)
+
+        // Timeout: if LAN doesn't connect in 3 seconds, try relay
+        var lanConnected = false
+        let timeoutTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if !lanConnected && !self.isConnected {
+                print("[WS] LAN timeout, falling back to relay...")
+                conn.cancel()
+                self.connection = nil
+                self.performRelayConnect()
+            }
+        }
+
+        conn.stateUpdateHandler = { [weak self] state in
+            Task { @MainActor in
+                switch state {
+                case .ready:
+                    lanConnected = true
+                    timeoutTask.cancel()
+                    print("[WS] LAN connected to \(host):\(port)")
+                    self?.connectionMode = .lan
+                    if let token = self?.authToken {
+                        self?.send(WSPacket(action: .auth, payload: ["token": token]))
+                    }
+                    self?.receiveLANLoop()
+                    self?.startPing()
+                case .failed:
+                    lanConnected = false
+                    timeoutTask.cancel()
+                    print("[WS] LAN failed, switching to relay...")
+                    self?.connection = nil
+                    self?.performRelayConnect()
+                case .waiting:
+                    break
+                default:
+                    break
+                }
+            }
+        }
+
+        conn.start(queue: .global(qos: .userInitiated))
+        self.connection = conn
+    }
+
+    private func receiveLANLoop() {
         connection?.receiveMessage { [weak self] content, context, isComplete, error in
             Task { @MainActor in
                 if let error {
-                    print("[WS] Receive error: \(error)")
+                    print("[WS] LAN receive error: \(error)")
                     self?.handleDisconnect()
                     return
                 }
@@ -132,11 +241,89 @@ public class ConnectionManager: ObservableObject {
                     self?.handlePacket(packet)
                 }
 
-                // Continue receiving
-                self?.receiveLoop()
+                self?.receiveLANLoop()
             }
         }
     }
+
+    // MARK: - Relay Transport
+
+    private func sendViaRelay(_ data: Data) {
+        guard let relayTask else { return }
+        let message = URLSessionWebSocketTask.Message.string(String(data: data, encoding: .utf8)!)
+        relayTask.send(message) { error in
+            if let error {
+                print("[WS] Relay send error: \(error)")
+            }
+        }
+    }
+
+    private func performRelayConnect() {
+        guard let token = authToken else { return }
+
+        let baseURL = TarsyConfig.relayURL
+
+        guard let url = URL(string: "\(baseURL)?token=\(token)&role=client") else {
+            errorMessage = "Invalid relay URL"
+            return
+        }
+
+        print("[WS] Connecting to relay...")
+
+        relaySession = URLSession(configuration: .default)
+        let task = relaySession!.webSocketTask(with: url)
+        self.relayTask = task
+        task.resume()
+
+        connectionMode = .relay
+        receiveRelayLoop()
+
+        // Relay doesn't have an explicit "ready" — it's ready as soon as task resumes
+        // We consider ourselves connected when we get the first message or after a short delay
+        Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if !self.isConnected {
+                // Check if relay responded with machine_online
+                self.isConnected = true
+                self.isReconnecting = false
+                self.reconnectAttempts = 0
+                self.errorMessage = nil
+                self.startPing()
+                print("[WS] Relay connected")
+            }
+        }
+    }
+
+    private func receiveRelayLoop() {
+        guard let relayTask else { return }
+
+        relayTask.receive { [weak self] result in
+            Task { @MainActor in
+                switch result {
+                case .success(let message):
+                    switch message {
+                    case .string(let text):
+                        if let data = text.data(using: .utf8),
+                           let packet = try? WSPacket.decode(from: data) {
+                            self?.handlePacket(packet)
+                        }
+                    case .data(let data):
+                        // Binary data = MJPEG frame from Mac via relay
+                        self?.onStreamFrameReceived?(data)
+                    @unknown default:
+                        break
+                    }
+                    self?.receiveRelayLoop()
+
+                case .failure(let error):
+                    print("[WS] Relay receive error: \(error)")
+                    self?.handleDisconnect()
+                }
+            }
+        }
+    }
+
+    // MARK: - Common
 
     private func handlePacket(_ packet: WSPacket) {
         switch packet.action {
@@ -150,6 +337,10 @@ public class ConnectionManager: ObservableObject {
             isConnected = false
             errorMessage = "authentication failed"
             disconnect()
+        case .relayMachineOnline:
+            print("[WS] Mac is online via relay")
+            isConnected = true
+            isReconnecting = false
         case .auth, .pong:
             if let pingTime = lastPingTime {
                 latency = Date().timeIntervalSince(pingTime)
@@ -177,6 +368,8 @@ public class ConnectionManager: ObservableObject {
         isConnected = false
         connection?.cancel()
         connection = nil
+        relayTask?.cancel(with: .goingAway, reason: nil)
+        relayTask = nil
         pingTimer?.invalidate()
         pingTimer = nil
 
@@ -196,7 +389,12 @@ public class ConnectionManager: ObservableObject {
 
         reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
-                self?.performConnect()
+                // Reconnect using the same mode
+                if self?.connectionMode == .relay || self?.host == nil {
+                    self?.performRelayConnect()
+                } else {
+                    self?.performLANConnectWithRelayFallback()
+                }
             }
         }
     }

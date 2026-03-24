@@ -12,7 +12,6 @@ struct OnboardingWindow: View {
 
     enum OnboardingStep {
         case login
-        case tailscale
         case permissions
         case ready
     }
@@ -37,8 +36,6 @@ struct OnboardingWindow: View {
                     switch step {
                     case .login:
                         loginStep
-                    case .tailscale:
-                        tailscaleStep
                     case .permissions:
                         permissionsStep
                     case .ready:
@@ -53,12 +50,12 @@ struct OnboardingWindow: View {
         .frame(width: 480, height: 520)
         .onAppear {
             if authManager.isAuthenticated {
-                step = .tailscale
+                step = .permissions
             }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuth in
             if isAuth {
-                step = .tailscale
+                step = .permissions
                 Task { await daemonManager.start() }
             }
         }
@@ -68,7 +65,6 @@ struct OnboardingWindow: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            // Tarsier eyes
             HStack(spacing: 4) {
                 eyeIcon(size: 14)
                 eyeIcon(size: 14)
@@ -95,11 +91,9 @@ struct OnboardingWindow: View {
         HStack(spacing: 10) {
             stepDot(label: "1. login", active: step == .login, done: step != .login)
             stepLine(done: step != .login)
-            stepDot(label: "2. tailscale", active: step == .tailscale, done: step == .permissions || step == .ready)
-            stepLine(done: step == .permissions || step == .ready)
-            stepDot(label: "3. perms", active: step == .permissions, done: step == .ready)
+            stepDot(label: "2. perms", active: step == .permissions, done: step == .ready)
             stepLine(done: step == .ready)
-            stepDot(label: "4. ready", active: step == .ready, done: false)
+            stepDot(label: "3. ready", active: step == .ready, done: false)
         }
         .padding(.horizontal, 24)
     }
@@ -193,179 +187,6 @@ struct OnboardingWindow: View {
             .frame(maxWidth: 300)
 
             Spacer()
-        }
-    }
-
-    // MARK: - Tailscale Step
-
-    private var tailscaleStep: some View {
-        VStack(spacing: 16) {
-            Spacer()
-
-            Image(systemName: "network")
-                .font(.system(size: 36))
-                .foregroundColor(Color(hex: "d4a574"))
-
-            Text("tailscale setup")
-                .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                .foregroundColor(Color(hex: "e8e0d4"))
-
-            Text("tarsy uses tailscale to securely connect\nyour iphone to this mac from anywhere")
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(Color(hex: "a89e91"))
-                .multilineTextAlignment(.center)
-
-            // Install progress
-            if daemonManager.tailscale.isInstalling {
-                VStack(spacing: 10) {
-                    // Progress bar
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("installing tailscale...")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(Color(hex: "d4a574"))
-                            Spacer()
-                            Text("\(Int(daemonManager.tailscale.installProgress * 100))%")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(Color(hex: "a89e91"))
-                        }
-
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color(hex: "2a2a2a"))
-                                    .frame(height: 6)
-                                RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color(hex: "d4a574"))
-                                    .frame(width: geo.size.width * daemonManager.tailscale.installProgress, height: 6)
-                                    .animation(.easeInOut(duration: 0.3), value: daemonManager.tailscale.installProgress)
-                            }
-                        }
-                        .frame(height: 6)
-                    }
-                    .padding(.horizontal, 40)
-
-                    // Live log output
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            Text(daemonManager.tailscale.installLog)
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(Color(hex: "7a8b6f"))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(8)
-                                .id("logBottom")
-                        }
-                        .frame(maxWidth: 380, maxHeight: 120)
-                        .background(Color(hex: "1a1a1a"))
-                        .cornerRadius(8)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color(hex: "2a2a2a"), lineWidth: 1)
-                        )
-                        .onChange(of: daemonManager.tailscale.installLog) { _, _ in
-                            proxy.scrollTo("logBottom", anchor: .bottom)
-                        }
-                    }
-                }
-            } else {
-                // Status display
-                HStack(spacing: 8) {
-                    statusIcon
-                    Text(daemonManager.tailscaleStatus)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(Color(hex: "a89e91"))
-                        .lineLimit(2)
-                }
-                .padding(12)
-                .frame(maxWidth: 380)
-                .background(Color(hex: "2a2a2a"))
-                .cornerRadius(8)
-
-                if let ip = daemonManager.tailscaleIP {
-                    HStack(spacing: 8) {
-                        Text("your tailscale ip:")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(Color(hex: "6b6b6b"))
-                        Text(ip)
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                            .foregroundColor(Color(hex: "7a8b6f"))
-                            .textSelection(.enabled)
-                    }
-                }
-            }
-
-            // Action buttons
-            if daemonManager.tailscaleIP != nil {
-                Button(action: { step = .permissions }) {
-                    Text("continue")
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundColor(Color(hex: "1a1a1a"))
-                        .frame(maxWidth: 200)
-                        .padding(12)
-                        .background(Color(hex: "d4a574"))
-                        .cornerRadius(8)
-                }
-                .buttonStyle(.plain)
-            } else if !daemonManager.tailscale.isInstalling {
-                VStack(spacing: 8) {
-                    if daemonManager.tailscaleStatus.contains("not installed") {
-                        Button(action: {
-                            Task { await daemonManager.installTailscale() }
-                        }) {
-                            Text("install tailscale")
-                                .font(.system(size: 14, design: .monospaced))
-                                .foregroundColor(Color(hex: "1a1a1a"))
-                                .frame(maxWidth: 200)
-                                .padding(12)
-                                .background(Color(hex: "d4a574"))
-                                .cornerRadius(8)
-                        }
-                        .buttonStyle(.plain)
-                    } else if daemonManager.tailscaleStatus.contains("installed") || daemonManager.tailscaleStatus.contains("open") {
-                        Text("open the Tailscale app and sign in,\nthen click refresh below")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(Color(hex: "6b6b6b"))
-                            .multilineTextAlignment(.center)
-
-                        Button(action: {
-                            Task { await daemonManager.refreshTailscale() }
-                        }) {
-                            Text("refresh status")
-                                .font(.system(size: 13, design: .monospaced))
-                                .foregroundColor(Color(hex: "d4a574"))
-                                .frame(maxWidth: 200)
-                                .padding(10)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Color(hex: "d4a574"), lineWidth: 1)
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-            Spacer()
-        }
-        .task {
-            await daemonManager.setupTailscale()
-        }
-    }
-
-    @ViewBuilder
-    private var statusIcon: some View {
-        if daemonManager.tailscaleIP != nil {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundColor(Color(hex: "7a8b6f"))
-        } else if daemonManager.tailscaleStatus.contains("installed") {
-            Image(systemName: "app.badge")
-                .foregroundColor(Color(hex: "d4a574"))
-        } else if daemonManager.tailscaleStatus.contains("not installed") {
-            Image(systemName: "arrow.down.circle")
-                .foregroundColor(Color(hex: "d4a574"))
-        } else {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundColor(Color(hex: "c4704b"))
         }
     }
 
@@ -510,7 +331,6 @@ struct OnboardingWindow: View {
         isCheckingPermissions = true
 
         Task {
-            // Check Screen Recording
             do {
                 let _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                 hasScreenRecording = true
@@ -518,14 +338,8 @@ struct OnboardingWindow: View {
                 hasScreenRecording = false
             }
 
-            // Check Accessibility
             hasAccessibility = AXIsProcessTrusted()
-
-            // Check Files and Folders — pre-access all scan directories
-            // This triggers the permission dialog once for each directory
-            // After granting, macOS remembers and won't ask again
             hasFilesAccess = preAccessDirectories()
-
             isCheckingPermissions = false
         }
     }
@@ -548,14 +362,12 @@ struct OnboardingWindow: View {
         var accessCount = 0
         for dir in dirs {
             if fm.fileExists(atPath: dir) {
-                // Try to list contents — this triggers the permission dialog
                 if let _ = try? fm.contentsOfDirectory(atPath: dir) {
                     accessCount += 1
                 }
             }
         }
 
-        // Consider it granted if we can access at least Desktop and home
         return accessCount >= 2
     }
 
@@ -571,7 +383,6 @@ struct OnboardingWindow: View {
         VStack(spacing: 20) {
             Spacer()
 
-            // Big eyes
             HStack(spacing: 12) {
                 eyeIcon(size: 28)
                 eyeIcon(size: 28)
@@ -583,7 +394,7 @@ struct OnboardingWindow: View {
 
             VStack(spacing: 8) {
                 statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "signed in as \(authManager.currentUser?.email ?? "...")")
-                statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "tailscale connected (\(daemonManager.tailscaleIP ?? "..."))")
+                statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "relay connected (remote access ready)")
                 statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "websocket server on port \(TarsyConfig.websocketPort)")
                 statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "stream server on port 8643")
             }
@@ -605,10 +416,6 @@ struct OnboardingWindow: View {
             .buttonStyle(.plain)
 
             Spacer()
-        }
-        .task {
-            // Ensure machine is registered and all services running
-            await daemonManager.refreshTailscale()
         }
     }
 

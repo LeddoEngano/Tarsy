@@ -35,10 +35,14 @@
 	<string>Tarsy can use the camera to capture and send images to the AI agent.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Tarsy connects to your Mac on the local network to stream and send commands.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Tarsy uses the microphone for voice-to-text input to send commands to the AI agent.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Tarsy saves screenshots from the stream to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Tarsy needs access to your photos to send images to the AI agent.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Tarsy uses speech recognition to convert your voice into text commands.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>

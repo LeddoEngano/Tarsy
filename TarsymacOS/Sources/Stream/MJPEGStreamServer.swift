@@ -106,6 +106,13 @@ actor MJPEGStreamServer {
         print("[MJPEG] Client disconnected: \(id) (total: \(connections.count))")
     }
 
+    // Encode frame as JPEG data (for relay forwarding)
+    func encodeFrame(_ image: CGImage) -> Data? {
+        let data = jpegEncode(image, quality: jpegQuality)
+        guard let data, data.count < maxFrameSize else { return nil }
+        return data
+    }
+
     private func jpegEncode(_ image: CGImage, quality: CGFloat) -> Data? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else {

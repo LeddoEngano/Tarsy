@@ -9,6 +9,8 @@ struct StatusBanner: View {
             banner(text: "reconnecting...", color: TarsyTheme.accentAmber, icon: "arrow.triangle.2.circlepath")
         } else if let error = connectionManager.errorMessage {
             banner(text: error, color: TarsyTheme.accentTerracotta, icon: "exclamationmark.triangle")
+        } else if connectionManager.isConnected && connectionManager.connectionMode == .relay {
+            banner(text: "connected via relay", color: TarsyTheme.accentMoss, icon: "globe")
         }
     }
 

@@ -1,7 +1,9 @@
 import Foundation
+import TarsyShared
 
-actor ClaudeCodeSession {
+actor ClaudeCodeSession: AIEngine {
     let id: String
+    let engineType: AIEngineType = .claude
     let workspacePath: String
     let aiContext: String?
     private var process: Process?
@@ -231,7 +233,6 @@ actor ClaudeCodeSession {
                 print("[ClaudeCode] AskUserQuestion: \(questionsPayload.count) questions")
 
                 // Send all questions as JSON to iOS via onAskUser
-                // Encode the full questions array as the first param, empty array as second
                 if let jsonData = try? JSONSerialization.data(withJSONObject: questionsPayload),
                    let jsonStr = String(data: jsonData, encoding: .utf8) {
                     onAskUser?(jsonStr, [])

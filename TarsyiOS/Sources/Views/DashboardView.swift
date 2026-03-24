@@ -7,6 +7,7 @@ struct DashboardView: View {
     @EnvironmentObject var machineService: MachineService
 
     @State private var showNewWorkspace = false
+    @State private var showSettings = false
 
     var body: some View {
         NavigationStack {
@@ -34,6 +35,10 @@ struct DashboardView: View {
                         Button(action: { showNewWorkspace = true }) {
                             Image(systemName: "plus")
                                 .foregroundColor(TarsyTheme.accentAmber)
+                        }
+                        Button(action: { showSettings = true }) {
+                            Image(systemName: "gearshape")
+                                .foregroundColor(TarsyTheme.textSecondary)
                         }
                         Button(action: {
                             Task { await authManager.signOut() }
@@ -71,6 +76,9 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $showNewWorkspace) {
             NewWorkspaceView()
+        }
+        .sheet(isPresented: $showSettings) {
+            AppSettingsView()
         }
         .task {
             await machineService.fetchMachine()

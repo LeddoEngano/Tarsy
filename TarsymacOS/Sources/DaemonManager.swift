@@ -22,6 +22,7 @@ class DaemonManager: ObservableObject {
     private var mjpegServer: MJPEGStreamServer?
     private let openClaw = OpenClawService()
     private let remoteInput = RemoteInputService()
+    private let relayClient = RelayClient()
     private var heartbeatTimer: Timer?
     private var devServerSessions: [String: String] = [:] // workspacePath -> terminalSessionId
 
@@ -38,7 +39,10 @@ class DaemonManager: ObservableObject {
         // 3. Register machine in Supabase
         await registerMachine()
 
-        // 4. Start heartbeat
+        // 4. Connect to relay for remote access
+        await connectRelay()
+
+        // 5. Start heartbeat
         startHeartbeat()
 
         isRunning = true
@@ -147,6 +151,39 @@ class DaemonManager: ObservableObject {
         }
     }
 
+    // MARK: - Relay
+
+    private func connectRelay() async {
+        // Get auth token for relay connection
+        guard let session = try? await supabase.auth.session else {
+            log("Cannot connect to relay — no auth session")
+            return
+        }
+
+        // Setup relay handlers — relay packets go to same handler as local WS
+        await relayClient.setHandlers(
+            onPacket: { [weak self] packet in
+                Task { @MainActor in
+                    // Handle relay packets like local WebSocket packets
+                    // Use "relay" as clientId so responses go back through relay
+                    await self?.handlePacket(clientId: "relay", packet: packet)
+                }
+            }
+        )
+
+        await relayClient.connect(token: session.accessToken)
+        log("Connected to relay for remote access")
+    }
+
+    // Forward response to relay when clientId is "relay"
+    func sendToClientOrRelay(_ packet: WSPacket, to clientId: String) async {
+        if clientId == "relay" {
+            await relayClient.send(packet: packet)
+        } else {
+            await wsServer?.send(packet, to: clientId)
+        }
+    }
+
     // MARK: - Packet Handling
 
     private func handlePacket(clientId: String, packet: WSPacket) async {
@@ -195,8 +232,26 @@ class DaemonManager: ObservableObject {
             handleRemoteInput(packet: packet)
         case .screenshotRequest:
             await handleScreenshotRequest(clientId: clientId, packet: packet)
+        // Multi-Provider Engine
+        case .engineCreate:
+            await handleEngineCreate(clientId: clientId, packet: packet)
+        case .engineMessage:
+            await handleEngineMessage(clientId: clientId, packet: packet)
+        case .engineUserResponse:
+            await handleEngineUserResponse(clientId: clientId, packet: packet)
+        case .engineClose:
+            await handleEngineClose(clientId: clientId, packet: packet)
+        // Git Safety Net
+        case .gitCheckpoint:
+            await handleGitCheckpoint(clientId: clientId, packet: packet)
+        case .gitDiff:
+            await handleGitDiff(clientId: clientId, packet: packet)
+        case .gitRollback:
+            await handleGitRollback(clientId: clientId, packet: packet)
+        case .gitHistory:
+            await handleGitHistory(clientId: clientId, packet: packet)
         default:
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Unknown action: \(packet.action.rawValue)"]),
                 to: clientId
             )
@@ -210,7 +265,7 @@ class DaemonManager: ObservableObject {
         // Encode repos as JSON string in payload
         if let data = try? JSONEncoder().encode(repos),
            let json = String(data: data, encoding: .utf8) {
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .workspaceScanResult, payload: ["repos": json], id: packet.id),
                 to: clientId
             )
@@ -225,7 +280,7 @@ class DaemonManager: ObservableObject {
 
         do {
             let result = try await orchestrator?.setupWorkspace(repoUrl: repoUrl, localPath: localPath, name: name)
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .workspaceCreate, payload: [
                     "sessionId": result?.sessionId ?? "",
                     "stack": result?.detectedStack ?? "unknown",
@@ -235,7 +290,7 @@ class DaemonManager: ObservableObject {
                 to: clientId
             )
         } catch {
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": error.localizedDescription], id: packet.id),
                 to: clientId
             )
@@ -244,7 +299,7 @@ class DaemonManager: ObservableObject {
 
     private func handleWorkspaceList(clientId: String, packet: WSPacket) async {
         let sessions = await terminalManager.listSessions()
-        await wsServer?.send(
+        await sendToClientOrRelay(
             WSPacket(action: .workspaceList, payload: ["sessions": sessions.joined(separator: ",")], id: packet.id),
             to: clientId
         )
@@ -265,12 +320,12 @@ class DaemonManager: ObservableObject {
                 }
             }
 
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .workspaceStart, payload: ["sessionId": sessionId, "status": "running"], id: packet.id),
                 to: clientId
             )
         } catch {
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": error.localizedDescription], id: packet.id),
                 to: clientId
             )
@@ -280,7 +335,7 @@ class DaemonManager: ObservableObject {
     private func handleWorkspaceStop(clientId: String, packet: WSPacket) async {
         guard let sessionId = packet.payload?["sessionId"] else { return }
         await terminalManager.closeSession(sessionId)
-        await wsServer?.send(
+        await sendToClientOrRelay(
             WSPacket(action: .workspaceStop, payload: ["sessionId": sessionId, "status": "idle"], id: packet.id),
             to: clientId
         )
@@ -298,12 +353,12 @@ class DaemonManager: ObservableObject {
                     )
                 }
             }
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .terminalCreate, payload: ["sessionId": sessionId], id: packet.id),
                 to: clientId
             )
         } catch {
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": error.localizedDescription], id: packet.id),
                 to: clientId
             )
@@ -319,7 +374,7 @@ class DaemonManager: ObservableObject {
     private func handleTerminalClose(clientId: String, packet: WSPacket) async {
         guard let sessionId = packet.payload?["sessionId"] else { return }
         await terminalManager.closeSession(sessionId)
-        await wsServer?.send(
+        await sendToClientOrRelay(
             WSPacket(action: .terminalClose, payload: ["sessionId": sessionId], id: packet.id),
             to: clientId
         )
@@ -380,7 +435,7 @@ class DaemonManager: ObservableObject {
 
             log("claudeCreate: session created, sending response")
 
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .claudeCreate, payload: ["sessionId": sid], id: packet.id),
                 to: clientId
             )
@@ -394,7 +449,7 @@ class DaemonManager: ObservableObject {
             }
         } catch {
             log("claudeCreate: FAILED — \(error)")
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Claude Code error: \(error.localizedDescription)"], id: packet.id),
                 to: clientId
             )
@@ -417,7 +472,7 @@ class DaemonManager: ObservableObject {
     private func handleClaudeClose(clientId: String, packet: WSPacket) async {
         guard let sessionId = packet.payload?["sessionId"] else { return }
         await terminalManager.closeClaudeSession(sessionId)
-        await wsServer?.send(
+        await sendToClientOrRelay(
             WSPacket(action: .claudeClose, payload: ["sessionId": sessionId], id: packet.id),
             to: clientId
         )
@@ -427,7 +482,7 @@ class DaemonManager: ObservableObject {
 
     private func handleOpenClawStatus(clientId: String, packet: WSPacket) async {
         let running = await openClaw.checkGateway()
-        await wsServer?.send(
+        await sendToClientOrRelay(
             WSPacket(action: .openclawStatus, payload: [
                 "running": running ? "true" : "false",
                 "port": "18789"
@@ -446,7 +501,7 @@ class DaemonManager: ObservableObject {
             do {
                 try await openClaw.startGateway()
             } catch {
-                await wsServer?.send(
+                await sendToClientOrRelay(
                     WSPacket(action: .error, payload: ["message": "OpenClaw gateway not running: \(error.localizedDescription)"], id: packet.id),
                     to: clientId
                 )
@@ -465,12 +520,12 @@ class DaemonManager: ObservableObject {
                     )
                 }
             }
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .openclawComplete, payload: ["message": fullResponse], id: packet.id),
                 to: clientId
             )
         } catch {
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "OpenClaw error: \(error.localizedDescription)"], id: packet.id),
                 to: clientId
             )
@@ -482,7 +537,7 @@ class DaemonManager: ObservableObject {
     private func handleDevServerStart(clientId: String, packet: WSPacket) async {
         guard let path = packet.payload?["path"],
               let command = packet.payload?["command"], !command.isEmpty else {
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Missing path or command for dev server"], id: packet.id),
                 to: clientId
             )
@@ -497,7 +552,7 @@ class DaemonManager: ObservableObject {
            await terminalManager.isSessionAlive(existingId) {
             let actuallyServing = portFromUrl(streamUrl).map { isPortListening(port: $0) } ?? true
             if actuallyServing {
-                await wsServer?.send(
+                await sendToClientOrRelay(
                     WSPacket(action: .devServerStart, payload: ["status": "running", "sessionId": existingId], id: packet.id),
                     to: clientId
                 )
@@ -534,7 +589,7 @@ class DaemonManager: ObservableObject {
 
             if confirmed {
                 log("devServerStart: confirmed running")
-                await wsServer?.send(
+                await sendToClientOrRelay(
                     WSPacket(action: .devServerStart, payload: ["status": "running", "sessionId": sessionId], id: packet.id),
                     to: clientId
                 )
@@ -544,13 +599,13 @@ class DaemonManager: ObservableObject {
                 }
             } else {
                 log("devServerStart: could not confirm, assuming started")
-                await wsServer?.send(
+                await sendToClientOrRelay(
                     WSPacket(action: .devServerStart, payload: ["status": "started_unconfirmed", "sessionId": sessionId], id: packet.id),
                     to: clientId
                 )
             }
         } catch {
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Dev server failed: \(error.localizedDescription)"], id: packet.id),
                 to: clientId
             )
@@ -570,7 +625,7 @@ class DaemonManager: ObservableObject {
             log("devServerStop: stopped for \(expandedPath)")
         }
 
-        await wsServer?.send(
+        await sendToClientOrRelay(
             WSPacket(action: .devServerStop, payload: ["status": "stopped"], id: packet.id),
             to: clientId
         )
@@ -599,7 +654,7 @@ class DaemonManager: ObservableObject {
             }
         }
 
-        await wsServer?.send(
+        await sendToClientOrRelay(
             WSPacket(action: .devServerStatus, payload: ["running": running ? "true" : "false"], id: packet.id),
             to: clientId
         )
@@ -609,7 +664,7 @@ class DaemonManager: ObservableObject {
 
     private func handleBrowserOpenUrl(clientId: String, packet: WSPacket) async {
         guard let urlString = packet.payload?["url"], !urlString.isEmpty else {
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Missing url"], id: packet.id),
                 to: clientId
             )
@@ -617,7 +672,7 @@ class DaemonManager: ObservableObject {
         }
         await openBrowserToUrl(urlString)
         log("browserOpenUrl: \(urlString)")
-        await wsServer?.send(
+        await sendToClientOrRelay(
             WSPacket(action: .browserOpenUrl, payload: ["status": "opened", "url": urlString], id: packet.id),
             to: clientId
         )
@@ -746,7 +801,7 @@ class DaemonManager: ObservableObject {
             guard process.terminationStatus == 0,
                   let imageData = try? Data(contentsOf: URL(fileURLWithPath: tmpPath)),
                   let nsImage = NSImage(data: imageData) else {
-                await wsServer?.send(
+                await sendToClientOrRelay(
                     WSPacket(action: .error, payload: ["message": "Screenshot failed"], id: packet.id),
                     to: clientId
                 )
@@ -765,7 +820,7 @@ class DaemonManager: ObservableObject {
             let sizeKB = jpegData.count / 1024
             log("screenshot: captured \(sizeKB)KB JPEG, sending to iOS")
 
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .screenshotResult, payload: [
                     "data": base64,
                     "size": "\(sizeKB)"
@@ -778,7 +833,7 @@ class DaemonManager: ObservableObject {
 
         } catch {
             log("screenshot: FAILED — \(error)")
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Screenshot error: \(error.localizedDescription)"], id: packet.id),
                 to: clientId
             )
@@ -798,9 +853,13 @@ class DaemonManager: ObservableObject {
                 await mjpegServer?.setQuality(jpegQuality: 0.8, maxFrameSize: 1_000_000)
                 log("streamStart: quality boosted to HIGH (fullscreen)")
             } else {
-                let isLocal = !(packet.payload?["ip"]?.hasPrefix("100.") ?? true)
-                await mjpegServer?.setQuality(jpegQuality: isLocal ? 0.65 : 0.35, maxFrameSize: isLocal ? 500_000 : 80_000)
-                log("streamStart: quality restored to normal")
+                let isRelay = clientId == "relay"
+                let isLocal = !isRelay && !(packet.payload?["ip"]?.hasPrefix("100.") ?? true)
+                await mjpegServer?.setQuality(
+                    jpegQuality: isLocal ? 0.65 : 0.55,
+                    maxFrameSize: isLocal ? 500_000 : 300_000
+                )
+                log("streamStart: quality restored to \(isLocal ? "LAN" : "relay")")
             }
             return
         }
@@ -831,7 +890,7 @@ class DaemonManager: ObservableObject {
 
         guard let window else {
             log("streamStart: still no window found after opening app")
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "No window found for stack: \(stack). Could not open app automatically."], id: packet.id),
                 to: clientId
             )
@@ -848,28 +907,35 @@ class DaemonManager: ObservableObject {
                 log("streamStart: MJPEG server started on port 8643")
             }
 
-            // Detect if connection is local WiFi or Tailscale VPN
-            let isLocalConnection = !(packet.payload?["ip"]?.hasPrefix("100.") ?? true)
+            // Detect connection type and set quality accordingly
+            let ipPayload = packet.payload?["ip"] ?? ""
+            let isLocalConnection = !ipPayload.isEmpty && !ipPayload.hasPrefix("100.")
+            let isRelay = clientId == "relay"
             let fps: Int
             let scale: CGFloat
-            if isLocalConnection {
-                // Local WiFi — high quality
+            if isLocalConnection && !isRelay {
+                // Local WiFi — best quality
                 fps = 15
-                scale = 0.7
-                await mjpegServer?.setQuality(jpegQuality: 0.65, maxFrameSize: 500_000)
-                log("streamStart: local WiFi — high quality (15fps, 0.7x, q0.65)")
+                scale = 1.0
+                await mjpegServer?.setQuality(jpegQuality: 0.85, maxFrameSize: 1_500_000)
+                log("streamStart: LAN — high quality (15fps, 1.0x, q0.85)")
             } else {
-                // Tailscale VPN — lower quality to avoid fragmentation
-                fps = 5
-                scale = 0.4
-                await mjpegServer?.setQuality(jpegQuality: 0.35, maxFrameSize: 80_000)
-                log("streamStart: Tailscale VPN — low quality (5fps, 0.4x, q0.35)")
+                // Relay / remote — prioritize quality over fps
+                fps = 8
+                scale = 0.85
+                await mjpegServer?.setQuality(jpegQuality: 0.75, maxFrameSize: 800_000)
+                log("streamStart: relay — quality priority (8fps, 0.85x, q0.75)")
             }
 
-            // Wire screen capture to MJPEG
+            // Wire screen capture to MJPEG (local + relay)
             screenCapture.onFrame = { [weak self] cgImage in
                 Task {
                     await self?.mjpegServer?.sendFrame(cgImage)
+
+                    // Also send frame via relay for remote clients
+                    if let jpegData = await self?.mjpegServer?.encodeFrame(cgImage) {
+                        await self?.relayClient.sendBinary(jpegData)
+                    }
                 }
             }
 
@@ -889,7 +955,7 @@ class DaemonManager: ObservableObject {
             log("streamStart: capture started")
 
             let streamPort: UInt16 = 8643
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .streamStart, payload: [
                     "port": "\(streamPort)",
                     "window": window.title ?? "unknown",
@@ -901,7 +967,7 @@ class DaemonManager: ObservableObject {
             log("streamStart: response sent to client")
         } catch {
             log("streamStart: FAILED — \(error)")
-            await wsServer?.send(
+            await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Stream failed: \(error.localizedDescription)"], id: packet.id),
                 to: clientId
             )
@@ -937,7 +1003,7 @@ class DaemonManager: ObservableObject {
         await mjpegServer?.stop()
         mjpegServer = nil
 
-        await wsServer?.send(
+        await sendToClientOrRelay(
             WSPacket(action: .streamStop, id: packet.id),
             to: clientId
         )
@@ -1046,6 +1112,268 @@ class DaemonManager: ObservableObject {
             print("[Daemon] Failed to update status: \(error)")
         }
     }
+
+    // MARK: - Multi-Provider Engine
+
+    private func handleEngineCreate(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"],
+              let engineTypeRaw = packet.payload?["engineType"],
+              let engineType = AIEngineType(rawValue: engineTypeRaw) else {
+            log("engineCreate: missing path or engineType")
+            return
+        }
+
+        let apiKey = packet.payload?["apiKey"]
+        let command = packet.payload?["command"]
+        let aiContext = packet.payload?["aiContext"]
+        let initialMessage = packet.payload?["message"]
+        let sid = UUID().uuidString
+
+        log("engineCreate: type=\(engineType.displayName), path=\(path), sid=\(sid)")
+
+        // For Claude, use the existing rich session
+        if engineType == .claude {
+            do {
+                let _ = try await terminalManager.createClaudeSession(
+                    id: sid,
+                    workspacePath: path,
+                    aiContext: aiContext,
+                    onOutput: { [weak self] output in
+                        Task {
+                            await self?.wsServer?.send(
+                                WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": "claude"]),
+                                to: clientId
+                            )
+                        }
+                    },
+                    onComplete: { [weak self] (message: String) in
+                        Task {
+                            await self?.wsServer?.send(
+                                WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": "claude"]),
+                                to: clientId
+                            )
+                        }
+                    },
+                    onAskUser: { [weak self] questionsJson, _ in
+                        Task {
+                            await self?.wsServer?.send(
+                                WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": "claude"]),
+                                to: clientId
+                            )
+                        }
+                    }
+                )
+
+                await sendToClientOrRelay(
+                    WSPacket(action: .engineCreate, payload: ["sessionId": sid, "engineType": "claude"], id: packet.id),
+                    to: clientId
+                )
+
+                if let msg = initialMessage, !msg.isEmpty {
+                    await terminalManager.sendClaudeMessage(msg, to: sid)
+                }
+            } catch {
+                log("engineCreate error: \(error)")
+            }
+            return
+        }
+
+        // Generic engine (Gemini, Codex, Aider, Custom)
+        do {
+            let _ = try await terminalManager.createEngineSession(
+                id: sid,
+                engineType: engineType,
+                workspacePath: path,
+                command: command,
+                apiKey: apiKey,
+                onOutput: { [weak self] output in
+                    Task {
+                        await self?.wsServer?.send(
+                            WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": engineTypeRaw]),
+                            to: clientId
+                        )
+                    }
+                },
+                onComplete: { [weak self] (message: String) in
+                    Task {
+                        await self?.wsServer?.send(
+                            WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": engineTypeRaw]),
+                            to: clientId
+                        )
+                    }
+                }
+            )
+
+            await sendToClientOrRelay(
+                WSPacket(action: .engineCreate, payload: ["sessionId": sid, "engineType": engineTypeRaw], id: packet.id),
+                to: clientId
+            )
+
+            if let msg = initialMessage, !msg.isEmpty {
+                await terminalManager.sendEngineMessage(msg, to: sid)
+            }
+        } catch {
+            log("engineCreate error: \(error)")
+        }
+    }
+
+    private func handleEngineMessage(clientId: String, packet: WSPacket) async {
+        guard let sessionId = packet.payload?["sessionId"],
+              let message = packet.payload?["message"] else { return }
+        let engineType = packet.payload?["engineType"] ?? ""
+
+        if engineType == "claude" {
+            await terminalManager.sendClaudeMessage(message, to: sessionId)
+        } else {
+            await terminalManager.sendEngineMessage(message, to: sessionId)
+        }
+    }
+
+    private func handleEngineUserResponse(clientId: String, packet: WSPacket) async {
+        guard let sessionId = packet.payload?["sessionId"],
+              let answer = packet.payload?["answer"] else { return }
+        let engineType = packet.payload?["engineType"] ?? ""
+
+        if engineType == "claude" {
+            await terminalManager.respondToClaudeQuestion(answer, sessionId: sessionId)
+        } else {
+            await terminalManager.respondToEngineQuestion(answer, sessionId: sessionId)
+        }
+    }
+
+    private func handleEngineClose(clientId: String, packet: WSPacket) async {
+        guard let sessionId = packet.payload?["sessionId"] else { return }
+        let engineType = packet.payload?["engineType"] ?? ""
+
+        if engineType == "claude" {
+            await terminalManager.closeClaudeSession(sessionId)
+        } else {
+            await terminalManager.closeEngineSession(sessionId)
+        }
+        await sendToClientOrRelay(
+            WSPacket(action: .engineClose, payload: ["sessionId": sessionId], id: packet.id),
+            to: clientId
+        )
+    }
+
+    // MARK: - Git Safety Net
+
+    private func handleGitCheckpoint(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else { return }
+        let message = packet.payload?["message"] ?? "checkpoint"
+        let expandedPath = (path as NSString).expandingTildeInPath
+
+        let result = await runGitCommand(["add", "-A"], at: expandedPath)
+        guard result.success else {
+            await sendGitResult(action: .gitCheckpointResult, clientId: clientId, packetId: packet.id, success: false, error: result.output)
+            return
+        }
+
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        let commitMsg = "checkpoint: \(message) [\(timestamp)]"
+        let commitResult = await runGitCommand(["commit", "-m", commitMsg, "--allow-empty"], at: expandedPath)
+
+        // Get files changed count
+        let diffStat = await runGitCommand(["diff", "--stat", "HEAD~1..HEAD"], at: expandedPath)
+        let filesCount = diffStat.output.components(separatedBy: "\n").count - 1
+
+        await sendGitResult(action: .gitCheckpointResult, clientId: clientId, packetId: packet.id,
+                           success: commitResult.success,
+                           data: ["message": commitMsg, "filesChanged": "\(max(0, filesCount))"],
+                           error: commitResult.success ? nil : commitResult.output)
+    }
+
+    private func handleGitDiff(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else { return }
+        let expandedPath = (path as NSString).expandingTildeInPath
+
+        // Get list of changed files with stats
+        let statusResult = await runGitCommand(["status", "--porcelain"], at: expandedPath)
+        let diffResult = await runGitCommand(["diff", "--stat"], at: expandedPath)
+        let diffFull = await runGitCommand(["diff"], at: expandedPath)
+
+        await sendToClientOrRelay(
+            WSPacket(action: .gitDiffResult, payload: [
+                "status": statusResult.output,
+                "stat": diffResult.output,
+                "diff": String(diffFull.output.prefix(50000)), // Limit size
+                "success": "true"
+            ], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func handleGitRollback(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else { return }
+        let expandedPath = (path as NSString).expandingTildeInPath
+        let target = packet.payload?["target"] ?? "HEAD~1"
+
+        let result = await runGitCommand(["reset", "--hard", target], at: expandedPath)
+
+        await sendGitResult(action: .gitRollbackResult, clientId: clientId, packetId: packet.id,
+                           success: result.success, error: result.success ? nil : result.output)
+    }
+
+    private func handleGitHistory(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else { return }
+        let expandedPath = (path as NSString).expandingTildeInPath
+        let limit = packet.payload?["limit"] ?? "20"
+
+        let result = await runGitCommand([
+            "log", "--oneline", "--format=%H|||%s|||%ai|||%an", "-\(limit)"
+        ], at: expandedPath)
+
+        // Parse into structured data
+        var commits: [[String: String]] = []
+        for line in result.output.components(separatedBy: "\n") {
+            let parts = line.components(separatedBy: "|||")
+            guard parts.count >= 3 else { continue }
+            commits.append([
+                "hash": parts[0],
+                "message": parts[1],
+                "date": parts[2],
+                "author": parts.count > 3 ? parts[3] : ""
+            ])
+        }
+
+        let json = (try? JSONSerialization.data(withJSONObject: commits))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
+        await sendToClientOrRelay(
+            WSPacket(action: .gitHistoryResult, payload: ["commits": json, "success": "true"], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func runGitCommand(_ args: [String], at path: String) async -> (success: Bool, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+        process.currentDirectoryURL = URL(fileURLWithPath: path)
+
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return (process.terminationStatus == 0, output)
+        } catch {
+            return (false, error.localizedDescription)
+        }
+    }
+
+    private func sendGitResult(action: WSAction, clientId: String, packetId: String, success: Bool, data: [String: String]? = nil, error: String? = nil) async {
+        var payload = data ?? [:]
+        payload["success"] = success ? "true" : "false"
+        if let err = error { payload["error"] = err }
+        await sendToClientOrRelay(WSPacket(action: action, payload: payload, id: packetId), to: clientId)
+    }
+
+    // MARK: - Heartbeat
 
     private func startHeartbeat() {
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in

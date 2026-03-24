@@ -12,13 +12,17 @@ struct WorkspaceView: View {
     @State private var selectedTabIndex = 0
     @State private var tabs: [TerminalTab] = [
         TerminalTab(id: "openclaw", title: "OpenClaw", isFixed: true, type: .openclaw),
-        TerminalTab(id: "claude-1", title: "Claude Code", isFixed: false, type: .claude, sessionId: nil)
+        TerminalTab(id: "claude-1", title: "Claude Code", isFixed: false, type: .claude, sessionId: nil, engineType: .claude)
     ]
     @State private var messageText = ""
     @State private var isStreamActive = false
     @State private var isAgentThinking = false
     @State private var agentActivity: String? = nil // Current tool use activity
     @StateObject private var chatService = ChatService()
+    @State private var showGitSheet = false
+    @State private var checkpointFeedback: String? = nil
+    @State private var isRecording = false
+    @StateObject private var voiceInput = VoiceInputManager()
 
     private var currentTab: TerminalTab {
         tabs[selectedTabIndex]
@@ -77,6 +81,32 @@ struct WorkspaceView: View {
                 inputBar
             }
             .onTapGesture { isInputFocused = false }
+
+            // Checkpoint feedback toast
+            if let feedback = checkpointFeedback {
+                VStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: feedback.contains("Saving") ? "arrow.triangle.2.circlepath" : feedback.contains("Saved") ? "checkmark.shield" : "xmark.shield")
+                            .foregroundColor(feedback.contains("Failed") ? TarsyTheme.accentTerracotta : TarsyTheme.accentMoss)
+                        Text(feedback)
+                            .font(TarsyTheme.monoFontSmall)
+                            .foregroundColor(TarsyTheme.textPrimary)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(TarsyTheme.backgroundSecondary)
+                    .cornerRadius(20)
+                    .shadow(color: .black.opacity(0.3), radius: 8)
+                    Spacer()
+                }
+                .padding(.top, 60)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+                .animation(.easeInOut, value: checkpointFeedback)
+            }
+        }
+        .sheet(isPresented: $showGitSheet) {
+            GitSafetyNetView(workspace: workspace)
+                .environmentObject(connectionManager)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -91,7 +121,16 @@ struct WorkspaceView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Button(action: { createCheckpoint() }) {
+                    Image(systemName: "shield.checkered")
+                        .foregroundColor(TarsyTheme.accentMoss)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    Button(action: { showGitSheet = true }) {
+                        Label("git safety net", systemImage: "shield.checkered")
+                    }
                     NavigationLink(destination: AIContextEditorView(workspace: workspace).environmentObject(workspaceService)) {
                         Label("ai context", systemImage: "brain")
                     }
@@ -137,7 +176,20 @@ struct WorkspaceView: View {
                     )
                 }
 
-                Button(action: { addClaudeTab() }) {
+                Menu {
+                    Button(action: { addEngineTab(.claude) }) {
+                        Label("Claude Code", systemImage: "brain.head.profile")
+                    }
+                    Button(action: { addEngineTab(.gemini) }) {
+                        Label("Gemini CLI", systemImage: "sparkles")
+                    }
+                    Button(action: { addEngineTab(.codex) }) {
+                        Label("Codex CLI", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+                    Button(action: { addEngineTab(.aider) }) {
+                        Label("Aider", systemImage: "wrench.and.screwdriver")
+                    }
+                } label: {
                     Image(systemName: "plus")
                         .font(.caption)
                         .foregroundColor(TarsyTheme.textSecondary)
@@ -252,9 +304,10 @@ struct WorkspaceView: View {
             await chatService.addMessage(msg)
             if let sessionId = currentTab.sessionId {
                 isAgentThinking = true
+                let engineType = currentTab.engineType?.rawValue ?? "claude"
                 connectionManager.send(WSPacket(
-                    action: .claudeMessage,
-                    payload: ["sessionId": sessionId, "message": option.label]
+                    action: .engineMessage,
+                    payload: ["sessionId": sessionId, "message": option.label, "engineType": engineType]
                 ))
             }
         }
@@ -280,9 +333,10 @@ struct WorkspaceView: View {
             await chatService.addMessage(msg)
             if let sessionId = currentTab.sessionId {
                 isAgentThinking = true
+                let engineType = currentTab.engineType?.rawValue ?? "claude"
                 connectionManager.send(WSPacket(
-                    action: .claudeMessage,
-                    payload: ["sessionId": sessionId, "message": answerText]
+                    action: .engineMessage,
+                    payload: ["sessionId": sessionId, "message": answerText, "engineType": engineType]
                 ))
             }
         }
@@ -331,6 +385,14 @@ struct WorkspaceView: View {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: 24))
                         .foregroundColor(TarsyTheme.textSecondary)
+                }
+
+                // Mic button
+                Button(action: { toggleVoiceInput() }) {
+                    Image(systemName: isRecording ? "mic.fill" : "mic")
+                        .font(.system(size: 18))
+                        .foregroundColor(isRecording ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
+                        .symbolEffect(.pulse, isActive: isRecording)
                 }
 
                 HStack(spacing: 0) {
@@ -472,19 +534,21 @@ struct WorkspaceView: View {
             isAgentThinking = true
             print("[Chat] sendMessage: tab=\(currentTab.type), sessionId=\(currentTab.sessionId ?? "nil"), connected=\(connectionManager.isConnected), path=\(workspace.localPath)")
 
-            if currentTab.type == .claude {
+            if currentTab.type == .claude || currentTab.type == .engine {
+                let engineType = currentTab.engineType ?? .claude
                 if let sessionId = currentTab.sessionId {
-                    print("[Chat] Sending claudeMessage to session \(sessionId)")
+                    print("[Chat] Sending engineMessage to session \(sessionId)")
                     connectionManager.send(WSPacket(
-                        action: .claudeMessage,
-                        payload: ["sessionId": sessionId, "message": text]
+                        action: .engineMessage,
+                        payload: ["sessionId": sessionId, "message": text, "engineType": engineType.rawValue]
                     ))
                 } else {
-                    print("[Chat] Sending claudeCreate with path=\(workspace.localPath)")
+                    print("[Chat] Sending engineCreate type=\(engineType.rawValue) path=\(workspace.localPath)")
                     connectionManager.send(WSPacket(
-                        action: .claudeCreate,
+                        action: .engineCreate,
                         payload: [
                             "path": workspace.localPath,
+                            "engineType": engineType.rawValue,
                             "aiContext": workspace.aiContext ?? "",
                             "message": text
                         ]
@@ -521,25 +585,29 @@ struct WorkspaceView: View {
             return
         }
 
-        print("[Workspace] Connected! Auto-starting Claude session for \(workspace.name)")
+        print("[Workspace] Connected! Auto-starting engine session for \(workspace.name)")
 
-        // Find the first Claude tab without a session
-        if let claudeIndex = tabs.firstIndex(where: { $0.type == .claude && $0.sessionId == nil }) {
-            selectedTabIndex = claudeIndex
+        // Find the first engine tab without a session
+        if let tabIndex = tabs.firstIndex(where: { ($0.type == .claude || $0.type == .engine) && $0.sessionId == nil }) {
+            selectedTabIndex = tabIndex
+            let engineType = tabs[tabIndex].engineType ?? .claude
             connectionManager.send(WSPacket(
-                action: .claudeCreate,
+                action: .engineCreate,
                 payload: [
                     "path": workspace.localPath,
+                    "engineType": engineType.rawValue,
                     "aiContext": workspace.aiContext ?? ""
                 ]
             ))
-            print("[Workspace] Sent claudeCreate for path=\(workspace.localPath)")
+            print("[Workspace] Sent engineCreate type=\(engineType.rawValue) for path=\(workspace.localPath)")
         }
     }
 
-    private func addClaudeTab() {
-        let count = tabs.filter { $0.type == .claude }.count + 1
-        let tab = TerminalTab(id: "claude-\(count)", title: "Claude \(count)", isFixed: false, type: .claude, sessionId: nil)
+    private func addEngineTab(_ engineType: AIEngineType) {
+        let count = tabs.filter { $0.engineType == engineType || ($0.type == .claude && engineType == .claude) }.count + 1
+        let tabType: TerminalTab.TabType = engineType == .claude ? .claude : .engine
+        let title = count > 1 ? "\(engineType.displayName) \(count)" : engineType.displayName
+        let tab = TerminalTab(id: "\(engineType.rawValue)-\(count)", title: title, isFixed: false, type: tabType, sessionId: nil, engineType: engineType)
         tabs.append(tab)
         selectedTabIndex = tabs.count - 1
     }
@@ -547,8 +615,9 @@ struct WorkspaceView: View {
     private func closeTab(at index: Int) {
         let tab = tabs[index]
         if let sessionId = tab.sessionId {
-            if tab.type == .claude {
-                connectionManager.send(WSPacket(action: .claudeClose, payload: ["sessionId": sessionId]))
+            if tab.type == .claude || tab.type == .engine {
+                let engineType = tab.engineType?.rawValue ?? "claude"
+                connectionManager.send(WSPacket(action: .engineClose, payload: ["sessionId": sessionId, "engineType": engineType]))
             } else {
                 connectionManager.send(WSPacket(action: .terminalClose, payload: ["sessionId": sessionId]))
             }
@@ -563,23 +632,9 @@ struct WorkspaceView: View {
         connectionManager.addListener("workspace-\(workspace.id)") { [self] packet in
             Task { @MainActor in
                 switch packet.action {
+                // Legacy Claude events (backward compat)
                 case .claudeOutput:
-                    isAgentThinking = false
-                    if let output = packet.payload?["output"] {
-                        if output.hasPrefix("🔧") {
-                            // Tool use activity — show as status, not in chat bubble
-                            let clean = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                            agentActivity = clean
-                        } else if output.hasPrefix("📋") {
-                            // Question prefix — show in chat
-                            agentActivity = nil
-                            chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
-                        } else {
-                            // Regular text response — show in chat bubble
-                            agentActivity = nil
-                            chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
-                        }
-                    }
+                    handleEngineOutput(packet)
                 case .claudeComplete:
                     isAgentThinking = false
                     agentActivity = nil
@@ -589,30 +644,111 @@ struct WorkspaceView: View {
                         tabs[selectedTabIndex].sessionId = sessionId
                     }
                 case .claudeAskUser:
+                    handleEngineAskUser(packet)
+
+                // Multi-engine events
+                case .engineOutput:
+                    handleEngineOutput(packet)
+                case .engineComplete:
                     isAgentThinking = false
-                    if let questionsJson = packet.payload?["questions"],
-                       let questionsData = questionsJson.data(using: .utf8),
-                       let questions = try? JSONDecoder().decode([InteractiveQuestion].self, from: questionsData) {
-                        if !questions.isEmpty {
-                            // Show paginated question card for all cases
-                            withAnimation {
-                                interactiveOptions = nil
-                                interactiveQuestions = questions
-                            }
-                        }
+                    agentActivity = nil
+                    await chatService.saveLastAssistantMessage()
+                case .engineCreate:
+                    if let sessionId = packet.payload?["sessionId"] {
+                        tabs[selectedTabIndex].sessionId = sessionId
                     }
+                case .engineAskUser:
+                    handleEngineAskUser(packet)
+
+                // OpenClaw
                 case .openclawOutput:
                     if let output = packet.payload?["output"] {
                         chatService.addAssistantChunk(workspaceId: workspace.id, tabId: "openclaw", content: output)
                     }
                 case .openclawComplete:
                     await chatService.saveLastAssistantMessage()
+
+                // Terminal
                 case .terminalOutput:
                     if let output = packet.payload?["output"] {
                         chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
                     }
+
                 default:
                     break
+                }
+            }
+        }
+    }
+
+    private func handleEngineOutput(_ packet: WSPacket) {
+        isAgentThinking = false
+        if let output = packet.payload?["output"] {
+            if output.hasPrefix("🔧") {
+                let clean = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                agentActivity = clean
+            } else {
+                agentActivity = nil
+                chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
+            }
+        }
+    }
+
+    private func handleEngineAskUser(_ packet: WSPacket) {
+        isAgentThinking = false
+        if let questionsJson = packet.payload?["questions"],
+           let questionsData = questionsJson.data(using: .utf8),
+           let questions = try? JSONDecoder().decode([InteractiveQuestion].self, from: questionsData) {
+            if !questions.isEmpty {
+                withAnimation {
+                    interactiveOptions = nil
+                    interactiveQuestions = questions
+                }
+            }
+        }
+    }
+
+    // MARK: - Voice Input
+
+    private func toggleVoiceInput() {
+        if isRecording {
+            voiceInput.stopRecording()
+            isRecording = false
+        } else {
+            voiceInput.startRecording { transcription in
+                messageText += transcription
+            }
+            isRecording = true
+            Haptics.light()
+        }
+    }
+
+    // MARK: - Git Safety Net
+
+    private func createCheckpoint() {
+        Haptics.medium()
+        connectionManager.send(WSPacket(
+            action: .gitCheckpoint,
+            payload: ["path": workspace.localPath, "message": "manual checkpoint"]
+        ))
+        checkpointFeedback = "Saving..."
+
+        // Listen for result
+        connectionManager.addListener("git-checkpoint-\(workspace.id)") { [self] packet in
+            Task { @MainActor in
+                if packet.action == .gitCheckpointResult {
+                    connectionManager.removeListener("git-checkpoint-\(workspace.id)")
+                    if packet.payload?["success"] == "true" {
+                        let files = packet.payload?["filesChanged"] ?? "0"
+                        checkpointFeedback = "Saved (\(files) files)"
+                        Haptics.success()
+                    } else {
+                        checkpointFeedback = "Failed"
+                        Haptics.error()
+                    }
+                    // Auto-dismiss
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    checkpointFeedback = nil
                 }
             }
         }
@@ -631,10 +767,12 @@ struct TerminalTab: Identifiable {
     let isFixed: Bool
     let type: TabType
     var sessionId: String?
+    var engineType: AIEngineType?
 
     enum TabType {
         case openclaw
         case claude
+        case engine
         case terminal
     }
 }
@@ -659,6 +797,9 @@ struct TabButton: View {
                         .font(.caption2)
                 case .openclaw:
                     Image(systemName: "hand.raised")
+                        .font(.caption2)
+                case .engine:
+                    Image(systemName: tab.engineType?.iconName ?? "terminal")
                         .font(.caption2)
                 case .terminal:
                     Image(systemName: "chevron.left.forwardslash.chevron.right")

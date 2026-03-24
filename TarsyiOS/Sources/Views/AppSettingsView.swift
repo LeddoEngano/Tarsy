@@ -1,0 +1,341 @@
+import SwiftUI
+import TarsyShared
+import Security
+
+struct AppSettingsView: View {
+    @Environment(\.dismiss) var dismiss
+    @State private var apiKeys: [APIKeyEntry] = []
+    @State private var editingProvider: AIEngineType?
+    @State private var keyInput = ""
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                TarsyTheme.backgroundPrimary.ignoresSafeArea()
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 24) {
+                        // API Keys Section
+                        sectionHeader("AI Provider Keys")
+
+                        VStack(spacing: 1) {
+                            ForEach(AIEngineType.allCases.filter { $0.envKeyName != nil }, id: \.self) { engine in
+                                apiKeyRow(engine)
+                            }
+                        }
+                        .cornerRadius(10)
+
+                        Text("Your API keys are stored securely in the device Keychain and sent to your Mac only when needed.")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .padding(.horizontal, 4)
+
+                        // About Section
+                        sectionHeader("About")
+
+                        VStack(spacing: 1) {
+                            infoRow("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+                            infoRow("Model", value: "BYOK (Bring Your Own Key)")
+                        }
+                        .cornerRadius(10)
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("done") { dismiss() }
+                        .foregroundColor(TarsyTheme.accentAmber)
+                }
+            }
+            .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+        }
+        .preferredColorScheme(.dark)
+        .onAppear { loadKeys() }
+        .sheet(item: $editingProvider) { provider in
+            APIKeyEditorSheet(provider: provider, existingKey: getKeyForProvider(provider)) { newKey in
+                saveKey(newKey, for: provider)
+                editingProvider = nil
+            } onDelete: {
+                deleteKey(for: provider)
+                editingProvider = nil
+            }
+        }
+    }
+
+    // MARK: - Components
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .foregroundColor(TarsyTheme.textSecondary)
+            .padding(.leading, 4)
+    }
+
+    private func apiKeyRow(_ engine: AIEngineType) -> some View {
+        Button(action: { editingProvider = engine }) {
+            HStack(spacing: 12) {
+                Image(systemName: engine.iconName)
+                    .font(.system(size: 16))
+                    .foregroundColor(TarsyTheme.accentAmber)
+                    .frame(width: 28)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(engine.displayName)
+                        .font(TarsyTheme.monoFontSmall)
+                        .foregroundColor(TarsyTheme.textPrimary)
+
+                    Text(engine.envKeyName ?? "")
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                }
+
+                Spacer()
+
+                if hasKey(for: engine) {
+                    HStack(spacing: 4) {
+                        Circle().fill(TarsyTheme.accentMoss).frame(width: 6, height: 6)
+                        Text("configured")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(TarsyTheme.accentMoss)
+                    }
+                } else {
+                    Text("not set")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                }
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10))
+                    .foregroundColor(TarsyTheme.textSecondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(TarsyTheme.backgroundSecondary)
+        }
+    }
+
+    private func infoRow(_ label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(TarsyTheme.monoFontSmall)
+                .foregroundColor(TarsyTheme.textPrimary)
+            Spacer()
+            Text(value)
+                .font(TarsyTheme.monoFontSmall)
+                .foregroundColor(TarsyTheme.textSecondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(TarsyTheme.backgroundSecondary)
+    }
+
+    // MARK: - Keychain
+
+    private func loadKeys() {
+        apiKeys = AIEngineType.allCases.compactMap { engine in
+            guard let envKey = engine.envKeyName else { return nil }
+            let key = KeychainHelper.load(key: envKey)
+            return APIKeyEntry(provider: engine, key: key)
+        }
+    }
+
+    private func hasKey(for engine: AIEngineType) -> Bool {
+        guard let envKey = engine.envKeyName else { return false }
+        return KeychainHelper.load(key: envKey) != nil
+    }
+
+    private func getKeyForProvider(_ engine: AIEngineType) -> String? {
+        guard let envKey = engine.envKeyName else { return nil }
+        return KeychainHelper.load(key: envKey)
+    }
+
+    private func saveKey(_ key: String, for engine: AIEngineType) {
+        guard let envKey = engine.envKeyName else { return }
+        KeychainHelper.save(key: envKey, value: key)
+        loadKeys()
+    }
+
+    private func deleteKey(for engine: AIEngineType) {
+        guard let envKey = engine.envKeyName else { return }
+        KeychainHelper.delete(key: envKey)
+        loadKeys()
+    }
+}
+
+// MARK: - API Key Editor Sheet
+
+struct APIKeyEditorSheet: View {
+    let provider: AIEngineType
+    let existingKey: String?
+    let onSave: (String) -> Void
+    let onDelete: () -> Void
+
+    @Environment(\.dismiss) var dismiss
+    @State private var keyText = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                TarsyTheme.backgroundPrimary.ignoresSafeArea()
+
+                VStack(alignment: .leading, spacing: 20) {
+                    // Provider info
+                    HStack(spacing: 12) {
+                        Image(systemName: provider.iconName)
+                            .font(.system(size: 24))
+                            .foregroundColor(TarsyTheme.accentAmber)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(provider.displayName)
+                                .font(TarsyTheme.monoFont)
+                                .foregroundColor(TarsyTheme.textPrimary)
+                            Text(provider.envKeyName ?? "")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(TarsyTheme.textSecondary)
+                        }
+                    }
+                    .padding(.top, 8)
+
+                    // Key input
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("API Key")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+
+                        TextField("sk-...", text: $keyText)
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textPrimary)
+                            .padding(12)
+                            .background(TarsyTheme.backgroundSecondary)
+                            .cornerRadius(8)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .focused($isFocused)
+                    }
+
+                    // Get key link
+                    if let url = getKeyURL(for: provider) {
+                        Link(destination: url) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.up.right.square")
+                                    .font(.system(size: 11))
+                                Text("Get your \(provider.displayName) API key")
+                                    .font(.system(size: 11, design: .monospaced))
+                            }
+                            .foregroundColor(TarsyTheme.accentAmber)
+                        }
+                    }
+
+                    // Save button
+                    Button(action: {
+                        guard !keyText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                        onSave(keyText.trimmingCharacters(in: .whitespaces))
+                    }) {
+                        Text("Save Key")
+                            .font(TarsyTheme.monoFont)
+                            .foregroundColor(TarsyTheme.backgroundPrimary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
+                            .background(keyText.isEmpty ? TarsyTheme.textSecondary : TarsyTheme.accentAmber)
+                            .cornerRadius(10)
+                    }
+                    .disabled(keyText.trimmingCharacters(in: .whitespaces).isEmpty)
+
+                    // Delete button (if key exists)
+                    if existingKey != nil {
+                        Button(action: { onDelete() }) {
+                            Text("Remove Key")
+                                .font(TarsyTheme.monoFontSmall)
+                                .foregroundColor(TarsyTheme.accentTerracotta)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(16)
+            }
+            .navigationTitle(provider.displayName)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("cancel") { dismiss() }
+                        .foregroundColor(TarsyTheme.textSecondary)
+                }
+            }
+            .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+        }
+        .preferredColorScheme(.dark)
+        .onAppear {
+            keyText = existingKey ?? ""
+            isFocused = true
+        }
+    }
+
+    private func getKeyURL(for provider: AIEngineType) -> URL? {
+        switch provider {
+        case .claude: return URL(string: "https://console.anthropic.com/settings/keys")
+        case .gemini: return URL(string: "https://aistudio.google.com/apikey")
+        case .codex: return URL(string: "https://platform.openai.com/api-keys")
+        default: return nil
+        }
+    }
+}
+
+// MARK: - Supporting Types
+
+struct APIKeyEntry: Identifiable {
+    let id = UUID()
+    let provider: AIEngineType
+    let key: String?
+}
+
+extension AIEngineType: @retroactive Identifiable {
+    public var id: String { rawValue }
+}
+
+// MARK: - Keychain Helper
+
+enum KeychainHelper {
+    static func save(key: String, value: String) {
+        guard let data = value.data(using: .utf8) else { return }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecAttrService as String: "com.tarsy.apikeys"
+        ]
+        SecItemDelete(query as CFDictionary)
+        var addQuery = query
+        addQuery[kSecValueData as String] = data
+        SecItemAdd(addQuery as CFDictionary, nil)
+    }
+
+    static func load(key: String) -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecAttrService as String: "com.tarsy.apikeys",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    static func delete(key: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key,
+            kSecAttrService as String: "com.tarsy.apikeys"
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+}

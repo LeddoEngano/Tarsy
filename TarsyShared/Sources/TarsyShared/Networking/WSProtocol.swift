@@ -62,6 +62,30 @@ public enum WSAction: String, Codable, Sendable {
     case openclawOutput = "openclaw:output"
     case openclawComplete = "openclaw:complete"
 
+    // Generic Engine (multi-provider)
+    case engineCreate = "engine:create"
+    case engineMessage = "engine:message"
+    case engineOutput = "engine:output"
+    case engineComplete = "engine:complete"
+    case engineClose = "engine:close"
+    case engineAskUser = "engine:ask_user"
+    case engineUserResponse = "engine:user_response"
+
+    // Git Safety Net
+    case gitCheckpoint = "git:checkpoint"
+    case gitCheckpointResult = "git:checkpoint_result"
+    case gitDiff = "git:diff"
+    case gitDiffResult = "git:diff_result"
+    case gitRollback = "git:rollback"
+    case gitRollbackResult = "git:rollback_result"
+    case gitHistory = "git:history"
+    case gitHistoryResult = "git:history_result"
+
+    // Relay
+    case relayMachineOnline = "relay:machine_online"
+    case relayMachineOffline = "relay:machine_offline"
+    case relayStreamFrame = "relay:stream_frame"
+
     // System
     case auth
     case authSuccess = "auth:success"

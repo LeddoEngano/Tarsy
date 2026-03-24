@@ -34,6 +34,8 @@ targets:
         NSPhotoLibraryUsageDescription: "Tarsy needs access to your photos to send images to the AI agent."
         NSPhotoLibraryAddUsageDescription: "Tarsy saves screenshots from the stream to your photo library."
         NSCameraUsageDescription: "Tarsy can use the camera to capture and send images to the AI agent."
+        NSMicrophoneUsageDescription: "Tarsy uses the microphone for voice-to-text input to send commands to the AI agent."
+        NSSpeechRecognitionUsageDescription: "Tarsy uses speech recognition to convert your voice into text commands."
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSAllowsArbitraryLoads: true

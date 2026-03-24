@@ -13,17 +13,18 @@ Desenvolvedores que usam agentes de IA para codificar precisam estar na frente d
 - Ver o resultado visual (UI/frontend) remotamente
 - Manter contexto de IA por projeto sem depender de arquivos no repo
 - Ter seguranca de poder voltar atras quando algo quebra
+- Revisar codigo gerado pelo agent sem abrir o laptop
 
 ### Solucao
 
-Dois apps Swift nativos que transformam o Mac do usuario em um server de desenvolvimento controlavel pelo iPhone, com streaming de video em tempo real, chat integrado com multiplos agentes de IA, e ferramentas de safety net (checkpoints, diffs, rollback).
+Dois apps Swift nativos que transformam o Mac do usuario em um server de desenvolvimento controlavel pelo iPhone, com streaming de video em tempo real, chat integrado com multiplos agentes de IA, ferramentas de safety net (checkpoints, diffs, rollback), file explorer com syntax highlighting, e voice input.
 
 ### Modelo de Negocio
 
 - **Preco**: $9/mes (assinatura via App Store)
 - **O que o user paga**: o app Tarsy (iOS + macOS)
-- **O que o user traz**: suas proprias API keys dos provedores de IA (Claude, Gemini, OpenAI, etc)
-- **BYOK (Bring Your Own Key)**: zero custo de LLM para o Tarsy
+- **O que o user traz**: seus proprios CLIs de IA ja configurados no Mac (Claude Code, Gemini, Codex, Aider)
+- **Zero custo de LLM para o Tarsy**: os CLIs usam a autenticacao que ja esta no Mac do user
 - **Free tier**: 1 workspace, todas as features (incluindo relay remoto)
 - **Pro**: workspaces ilimitados
 - **Sem trial**: o free tier ja permite experimentar o produto completo
@@ -114,9 +115,64 @@ Um unico repositorio com targets compartilhados:
 
 ---
 
-## 4. Features Novas (v2 - MVP Comercial)
+## 4. Features v2 - Implementadas
 
-### 4.1 Tunneling Transparente
+### 4.1 Multi-Provider (Claude first-class, outros suportados) [DONE]
+
+**Objetivo**: Tarsy nao e preso a um provider. Suporta qualquer CLI de agente de IA, mas Claude e o cidadao de primeira classe.
+
+**Providers**:
+| Provider    | CLI                | Nivel de suporte                       |
+|-------------|--------------------|-----------------------------------------|
+| Claude      | `claude`           | First-class: parser completo, interactive questions, thinking indicator, todas as features |
+| Gemini      | `gemini`           | Suportado: output em tempo real, comandos basicos |
+| Codex       | `codex`            | Suportado: output em tempo real, comandos basicos |
+| Aider       | `aider`            | Suportado: output em tempo real, comandos basicos |
+| Custom      | qualquer CLI       | User configura o comando, output raw    |
+
+**Arquitetura**:
+- `AIEngineProtocol` no macOS que abstrai o ciclo de vida de qualquer CLI
+- `ClaudeCodeSession` implementa o protocolo com parser rico
+- `GenericCLIEngine` implementa o protocolo com output basico (funciona pra qualquer CLI)
+- iOS: menu selector de engine ao criar nova tab (Claude, Gemini, Codex, Aider)
+- Protocolo `engine:create/message/output/complete/close/ask_user/user_response`
+
+**Nota sobre API Keys**: Os CLIs de IA usam a autenticacao ja configurada no Mac (ex: `claude login`, env vars). O iOS nao precisa gerenciar keys — so envia comandos, o Mac executa.
+
+### 4.2 Git (Checkpoints + Safety Net) [DONE]
+
+**Objetivo**: Dar seguranca pro dev experimentar com agentes de IA sem medo de quebrar o projeto.
+
+**Features implementadas**:
+- **Checkpoint com 1 tap**: botao na toolbar com icone de shield+branch. `git add -A && git commit` com feedback haptico e toast animado
+- **Aba Changes**: lista de arquivos modificados com status colorido (M=ambar, A=verde, D=vermelho)
+- **Aba History**: ultimos 30 commits com hash, mensagem, data relativa. Checkpoints marcados com icone
+- **Rollback**: tap num commit na history -> confirmation dialog -> `git reset --hard`
+- **UI**: acessivel via menu "..." > "Git" (icone de branch) ou botao de checkpoint na toolbar
+
+**Protocolo WebSocket**: `git:checkpoint`, `git:diff`, `git:rollback`, `git:history` + respectivos results
+
+### 4.3 Voice to Text [DONE]
+
+**Objetivo**: Ditar prompts e comandos em vez de digitar.
+
+**Implementacao**:
+- Apple Speech framework (on-device quando disponivel)
+- Botao de microfone na input bar (tap to record, tap to stop)
+- Transcricao inserida no campo de input (editavel antes de enviar)
+- Deteccao automatica de idioma
+- Icone pulsa em vermelho enquanto grava
+
+### 4.4 App Settings [DONE]
+
+- Tela de settings acessivel via icone de gear no Dashboard
+- Secao About com versao do app
+
+---
+
+## 5. Features v2 - A Implementar
+
+### 5.1 Tunneling Transparente
 
 **Objetivo**: O user instala Tarsy, faz login, e tudo conecta. Zero config de rede, zero apps terceiros visiveis.
 
@@ -140,37 +196,82 @@ Um unico repositorio com targets compartilhados:
 - Funcionar atras de NAT, firewalls corporativos, etc
 - Zero configuracao pelo user
 
-### 4.2 Multi-Provider (Claude first-class, outros suportados)
+### 5.2 Git - Diff Viewer e Branch Management
 
-**Objetivo**: Tarsy nao e preso a um provider. Suporta qualquer CLI de agente de IA, mas Claude e o cidadao de primeira classe.
+**Objetivo**: Expandir o Git para que o user possa revisar codigo e gerenciar branches pelo iPhone.
 
-**Providers**:
-| Provider    | CLI                | Nivel de suporte                       |
-|-------------|--------------------|-----------------------------------------|
-| Claude      | `claude`           | First-class: parser completo, interactive questions, thinking indicator, todas as features |
-| Gemini      | `gemini`           | Suportado: output em tempo real, comandos basicos |
-| Codex       | `codex`            | Suportado: output em tempo real, comandos basicos |
-| Aider       | `aider`            | Suportado: output em tempo real, comandos basicos |
-| Custom      | qualquer CLI       | User configura o comando, output raw    |
+**Diff Viewer** (dentro da aba Changes do Git):
+- Tap num arquivo modificado -> abre diff estilo GitHub
+- Mostra apenas os **hunks** (trechos que mudaram) com 3 linhas de contexto ao redor
+- Linhas adicionadas em verde, removidas em vermelho
+- Numero da linha a esquerda
+- Scroll vertical, font monospaced
+- Compacto para tela de iPhone — nao mostra o arquivo inteiro
 
-**Arquitetura**:
-- `AIEngineProtocol` no macOS que abstrai o ciclo de vida de qualquer CLI:
-  - `start(workingDir:)` -> spawna o processo
-  - `send(message:)` -> envia input
-  - `onOutput(_ handler:)` -> callback de output
-  - `onAskUser(_ handler:)` -> callback de pergunta interativa (Claude-only inicialmente)
-  - `stop()` -> mata o processo
-- `ClaudeCodeEngine` (existente, refatorar) — parser rico
-- `GenericCLIEngine` — parser basico que funciona pra Gemini/Codex/Aider/qualquer CLI
-- iOS: selector de engine por workspace ou por tab
+**Branch Management**:
+- Lista de branches locais e remotas
+- Trocar de branch com tap
+- Indicador da branch atual
+- **Pull com 1 tap**: icone de seta pra baixo ao lado do nome da branch na info bar
 
-**Config no iOS**:
-- Settings: user adiciona API keys por provider
-- Keys ficam no Keychain do iOS e sao enviadas ao macOS sob demanda
-- Workspace settings: escolhe qual engine usar como default
-- Pode ter tabs com engines diferentes no mesmo workspace
+**Implementacao**:
+- macOS: novos handlers `git:branches`, `git:checkout`, `git:pull`, `git:file_diff`
+- iOS: UI integrada na tela de Git existente
 
-### 4.3 Paywall ($9/mes)
+### 5.3 File Explorer
+
+**Objetivo**: Navegar e ler qualquer arquivo do projeto pelo iPhone. Essencial quando o chefe pede uma informacao que esta num arquivo, ou pra entender a estrutura do projeto.
+
+**Acesso**: Menu "..." do workspace > "File Explorer"
+
+**Features**:
+- **Tree view**: navegacao por pastas com lazy loading
+- **Respeita .gitignore**: nao mostra node_modules, .git, etc
+- **Search**: busca por **nome de arquivo** (filtro em tempo real na arvore)
+- **File preview**: abre arquivo com **syntax highlighting** por linguagem (Swift, JS, Python, TS, JSON, etc)
+- **Read-only**: sem edicao — o agent faz isso
+
+**UI**:
+- Tela fullscreen com barra de search no topo
+- Lista de pastas/arquivos com icones por tipo
+- Pastas expandem ao tocar
+- Tap no arquivo abre preview com syntax highlighting
+- Back button pra voltar a arvore
+
+**Implementacao**:
+- macOS: handlers `file:tree` (respeita .gitignore), `file:read`
+- `file:tree` retorna arvore JSON com nome, tipo (file/dir), path, tamanho
+- `file:read` retorna conteudo do arquivo + linguagem detectada pela extensao
+- iOS: TreeView com lazy loading + syntax highlighted preview
+- Syntax highlighting: usar lib como `Splash` ou `Highlightr` para Swift
+
+### 5.4 Info Bar (Status do Workspace)
+
+**Objetivo**: Mostrar informacoes importantes do workspace de forma compacta e acessivel, sem ocupar espaco.
+
+**Posicao**: Barra fina abaixo do campo de input.
+
+**Layout**:
+```
+ main ↓  |  Claude Code - Opus 4.6  |  45% ctx
+```
+
+**Elementos**:
+- **Branch atual** + icone de seta pra baixo (↓): tap na seta faz `git pull` na branch atual. Tap no nome da branch abre branch switcher
+- **Engine + modelo**: mostra o engine ativo e o modelo especifico (ex: "Claude Code - Opus 4.6", "Gemini - 2.0 Flash")
+- **Context window %**: porcentagem de uso da janela de contexto do modelo
+
+**Obtencao dos dados**:
+- **Branch**: via `git rev-parse --abbrev-ref HEAD` (ja existe no workspace)
+- **Engine/modelo**: Claude Code emite no stream-json metadata do modelo. Parsear campo `model` dos eventos
+- **Context %**: Claude Code emite eventos `usage` com `input_tokens` e `output_tokens`. Calcular `total / context_window_size * 100`. Contexto window size por modelo e conhecido (200k para Sonnet, 1M para Opus, etc)
+- **Para engines genericos** (Gemini, Codex): mostrar engine name sem modelo/context por enquanto. Investigar no futuro
+
+**Implementacao**:
+- macOS: parsear eventos `usage` e `model` do stream-json, enviar via novo WSAction `engine:status`
+- iOS: barra compacta com 3 seções, tap actions para pull e branch switch
+
+### 5.5 Paywall ($9/mes)
 
 **Objetivo**: Monetizar o app via assinatura mensal.
 
@@ -181,7 +282,7 @@ Um unico repositorio com targets compartilhados:
   - 1 workspace
   - Todos os engines
   - Relay/tunnel incluso
-  - Todas as features (git, voice, MCPs, etc)
+  - Todas as features (git, voice, file explorer, etc)
   - Sem limitacoes artificiais — o user experimenta o produto completo
 - **Pro ($9/mes)**:
   - Workspaces ilimitados
@@ -195,56 +296,11 @@ Um unico repositorio com targets compartilhados:
 - Restore purchases flow
 - Sem trial — free tier ja e a experiencia completa
 
-### 4.4 Git Safety Net (Checkpoints)
-
-**Objetivo**: Dar seguranca pro dev experimentar com agentes de IA sem medo de quebrar o projeto. Nao e um git client completo — e uma safety net.
-
-**Conceito**: Checkpoint = "aqui esta funcionando". O user salva o estado atual com um tap, experimenta a vontade, e pode voltar atras se algo quebrar.
-
-**Features**:
-- **Checkpoint** (botao principal): `git add -A && git commit -m "checkpoint"` com um tap
-  - Icone de "shield" ou "save" sempre visivel
-  - Feedback haptico ao salvar
-  - Badge mostrando quantos arquivos foram salvos
-- **Ver mudancas**: diff desde o ultimo checkpoint (o que mudou?)
-  - Lista de arquivos modificados com +/- lines count
-  - Tap no arquivo para ver diff (verde/vermelho)
-- **Rollback**: voltar pro ultimo checkpoint se algo quebrou
-  - Confirmacao antes de executar ("Isso vai desfazer X arquivos modificados")
-- **Historico de checkpoints**: lista dos ultimos checkpoints com timestamp
-- **Commit "de verdade"**: quando satisfeito, user pede pro Claude commitar e criar PR via chat (fluxo existente, nao precisa de UI nova)
-
-**UI**:
-- Botao de checkpoint flutuante ou na toolbar do workspace
-- Sheet/modal para ver mudancas e historico
-- Nao precisa de tab dedicada — e leve e acessivel de qualquer lugar
-
-**Implementacao**:
-- macOS: handlers WebSocket `git:checkpoint`, `git:diff`, `git:rollback`, `git:history`
-- iOS: UI minimalista focada em seguranca, nao em git management
-
-### 4.5 Voice to Text
-
-**Objetivo**: Ditar prompts e comandos em vez de digitar. Essencial para uso no dia a dia quando o user esta longe do teclado.
-
-**Implementacao**:
-- Apple Speech framework (on-device, sem API externa, sem custo)
-- Botao de microfone no input bar (hold to record, release to send)
-- Preview do texto transcrito antes de enviar (editavel)
-- Suporte a multiplos idiomas (detecta automatico)
-- Funciona offline (on-device processing)
-
-**UX**:
-- Hold no mic -> gravando (feedback visual: onda de audio)
-- Release -> mostra transcricao no campo de input (user pode editar antes de enviar)
-- Tap no send -> envia
-- Swipe down no mic (enquanto segura) -> cancela
-
-### 4.6 MCP/Tool Store (Guided Setup)
+### 5.6 MCP/Tool Store (Guided Setup)
 
 **Objetivo**: Facilitar a configuracao de MCPs e ferramentas para o agente de IA. Iniciantes nao precisam editar JSON nem saber o que e um MCP.
 
-**Conceito**: Uma "loja" curada de integracoes dentro do Tarsy. O user toca em "GitHub", faz auth, e pronto — o agente ja pode usar.
+**Conceito**: Uma "loja" curada de integracoes dentro do Tarsy. O user toca em "GitHub", faz auth, e pronto — o agente ja pode usar. O processo deve ser o mais simples possivel — idealmente one tap para integracoes sem auth.
 
 **Catalogo curado** (inicial):
 | Integracao  | Auth necessario          | Taps estimados |
@@ -278,9 +334,9 @@ Um unico repositorio com targets compartilhados:
 
 ---
 
-## 5. Telas - Tarsy iOS (v2)
+## 6. Telas - Tarsy iOS (v2)
 
-### 5.1 Onboarding
+### 6.1 Onboarding
 
 1. Splash com animacao do Tarsier
 2. "Welcome to Tarsy" - breve explicacao do produto
@@ -289,18 +345,22 @@ Um unico repositorio com targets compartilhados:
 5. Aguarda conexao automatica via tunnel
 6. Dashboard (com 1 workspace free pra comecar)
 
-### 5.2 Dashboard (atualizado)
+### 6.2 Dashboard (atualizado)
 
 Cards de workspace com informacoes adicionais:
 - Engine ativo (icone: Claude/Gemini/Codex)
 - Ultimo checkpoint (timestamp)
 - Status do agente (idle/running/waiting)
 
+Header:
+- "TARSY" + mac online/offline status
+- Botoes: "+" (novo workspace), gear (settings), sign out
+
 Botao "+" pra criar workspace:
 - Free: se ja tem 1 -> paywall
 - Pro: cria normalmente
 
-### 5.3 Workspace (atualizado)
+### 6.3 Workspace (atualizado)
 
 Layout:
 ```
@@ -308,34 +368,49 @@ Layout:
 |     Stream de Video       |
 |   (touch interativo)      |
 +---------------------------+
-| [Claude] [Term2] [+]     |  <- tabs
+| [Claude▼][Gemini][+]     |  <- tabs (+ abre menu de engines)
 +---------------------------+
 |                           |
 |   Chat area               |
 |                           |
 |   [floating question card]|
 +---------------------------+
-| [mic] [input field] [send]|  <- input bar
-|          [checkpoint btn] |  <- safety net
+| [+][mic] [input field][^] |  <- input bar
+| main↓ | Opus 4.6 | 45%ctx|  <- info bar
 +---------------------------+
 ```
 
-Novos elementos:
-- Botao de checkpoint sempre acessivel
-- Botao de mic no input bar
-- Selector de engine no "+" (criar tab com engine diferente)
+Toolbar:
+- Titulo: nome do workspace + status
+- Botao shield+branch: checkpoint com 1 tap
+- Menu "...": Git, File Explorer, AI Context, Settings
 
-### 5.4 Settings
+### 6.4 Git (sheet)
+
+- **Icone**: branch (nao shield)
+- **Aba Changes**: lista de arquivos modificados. Tap no arquivo -> diff viewer (hunks com contexto)
+- **Aba History**: commits com hash, mensagem, data. Tap -> rollback com confirmacao
+- **Branch switcher**: lista de branches, tap pra trocar
+- **Botao checkpoint**: no topo do sheet
+
+### 6.5 File Explorer (tela separada)
+
+- Barra de search no topo (busca por nome de arquivo)
+- Tree view de pastas/arquivos
+- Tap em pasta -> expande
+- Tap em arquivo -> preview com syntax highlighting
+- Read-only
+- Respeita .gitignore
+
+### 6.6 Settings
 
 - **Account**: email, subscription status, manage subscription
-- **AI Providers**: adicionar/remover API keys por provider
-  - Cada provider com campo de key + instrucoes + link "Get key"
 - **Integrations (MCPs)**: tool store com catalogo curado
 - **About**: versao, links, support
 
 ---
 
-## 6. Tunneling - Decisao Tecnica (a definir)
+## 7. Tunneling - Decisao Tecnica (a definir)
 
 O tunneling e a feature mais critica do v2. A decisao de implementacao impacta:
 - Latencia do stream
@@ -375,7 +450,7 @@ O tunneling e a feature mais critica do v2. A decisao de implementacao impacta:
 
 ---
 
-## 7. Supabase Schema (atualizado)
+## 8. Supabase Schema (atualizado)
 
 ### Novas tabelas
 
@@ -390,15 +465,6 @@ subscriptions (
   current_period_ends_at timestamp
   created_at timestamp
   updated_at timestamp
-)
-
--- API Keys (encrypted)
-api_keys (
-  id uuid PK
-  user_id uuid FK -> users
-  provider text -- 'anthropic' | 'google' | 'openai' | 'custom'
-  encrypted_key text -- encrypted at rest
-  created_at timestamp
 )
 
 -- MCP Configs
@@ -422,7 +488,7 @@ mcp_configs (
 
 ---
 
-## 8. Design Visual
+## 9. Design Visual
 
 ### Identidade
 
@@ -445,24 +511,27 @@ mcp_configs (
 - Status badges coloridos (verde=running, ambar=starting, cinza=idle)
 - Interactive questions: card paginado flutuante estilo Anthropic
 - Paywall: clean, sem overwhelm, uma unica proposta ("Unlimited workspaces")
-- Checkpoint button: prominente, sensacao de seguranca
+- Git: icone de branch, checkpoint button com shield+branch
+- Info bar: compacta, monospaced, 3 secoes separadas por |
+- File Explorer: tree view com icones por tipo de arquivo
+- Diff viewer: verde/vermelho estilo GitHub, hunks compactos
 - Tool store: grid com icones, status claro (connected/not configured)
 
 ---
 
-## 9. Seguranca
+## 10. Seguranca
 
 - Tunnel: criptografia end-to-end independente da tecnologia escolhida
 - Auth tokens Supabase validados em todos os pontos (iOS, tunnel, macOS)
-- API keys: criptografadas at rest no Supabase, Keychain no iOS
 - MCP tokens: armazenados criptografados, enviados ao macOS sob demanda
 - Conexao direta LAN quando possivel (menor superficie de ataque)
 - Chat history criptografado at rest no Supabase
 - RevenueCat: server-side validation de receipts
+- File Explorer: read-only, respeita .gitignore (nao expoe arquivos sensiveis)
 
 ---
 
-## 10. Fases de Desenvolvimento (v2)
+## 11. Fases de Desenvolvimento (v2)
 
 ### Fase 1 - Tunneling Transparente
 - [ ] Investigar opcoes (Tailscale embedded vs relay vs WireGuard)
@@ -473,15 +542,45 @@ mcp_configs (
 - [ ] Reconexao automatica ao mudar de rede
 - [ ] Testar latencia do stream
 
-### Fase 2 - Multi-Provider
-- [ ] Definir `AIEngineProtocol` no macOS
-- [ ] Refatorar `ClaudeCodeSession` para implementar o protocolo
-- [ ] Implementar `GenericCLIEngine` (funciona pra Gemini/Codex/Aider)
-- [ ] iOS: selector de engine por tab/workspace
-- [ ] iOS: tela de API keys no Settings
-- [ ] Armazenamento seguro de keys (Keychain + Supabase encrypted)
+### Fase 2 - Multi-Provider [DONE]
+- [x] Definir `AIEngineProtocol` no macOS
+- [x] Refatorar `ClaudeCodeSession` para implementar o protocolo
+- [x] Implementar `GenericCLIEngine` (funciona pra Gemini/Codex/Aider)
+- [x] iOS: selector de engine por tab (menu no +)
+- [x] Protocolo `engine:*` no WebSocket
 
-### Fase 3 - Paywall
+### Fase 3 - Git [PARCIAL]
+- [x] macOS: handlers `git:checkpoint`, `git:diff`, `git:rollback`, `git:history`
+- [x] iOS: botao de checkpoint com feedback
+- [x] iOS: aba Changes (lista de arquivos modificados)
+- [x] iOS: aba History com rollback
+- [ ] iOS: diff viewer por hunks (tap no arquivo -> diff estilo GitHub)
+- [ ] iOS: branch switcher (lista branches, trocar, pull)
+- [ ] Renomear para "Git" com icone de branch
+- [ ] Icone de checkpoint: shield com mini branch
+
+### Fase 4 - Voice to Text [DONE]
+- [x] Integrar Apple Speech framework
+- [x] Botao de mic na input bar
+- [x] Transcricao inserida no campo de input
+- [x] Deteccao automatica de idioma
+
+### Fase 5 - File Explorer
+- [ ] macOS: handler `file:tree` (respeita .gitignore)
+- [ ] macOS: handler `file:read` (retorna conteudo + linguagem)
+- [ ] iOS: TreeView com lazy loading
+- [ ] iOS: search por nome de arquivo
+- [ ] iOS: file preview com syntax highlighting
+- [ ] Acessivel via menu "..." > "File Explorer"
+
+### Fase 6 - Info Bar
+- [ ] macOS: parsear eventos `usage` e `model` do stream-json do Claude Code
+- [ ] macOS: enviar `engine:status` com model, tokens, context %
+- [ ] iOS: info bar abaixo do input (branch ↓ | engine - model | ctx %)
+- [ ] iOS: tap na seta da branch -> git pull
+- [ ] iOS: tap no nome da branch -> branch switcher
+
+### Fase 7 - Paywall
 - [ ] Integrar RevenueCat SDK no iOS
 - [ ] Configurar produto no App Store Connect ($9/mes)
 - [ ] Paywall screen no iOS (aparece ao criar 2o workspace)
@@ -489,20 +588,7 @@ mcp_configs (
 - [ ] Enforcar limite do free tier (1 workspace)
 - [ ] Restore purchases flow
 
-### Fase 4 - Voice to Text
-- [ ] Integrar Apple Speech framework
-- [ ] Botao de mic no input bar (hold to record)
-- [ ] Preview de transcricao editavel
-- [ ] Deteccao automatica de idioma
-
-### Fase 5 - Git Safety Net (Checkpoints)
-- [ ] macOS: handlers `git:checkpoint`, `git:diff`, `git:rollback`, `git:history`
-- [ ] iOS: botao de checkpoint
-- [ ] iOS: view de mudancas desde ultimo checkpoint
-- [ ] iOS: rollback com confirmacao
-- [ ] iOS: historico de checkpoints
-
-### Fase 6 - MCP/Tool Store
+### Fase 8 - MCP/Tool Store
 - [ ] Definir catalogo inicial de integracoes
 - [ ] macOS: auto-setup de MCPs (escreve config, instala server)
 - [ ] iOS: UI de tool store (grid com icones)
@@ -510,13 +596,7 @@ mcp_configs (
 - [ ] Fluxo de API key para Linear, Jira, Sentry
 - [ ] Health check de MCPs (validar que esta funcionando)
 
-### Fase 7 - File Browser (nice to have)
-- [ ] macOS: `file:tree` endpoint (respeita .gitignore)
-- [ ] macOS: `file:read` endpoint
-- [ ] iOS: TreeView com lazy loading
-- [ ] File preview com syntax highlighting
-
-### Fase 8 - Polish & Launch
+### Fase 9 - Polish & Launch
 - [ ] Performance tuning do stream
 - [ ] Error handling e recovery robusto
 - [ ] Onboarding flow completo
@@ -526,7 +606,7 @@ mcp_configs (
 
 ---
 
-## 11. Metricas de Sucesso
+## 12. Metricas de Sucesso
 
 - **Onboarding completion rate**: % de users que completam setup (meta: >80%)
 - **Free to paid conversion**: % de free users que fazem upgrade (meta: >20%)
@@ -535,10 +615,11 @@ mcp_configs (
 - **Tunnel latency**: latencia p95 do stream (meta: <200ms)
 - **Churn rate**: % de cancelamento mensal (meta: <8%)
 - **Checkpoint usage**: % de sessions que usam checkpoint (indica confianca no produto)
+- **File Explorer usage**: % de sessions que abrem file explorer (indica review de codigo)
 
 ---
 
-## 12. Questoes em Aberto
+## 13. Questoes em Aberto
 
 1. **Tunneling**: qual tecnologia usar? (Tailscale embedded vs relay vs WireGuard vs hibrido)
 2. **iPad support**: adicionar no futuro? (tela maior seria ideal pra stream)
@@ -547,3 +628,4 @@ mcp_configs (
 5. **Gravacao**: salvar replays das sessions pra review depois?
 6. **Marketplace de MCPs**: abrir pra community contribuir integracoes?
 7. **Self-hosted**: permitir que users enterprise rodem infra propria?
+8. **Context window para engines genericos**: Gemini/Codex expõem token usage de forma estruturada?
