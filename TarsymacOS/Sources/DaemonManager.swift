@@ -277,6 +277,22 @@ class DaemonManager: ObservableObject {
             await handleDevServerStatus(clientId: clientId, packet: packet)
         case .browserOpenUrl:
             await handleBrowserOpenUrl(clientId: clientId, packet: packet)
+        case .browserBack:
+            await sendBrowserShortcut(key: "[", modifiers: .maskCommand)
+        case .browserForward:
+            await sendBrowserShortcut(key: "]", modifiers: .maskCommand)
+        case .browserRefresh:
+            await sendBrowserShortcut(key: "r", modifiers: .maskCommand)
+        case .browserMobileViewport:
+            await handleBrowserMobileViewport(clientId: clientId, packet: packet)
+        case .browserDesktopViewport:
+            await handleBrowserDesktopViewport(clientId: clientId, packet: packet)
+        case .browserTabList:
+            await handleBrowserTabList(clientId: clientId, packet: packet)
+        case .browserTabSwitch:
+            await handleBrowserTabSwitch(clientId: clientId, packet: packet)
+        case .browserTabClose:
+            await handleBrowserTabClose(clientId: clientId, packet: packet)
         case .streamStart:
             await handleStreamStart(clientId: clientId, packet: packet)
         case .streamStop:
@@ -311,11 +327,21 @@ class DaemonManager: ObservableObject {
             await handleGitCheckout(clientId: clientId, packet: packet)
         case .gitPull:
             await handleGitPull(clientId: clientId, packet: packet)
+        // HTTP Proxy
+        case .proxyDetectPorts:
+            await handleProxyDetectPorts(clientId: clientId, packet: packet)
+        case .proxyRequest:
+            await handleProxyRequest(clientId: clientId, packet: packet)
         // File Explorer
         case .fileTree:
             await handleFileTree(clientId: clientId, packet: packet)
         case .fileRead:
             await handleFileRead(clientId: clientId, packet: packet)
+        // MCP Store
+        case .mcpList:
+            await handleMCPList(clientId: clientId, packet: packet)
+        case .mcpHealthCheck:
+            await handleMCPHealthCheck(clientId: clientId, packet: packet)
         // Sudo
         case .sudoRequest:
             await handleSudoRequest(clientId: clientId, packet: packet)
@@ -718,13 +744,29 @@ class DaemonManager: ObservableObject {
             let sessionId = try await terminalManager.createSession(workingDirectory: expandedPath)
             devServerSessions[expandedPath] = sessionId
 
-            // Monitor terminal output for server-ready signals
+            // Monitor terminal output for server-ready signals and port detection
             let serverReady = DevServerReadySignal()
             await terminalManager.setOutputHandler(for: sessionId) { [weak self] output in
                 Task {
+                    let wasReady = await serverReady.isReady
                     await serverReady.check(output)
                     await self?.detectSudoPromptInOutput(output, sessionId: sessionId)
                     await MainActor.run { self?.log("devServer[\(sessionId.prefix(8))]: \(output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))") }
+
+                    // Detect port from output and notify iOS
+                    if !wasReady, await serverReady.isReady {
+                        let detectedPort = self?.extractPort(from: output)
+                        if let port = detectedPort {
+                            await self?.sendToClientOrRelay(
+                                WSPacket(action: .devServerStart, payload: [
+                                    "status": "ready",
+                                    "port": "\(port)",
+                                    "sessionId": sessionId
+                                ]),
+                                to: clientId
+                            )
+                        }
+                    }
                 }
             }
 
@@ -843,12 +885,227 @@ class DaemonManager: ObservableObject {
         )
     }
 
+    private func sendBrowserShortcut(key: String, modifiers: CGEventFlags) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                // Get the key code
+                let keyCode: UInt16
+                switch key {
+                case "[": keyCode = 0x21
+                case "]": keyCode = 0x1E
+                case "r": keyCode = 0x0F
+                default: keyCode = 0x00
+                }
+
+                if let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true),
+                   let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) {
+                    keyDown.flags = modifiers
+                    keyUp.flags = modifiers
+                    keyDown.post(tap: .cghidEventTap)
+                    keyUp.post(tap: .cghidEventTap)
+                }
+                continuation.resume()
+            }
+        }
+    }
+
+    private var mobileViewportWindow: NSRunningApplication?
+    private var originalWindowId: CGWindowID?
+
+    private var savedDesktopWindowId: CGWindowID?
+
+    private func handleBrowserMobileViewport(clientId: String, packet: WSPacket) async {
+        log("browserMobileViewport: opening mobile window")
+
+        // Save current window for later restoration
+        savedDesktopWindowId = screenCapture.selectedWindow?.windowID
+
+        // Open a new Chrome window with mobile size using CLI (no AppleScript permissions needed)
+        let mobileWidth = 430
+        let mobileHeight = 932
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                proc.arguments = ["-na", "Google Chrome", "--args",
+                                  "--new-window",
+                                  "--window-size=\(mobileWidth),\(mobileHeight)",
+                                  "--window-position=50,50",
+                                  "about:blank"]
+                proc.standardOutput = Pipe()
+                proc.standardError = Pipe()
+                try? proc.run()
+                proc.waitUntilExit()
+                continuation.resume()
+            }
+        }
+
+        // Wait for window to open
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+
+        // Capture the smallest Chrome window (the new mobile one)
+        if let window = await screenCapture.findWindow(appName: "Google Chrome", preferSmall: true) {
+            await screenCapture.startCapturing(window: window, fps: 15, scale: 1.0)
+            log("browserMobileViewport: capturing mobile window (\(Int(window.frame.width))x\(Int(window.frame.height)))")
+        } else {
+            log("browserMobileViewport: could not find mobile window")
+        }
+
+        await sendToClientOrRelay(
+            WSPacket(action: .browserMobileViewport, payload: ["status": "opened"], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func handleBrowserDesktopViewport(clientId: String, packet: WSPacket) async {
+        log("browserDesktopViewport: restoring desktop window")
+
+        // Find and close the small mobile window using CGWindowList
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                // Use keyboard shortcut Cmd+W to close current (mobile) window
+                if let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0x0D, keyDown: true),
+                   let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0x0D, keyDown: false) {
+                    keyDown.flags = .maskCommand
+                    keyUp.flags = .maskCommand
+                    keyDown.post(tap: .cghidEventTap)
+                    keyUp.post(tap: .cghidEventTap)
+                }
+                continuation.resume()
+            }
+        }
+
+        try? await Task.sleep(nanoseconds: 500_000_000)
+
+        // Re-capture the main (large) desktop window
+        if let window = await screenCapture.findWindow(appName: "Google Chrome", preferSmall: false) {
+            await screenCapture.startCapturing(window: window, fps: 15, scale: 1.0)
+            log("browserDesktopViewport: capturing desktop window (\(Int(window.frame.width))x\(Int(window.frame.height)))")
+        } else {
+            log("browserDesktopViewport: could not find desktop window")
+        }
+
+        await sendToClientOrRelay(
+            WSPacket(action: .browserDesktopViewport, payload: ["status": "restored"], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func handleBrowserTabList(clientId: String, packet: WSPacket) async {
+        // Get tab count
+        let countScript = """
+        tell application "Google Chrome"
+            return (count of tabs of front window) as text
+        end tell
+        """
+        let countStr = await runAppleScript(countScript)
+        let tabCount = Int(countStr.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        log("browserTabList: \(tabCount) tabs")
+
+        guard tabCount > 0 else {
+            await sendToClientOrRelay(
+                WSPacket(action: .browserTabListResult, payload: ["tabs": ""], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        // Get each tab individually to avoid concatenation issues
+        var entries: [String] = []
+        for i in 1...tabCount {
+            let titleScript = """
+            tell application "Google Chrome"
+                return title of tab \(i) of front window
+            end tell
+            """
+            let urlScript = """
+            tell application "Google Chrome"
+                return URL of tab \(i) of front window
+            end tell
+            """
+            let title = await runAppleScript(titleScript)
+            let url = await runAppleScript(urlScript)
+            let host = URL(string: url)?.host ?? ""
+            let favicon = host.isEmpty ? "" : "https://www.google.com/s2/favicons?sz=32&domain=\(host)"
+            entries.append("\(i)||\(title)||\(url)||\(favicon)")
+        }
+
+        let tabsPayload = entries.joined(separator: "\n")
+        log("browserTabList: payload \(tabsPayload.prefix(200))")
+        await sendToClientOrRelay(
+            WSPacket(action: .browserTabListResult, payload: ["tabs": tabsPayload], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func handleBrowserTabSwitch(clientId: String, packet: WSPacket) async {
+        guard let indexStr = packet.payload?["index"], let index = Int(indexStr) else { return }
+        let script = """
+        tell application "Google Chrome"
+            set active tab index of front window to \(index)
+        end tell
+        """
+        await runAppleScript(script)
+        // Re-capture the window after tab switch
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        if let window = await screenCapture.findWindow(appName: "Google Chrome", preferSmall: false) {
+            await screenCapture.startCapturing(window: window, fps: 15, scale: 1.0)
+        }
+    }
+
+    private func handleBrowserTabClose(clientId: String, packet: WSPacket) async {
+        guard let indexStr = packet.payload?["index"], let index = Int(indexStr) else { return }
+        let script = """
+        tell application "Google Chrome"
+            close tab \(index) of front window
+        end tell
+        """
+        await runAppleScript(script)
+    }
+
+    @discardableResult
+    private func runAppleScript(_ source: String) async -> String {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                var error: NSDictionary?
+                let script = NSAppleScript(source: source)
+                let result = script?.executeAndReturnError(&error)
+                if let error {
+                    Task { @MainActor in
+                        self?.log("AppleScript error: \(error)")
+                    }
+                }
+                continuation.resume(returning: result?.stringValue ?? "")
+            }
+        }
+    }
+
     // MARK: - Dev Server Helpers
 
     private func openBrowserToUrl(_ urlString: String) async {
         guard let url = URL(string: urlString) else { return }
         log("openBrowserToUrl: opening \(urlString)")
         NSWorkspace.shared.open(url)
+    }
+
+    private nonisolated func extractPort(from output: String) -> Int? {
+        // Match patterns like "localhost:3000", "127.0.0.1:5173", ":8080", "port 3000"
+        let patterns = [
+            "localhost:(\\d{4,5})",
+            "127\\.0\\.0\\.1:(\\d{4,5})",
+            "0\\.0\\.0\\.0:(\\d{4,5})",
+            "\\[::\\]:(\\d{4,5})",
+            "port\\s+(\\d{4,5})",
+            ":(\\d{4,5})"
+        ]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+               let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
+               let range = Range(match.range(at: 1), in: output) {
+                return Int(output[range])
+            }
+        }
+        return nil
     }
 
     private func portFromUrl(_ urlString: String?) -> UInt16? {
@@ -947,12 +1204,50 @@ class DaemonManager: ObservableObject {
     // MARK: - Screenshot Transfer
 
     private func handleScreenshotRequest(clientId: String, packet: WSPacket) async {
+        let stack = packet.payload?["stack"] ?? "mobile"
+
+        // For web/fullstack: capture from current stream frame
+        if stack == "web" || stack == "fullstack" {
+            log("screenshot: capturing browser window")
+            if let window = screenCapture.selectedWindow {
+                let image = CGWindowListCreateImage(
+                    window.frame,
+                    .optionIncludingWindow,
+                    window.windowID,
+                    [.boundsIgnoreFraming, .bestResolution]
+                )
+                if let image {
+                    let bitmap = NSBitmapImageRep(cgImage: image)
+                    let isRelay = clientId == "relay"
+                    let quality: NSNumber = isRelay ? 0.5 : 0.7
+                    if let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality]) {
+                        let sizeKB = jpegData.count / 1024
+                        log("screenshot: captured \(sizeKB)KB JPEG from browser")
+
+                        if isRelay {
+                            var binaryData = Data("SCRN".utf8)
+                            binaryData.append(jpegData)
+                            await relayClient.sendBinary(binaryData)
+                        } else {
+                            let base64 = jpegData.base64EncodedString()
+                            await sendToClientOrRelay(
+                                WSPacket(action: .screenshotResult, payload: ["data": base64, "size": "\(sizeKB)"], id: packet.id),
+                                to: clientId
+                            )
+                        }
+                        return
+                    }
+                }
+            }
+            log("screenshot: browser capture failed, falling back to simctl")
+        }
+
+        // Mobile: use simctl
         let udid = packet.payload?["udid"] ?? "booted"
         let tmpPath = NSTemporaryDirectory() + "tarsy_screenshot_\(UUID().uuidString).png"
 
         log("screenshot: capturing simulator \(udid)")
 
-        // Take native screenshot via simctl
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         process.arguments = ["simctl", "io", udid, "screenshot", tmpPath]
@@ -1015,7 +1310,7 @@ class DaemonManager: ObservableObject {
         // Handle quality change for existing stream
         if let quality, screenCapture.isCapturing {
             if quality == "high" {
-                await mjpegServer?.setQuality(jpegQuality: 0.8, maxFrameSize: 1_000_000)
+                await mjpegServer?.setQuality(jpegQuality: 0.7, maxFrameSize: 500_000)
                 log("streamStart: quality boosted to HIGH (fullscreen)")
             } else {
                 let isRelay = clientId == "relay"
@@ -1817,6 +2112,333 @@ class DaemonManager: ObservableObject {
         case "graphql", "gql": return "graphql"
         default: return "text"
         }
+    }
+
+    // MARK: - HTTP Proxy (WKWebView tunnel)
+
+    private func handleProxyDetectPorts(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else { return }
+        let expandedPath = (path as NSString).expandingTildeInPath
+        log("proxyDetectPorts: scanning for \(expandedPath)")
+
+        let ports = await withCheckedContinuation { (continuation: CheckedContinuation<[[String: String]], Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                // Get all listening TCP ports
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+                proc.arguments = ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"]
+                let pipe = Pipe()
+                proc.standardOutput = pipe
+                proc.standardError = Pipe()
+
+                do {
+                    try proc.run()
+                    proc.waitUntilExit()
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    let output = String(data: data, encoding: .utf8) ?? ""
+
+                    var results: [[String: String]] = []
+                    var currentPid = ""
+                    var currentName = ""
+
+                    for line in output.components(separatedBy: "\n") {
+                        if line.hasPrefix("p") {
+                            currentPid = String(line.dropFirst())
+                        } else if line.hasPrefix("c") {
+                            currentName = String(line.dropFirst())
+                        } else if line.hasPrefix("n") {
+                            let addr = String(line.dropFirst())
+                            // Extract port from addresses like *:3000 or 127.0.0.1:3000
+                            if let colonIdx = addr.lastIndex(of: ":") {
+                                let portStr = String(addr[addr.index(after: colonIdx)...])
+                                if let port = Int(portStr), port >= 1024 && port < 65535 {
+                                    // Check if process cwd matches workspace
+                                    let cwdProc = Process()
+                                    cwdProc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+                                    cwdProc.arguments = ["-p", currentPid, "-d", "cwd", "-F", "n"]
+                                    let cwdPipe = Pipe()
+                                    cwdProc.standardOutput = cwdPipe
+                                    cwdProc.standardError = Pipe()
+                                    try? cwdProc.run()
+                                    cwdProc.waitUntilExit()
+                                    let cwdData = cwdPipe.fileHandleForReading.readDataToEndOfFile()
+                                    let cwdOutput = String(data: cwdData, encoding: .utf8) ?? ""
+
+                                    let matchesWorkspace = cwdOutput.contains(expandedPath)
+                                    let isDevServer = ["node", "next-server", "vite", "bun", "deno", "python", "ruby", "php"].contains(where: { currentName.lowercased().contains($0) })
+
+                                    if matchesWorkspace && isDevServer {
+                                        results.append([
+                                            "port": "\(port)",
+                                            "process": currentName,
+                                            "pid": currentPid,
+                                            "match": "workspace"
+                                        ])
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // If no workspace matches, fallback: show dev servers on common ports
+                    if results.isEmpty {
+                        let commonPorts: Set<Int> = [3000, 3001, 4000, 4200, 5000, 5173, 5174, 8000, 8080, 8888]
+                        // Re-scan but only for common dev ports
+                        var currentPid2 = ""
+                        var currentName2 = ""
+                        for line in output.components(separatedBy: "\n") {
+                            if line.hasPrefix("p") { currentPid2 = String(line.dropFirst()) }
+                            else if line.hasPrefix("c") { currentName2 = String(line.dropFirst()) }
+                            else if line.hasPrefix("n") {
+                                let addr = String(line.dropFirst())
+                                if let colonIdx = addr.lastIndex(of: ":") {
+                                    let portStr = String(addr[addr.index(after: colonIdx)...])
+                                    if let port = Int(portStr), commonPorts.contains(port) {
+                                        let isDevServer = ["node", "next-server", "vite", "bun", "deno", "python", "ruby", "php"].contains(where: { currentName2.lowercased().contains($0) })
+                                        if isDevServer {
+                                            results.append([
+                                                "port": "\(port)",
+                                                "process": currentName2,
+                                                "pid": currentPid2,
+                                                "match": "global"
+                                            ])
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Deduplicate by port
+                    var seen = Set<String>()
+                    let unique = results.filter { seen.insert($0["port"] ?? "").inserted }
+
+                    let sorted = unique.sorted { a, b in
+                        (Int(a["port"] ?? "0") ?? 0) < (Int(b["port"] ?? "0") ?? 0)
+                    }
+
+                    continuation.resume(returning: sorted)
+                } catch {
+                    continuation.resume(returning: [])
+                }
+            }
+        }
+
+        let json = (try? JSONSerialization.data(withJSONObject: ports))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
+        log("proxyDetectPorts: found \(ports.count) ports")
+
+        await sendToClientOrRelay(
+            WSPacket(action: .proxyDetectPortsResult, payload: ["ports": json, "success": "true"], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func handleProxyRequest(clientId: String, packet: WSPacket) async {
+        guard let urlString = packet.payload?["url"],
+              let method = packet.payload?["method"],
+              let requestId = packet.payload?["requestId"] else {
+            log("proxyRequest: missing fields")
+            return
+        }
+        log("proxyRequest: \(method) \(urlString)")
+
+        guard let url = URL(string: urlString) else {
+            await sendToClientOrRelay(
+                WSPacket(action: .proxyResponse, payload: [
+                    "requestId": requestId, "status": "0", "error": "Invalid URL"
+                ], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        var request = URLRequest(url: url, timeoutInterval: 30)
+        request.httpMethod = method
+
+        // Forward headers
+        if let headersJson = packet.payload?["headers"],
+           let headersData = headersJson.data(using: .utf8),
+           let headers = try? JSONSerialization.jsonObject(with: headersData) as? [String: String] {
+            for (key, value) in headers {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+        }
+
+        // Forward body
+        if let body = packet.payload?["body"], !body.isEmpty {
+            request.httpBody = Data(base64Encoded: body)
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let httpResponse = response as? HTTPURLResponse
+
+            // Get response headers
+            var responseHeaders: [String: String] = [:]
+            httpResponse?.allHeaderFields.forEach { key, value in
+                responseHeaders["\(key)"] = "\(value)"
+            }
+
+            let headersJson = (try? JSONSerialization.data(withJSONObject: responseHeaders))
+                .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+
+            let bodyBase64 = data.base64EncodedString()
+            log("proxyRequest: response \(httpResponse?.statusCode ?? 0), body \(data.count / 1024)KB")
+
+            await sendToClientOrRelay(
+                WSPacket(action: .proxyResponse, payload: [
+                    "requestId": requestId,
+                    "status": "\(httpResponse?.statusCode ?? 0)",
+                    "headers": headersJson,
+                    "body": bodyBase64
+                ], id: packet.id),
+                to: clientId
+            )
+        } catch {
+            await sendToClientOrRelay(
+                WSPacket(action: .proxyResponse, payload: [
+                    "requestId": requestId, "status": "0", "error": error.localizedDescription
+                ], id: packet.id),
+                to: clientId
+            )
+        }
+    }
+
+    // MARK: - MCP Store
+
+    private func handleMCPList(clientId: String, packet: WSPacket) async {
+        let workspacePath = packet.payload?["path"]
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let claudeConfigPath = NSHomeDirectory() + "/.claude.json"
+                guard let data = FileManager.default.contents(atPath: claudeConfigPath),
+                      let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    Task {
+                        await self?.sendToClientOrRelay(
+                            WSPacket(action: .mcpListResult, payload: ["mcps": "[]", "success": "true"], id: packet.id),
+                            to: clientId
+                        )
+                    }
+                    continuation.resume()
+                    return
+                }
+
+                var mcpEntries: [[String: String]] = []
+
+                // Global MCPs
+                if let globalMcps = config["mcpServers"] as? [String: Any] {
+                    for (name, mcpConfig) in globalMcps {
+                        let type = self?.mcpType(from: mcpConfig) ?? "unknown"
+                        let command = self?.mcpCommand(from: mcpConfig) ?? ""
+                        mcpEntries.append([
+                            "name": name,
+                            "scope": "global",
+                            "type": type,
+                            "command": command
+                        ])
+                    }
+                }
+
+                // Project-specific MCPs
+                if let path = workspacePath,
+                   let projects = config["projects"] as? [String: Any] {
+                    let expandedPath = (path as NSString).expandingTildeInPath
+                    if let projectConfig = projects[expandedPath] as? [String: Any],
+                       let projectMcps = projectConfig["mcpServers"] as? [String: Any] {
+                        for (name, mcpConfig) in projectMcps {
+                            // Skip if already in global
+                            if mcpEntries.contains(where: { $0["name"] == name }) { continue }
+                            let type = self?.mcpType(from: mcpConfig) ?? "unknown"
+                            let command = self?.mcpCommand(from: mcpConfig) ?? ""
+                            mcpEntries.append([
+                                "name": name,
+                                "scope": "project",
+                                "type": type,
+                                "command": command
+                            ])
+                        }
+                    }
+                }
+
+                let json = (try? JSONSerialization.data(withJSONObject: mcpEntries))
+                    .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
+                Task {
+                    await self?.sendToClientOrRelay(
+                        WSPacket(action: .mcpListResult, payload: ["mcps": json, "success": "true"], id: packet.id),
+                        to: clientId
+                    )
+                }
+                continuation.resume()
+            }
+        }
+    }
+
+    private func handleMCPHealthCheck(clientId: String, packet: WSPacket) async {
+        guard let name = packet.payload?["name"],
+              let type = packet.payload?["type"] else { return }
+
+        var status = "unknown"
+
+        if type == "http", let url = packet.payload?["command"] {
+            // HTTP MCP — try to reach it
+            if let url = URL(string: url) {
+                let request = URLRequest(url: url, timeoutInterval: 5)
+                do {
+                    let (_, response) = try await URLSession.shared.data(for: request)
+                    if let http = response as? HTTPURLResponse, (200...499).contains(http.statusCode) {
+                        status = "healthy"
+                    } else {
+                        status = "unreachable"
+                    }
+                } catch {
+                    status = "unreachable"
+                }
+            }
+        } else if type == "stdio" || type == "command" {
+            // Stdio/command MCP — check if binary exists
+            let command = packet.payload?["command"] ?? ""
+            let binaryName = command.components(separatedBy: "/").last ?? command
+            let whichResult = await runGitCommand(["which", binaryName], at: NSHomeDirectory())
+            // runGitCommand uses /usr/bin/git but we need /usr/bin/which — hack: use command directly
+            let exists = FileManager.default.fileExists(atPath: command) ||
+                         FileManager.default.fileExists(atPath: "/opt/homebrew/bin/\(binaryName)") ||
+                         FileManager.default.fileExists(atPath: "/usr/local/bin/\(binaryName)") ||
+                         binaryName == "npx" || binaryName == "docker" || binaryName == "node"
+            status = exists ? "healthy" : "not_found"
+        } else {
+            status = "healthy" // Assume OK for unknown types
+        }
+
+        await sendToClientOrRelay(
+            WSPacket(action: .mcpHealthResult, payload: [
+                "name": name,
+                "status": status,
+                "success": "true"
+            ], id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func mcpType(from config: Any) -> String {
+        guard let dict = config as? [String: Any] else { return "unknown" }
+        if let type = dict["type"] as? String { return type }
+        if dict["command"] != nil { return "command" }
+        if dict["url"] != nil { return "http" }
+        return "unknown"
+    }
+
+    private func mcpCommand(from config: Any) -> String {
+        guard let dict = config as? [String: Any] else { return "" }
+        if let url = dict["url"] as? String { return url }
+        if let cmd = dict["command"] as? String {
+            let args = (dict["args"] as? [String]) ?? []
+            return ([cmd] + args).joined(separator: " ")
+        }
+        return ""
     }
 
     // MARK: - Heartbeat

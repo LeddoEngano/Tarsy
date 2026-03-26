@@ -77,6 +77,26 @@ class ScreenCaptureService: NSObject, ObservableObject {
         return availableWindows.first
     }
 
+    func findWindow(appName: String, preferSmall: Bool) async -> SCWindow? {
+        await refreshWindows()
+        let appWindows = availableWindows.filter {
+            $0.owningApplication?.applicationName == appName && $0.frame.width > 50
+        }
+        if preferSmall {
+            return appWindows.min(by: { $0.frame.width < $1.frame.width })
+        } else {
+            return appWindows.max(by: { $0.frame.width < $1.frame.width })
+        }
+    }
+
+    func startCapturing(window: SCWindow, fps: Int, scale: CGFloat) async {
+        do {
+            try await startCapture(window: window, fps: fps, scale: scale)
+        } catch {
+            print("[ScreenCapture] Error starting capture: \(error)")
+        }
+    }
+
     func startCapture(window: SCWindow, fps: Int = 10, scale: CGFloat = 0.5, cropTitleBar: Bool = false) async throws {
         // If already capturing, just stop the old stream first without destroying everything
         if isCapturing {

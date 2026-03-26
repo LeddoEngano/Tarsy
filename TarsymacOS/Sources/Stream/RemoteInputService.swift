@@ -66,7 +66,6 @@ class RemoteInputService {
 
     func doubleTap(relativeX: CGFloat, relativeY: CGFloat) {
         if isMobileSimulator {
-            // idb: two quick taps
             idbTap(relativeX: relativeX, relativeY: relativeY)
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.1) { [self] in
                 idbTap(relativeX: relativeX, relativeY: relativeY)
@@ -177,18 +176,9 @@ class RemoteInputService {
 
     // MARK: - Pinch (Simulator only — browser uses Cmd+/-)
 
-    func pinchStart(relativeX: CGFloat, relativeY: CGFloat) {
-        // idb doesn't have native pinch — we'd need FBSimulatorControl for that
-        // For now, use keyboard shortcut in browser or skip for simulator
-    }
-
-    func pinchUpdate(scale: CGFloat) {
-        // Not supported via idb
-    }
-
-    func pinchEnd() {
-        // Not supported via idb
-    }
+    func pinchStart(relativeX: CGFloat, relativeY: CGFloat) {}
+    func pinchUpdate(scale: CGFloat) {}
+    func pinchEnd() {}
 
     // MARK: - Drag
 
@@ -237,7 +227,6 @@ class RemoteInputService {
         case "rotate_right":
             rotateSimulator(direction: "right")
         case "screenshot":
-            // Handled by DaemonManager for transfer to iOS
             break
         default:
             print("[RemoteInput] Unknown button: \(button)")
@@ -313,7 +302,6 @@ class RemoteInputService {
     // MARK: - idb Commands (Simulator)
 
     /// Convert stream-relative coords (0-1) to device screen coords (points) for idb.
-    /// The stream image may include device bezels and letterboxing at any zoom level.
     private func streamToDeviceCoords(relativeX: CGFloat, relativeY: CGFloat) -> (x: Int, y: Int) {
         let rx = max(0, min(1, relativeX))
         let ry = max(0, min(1, relativeY))
@@ -333,8 +321,6 @@ class RemoteInputService {
         let zoom: CGFloat
 
         if imageWidth >= screenW {
-            // Point Accurate or larger — image is bigger than screen
-            // Bezels are the extra space around the screen
             let bezelH = (imageWidth - screenW) / 2
             let totalVBezel = imageHeight - screenH
             let bezelTop_ = totalVBezel * 0.57
@@ -342,10 +328,6 @@ class RemoteInputService {
             screenTop = bezelTop_
             zoom = 1.0
         } else {
-            // Zoomed out — device artwork is aspect-fit inside the image.
-            // The artwork includes screen + bezels.
-            // Bezel estimates (proportional to screen size):
-            //   horizontal: ~2% per side, top: ~5%, bottom: ~1.6%
             let artWidth = screenW * 1.04
             let artHeight = screenH * 1.066
 
@@ -377,7 +359,6 @@ class RemoteInputService {
         let coords = streamToDeviceCoords(relativeX: relativeX, relativeY: relativeY)
         let x = coords.x
         let y = coords.y
-        print("[RemoteInput] idbTap: rel(\(String(format: "%.3f", relativeX)),\(String(format: "%.3f", relativeY))) → device(\(x),\(y))")
         var args = ["ui", "tap", "\(x)", "\(y)"]
         if let udid = simulatorUDID {
             args.append(contentsOf: ["--udid", udid])
@@ -417,6 +398,16 @@ class RemoteInputService {
 
     private var idbPath: String?
 
+    /// Remove stale idb lockfile that prevents commands from running.
+    /// idb uses /tmp/idb/state.lock with O_CREAT|O_EXCL — if a previous
+    /// process crashed without cleaning up, the lock stays forever.
+    private func cleanStaleLockfile() {
+        let lockPath = "/tmp/idb/state.lock"
+        if FileManager.default.fileExists(atPath: lockPath) {
+            try? FileManager.default.removeItem(atPath: lockPath)
+        }
+    }
+
     private func findIdb() -> String {
         if let cached = idbPath { return cached }
         let candidates = [
@@ -431,7 +422,6 @@ class RemoteInputService {
         for path in candidates {
             if FileManager.default.fileExists(atPath: path) {
                 idbPath = path
-                print("[RemoteInput] Found idb at: \(path)")
                 return path
             }
         }
@@ -444,13 +434,14 @@ class RemoteInputService {
         idbQueue.async { [self] in
             let idb = findIdb()
 
-            // Run via /bin/sh to ensure proper env setup
-            let fullCommand = "\(idb) \(argsCopy.map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " "))"
+            let escaped = argsCopy.map { a in
+                a.contains(" ") ? "\"\(a)\"" : a
+            }.joined(separator: " ")
+            let fullCommand = "rm -f /tmp/idb/state.lock && \(idb) \(escaped)"
 
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/sh")
-            process.arguments = ["-c", fullCommand]
-            process.environment = ProcessInfo.processInfo.environment
+            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = ["-l", "-c", fullCommand]
 
             let outPipe = Pipe()
             let errPipe = Pipe()
@@ -463,17 +454,19 @@ class RemoteInputService {
                 if process.terminationStatus != 0 {
                     let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
                     let errStr = String(data: errData, encoding: .utf8) ?? ""
-                    print("[RemoteInput] idb FAIL (\(process.terminationStatus)): \(fullCommand) — \(errStr.prefix(300))")
+                    print("[RemoteInput] idb FAIL (\(process.terminationStatus)): \(escaped) — \(errStr.prefix(300))")
                 }
             } catch {
-                print("[RemoteInput] idb ERROR: \(error) — cmd: \(fullCommand)")
+                print("[RemoteInput] idb ERROR: \(error) — cmd: \(escaped)")
             }
         }
     }
 
     private func detectSimulatorInfo() {
-        idbQueue.async { [self] in
-            // Get booted simulator UDID
+        // Run on a separate queue so it doesn't block idbQueue
+        // (idb connect takes ~1.2s and would delay input commands)
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            // Get booted simulator UDID and screen size via simctl (no idb needed)
             let simctl = Process()
             simctl.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
             simctl.arguments = ["simctl", "list", "devices", "booted", "-j"]
@@ -492,19 +485,19 @@ class RemoteInputService {
                             if let state = device["state"] as? String, state == "Booted",
                                let udid = device["udid"] as? String {
                                 simulatorUDID = udid
-                                print("[RemoteInput] Simulator UDID: \(udid)")
-
-                                // Connect idb
-                                let connect = Process()
-                                connect.executableURL = URL(fileURLWithPath: "/Library/Frameworks/Python.framework/Versions/3.13/bin/idb")
-                                connect.arguments = ["connect", udid]
-                                connect.standardOutput = Pipe()
-                                connect.standardError = Pipe()
-                                try? connect.run()
-                                connect.waitUntilExit()
-
-                                // Get screen dimensions
                                 fetchScreenDimensions(udid: udid)
+
+                                // Connect idb in background via login shell
+                                idbQueue.async { [self] in
+                                    let idb = findIdb()
+                                    let connect = Process()
+                                    connect.executableURL = URL(fileURLWithPath: "/bin/zsh")
+                                    connect.arguments = ["-l", "-c", "rm -f /tmp/idb/state.lock && \(idb) connect \(udid)"]
+                                    connect.standardOutput = Pipe()
+                                    connect.standardError = Pipe()
+                                    try? connect.run()
+                                    connect.waitUntilExit()
+                                }
                                 return
                             }
                         }
@@ -516,10 +509,11 @@ class RemoteInputService {
         }
     }
 
+    /// Get screen dimensions via simctl (no idb dependency, no lockfile)
     private func fetchScreenDimensions(udid: String) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/Library/Frameworks/Python.framework/Versions/3.13/bin/idb")
-        process.arguments = ["describe", "--udid", udid]
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["simctl", "list", "devices", "-j"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
@@ -528,28 +522,50 @@ class RemoteInputService {
             try process.run()
             process.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
 
-            // Parse "width_points=402, height_points=874" from output
-            if let widthMatch = output.range(of: #"width_points=(\d+)"#, options: .regularExpression),
-               let heightMatch = output.range(of: #"height_points=(\d+)"#, options: .regularExpression) {
-                let widthStr = String(output[widthMatch]).components(separatedBy: "=").last ?? ""
-                let heightStr = String(output[heightMatch]).components(separatedBy: "=").last ?? ""
-                if let w = CGFloat(exactly: Int(widthStr) ?? 402),
-                   let h = CGFloat(exactly: Int(heightStr) ?? 874) {
-                    simulatorScreenWidth = w
-                    simulatorScreenHeight = h
-
-                    // Calculate title bar ratio
-                    // The stream captures the full window. The title bar takes
-                    // some portion at the top. We need to know what fraction
-                    // of the window height is title bar vs device screen.
-                    print("[RemoteInput] Simulator screen: \(w)x\(h) points")
+            // Get device type from simctl, then look up screen size
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let devices = json["devices"] as? [String: [[String: Any]]] {
+                for (_, deviceList) in devices {
+                    for device in deviceList {
+                        if device["udid"] as? String == udid,
+                           let deviceType = device["deviceTypeIdentifier"] as? String {
+                            // Extract screen size from device type name
+                            let screenSize = screenSizeForDeviceType(deviceType)
+                            simulatorScreenWidth = screenSize.width
+                            simulatorScreenHeight = screenSize.height
+                            print("[RemoteInput] Simulator screen: \(screenSize.width)x\(screenSize.height) points (from \(deviceType))")
+                            return
+                        }
+                    }
                 }
             }
         } catch {
             print("[RemoteInput] Failed to get screen dimensions: \(error)")
         }
+    }
+
+    private func screenSizeForDeviceType(_ deviceType: String) -> CGSize {
+        // Common iPhone device types → screen sizes in points
+        let lowered = deviceType.lowercased()
+        if lowered.contains("iphone-16-pro-max") || lowered.contains("iphone-15-pro-max") {
+            return CGSize(width: 430, height: 932)
+        } else if lowered.contains("iphone-16-pro") || lowered.contains("iphone-15-pro") {
+            return CGSize(width: 402, height: 874)
+        } else if lowered.contains("iphone-16-plus") || lowered.contains("iphone-15-plus")
+                    || lowered.contains("iphone-16e") {
+            return CGSize(width: 430, height: 932)
+        } else if lowered.contains("iphone-16") || lowered.contains("iphone-15") {
+            return CGSize(width: 393, height: 852)
+        } else if lowered.contains("iphone-14-pro-max") {
+            return CGSize(width: 430, height: 932)
+        } else if lowered.contains("iphone-14-pro") {
+            return CGSize(width: 393, height: 852)
+        } else if lowered.contains("iphone-se") {
+            return CGSize(width: 375, height: 667)
+        }
+        // Default: iPhone 16 Pro
+        return CGSize(width: 402, height: 874)
     }
 
     private func getCurrentWindowFrame() -> CGRect? {

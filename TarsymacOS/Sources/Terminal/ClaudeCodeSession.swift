@@ -15,6 +15,7 @@ actor ClaudeCodeSession: AIEngine {
     private var onComplete: (@Sendable (String) -> Void)?
     private var onAskUser: (@Sendable (String, [String]) -> Void)?
     private var onStatusUpdate: (@Sendable (String, Int, Int) -> Void)? // model, inputTokens, outputTokens
+    private var pendingAskUser = false // Track if last turn ended with AskUserQuestion
 
     init(id: String, workspacePath: String, aiContext: String? = nil) {
         self.id = id
@@ -190,6 +191,7 @@ actor ClaudeCodeSession: AIEngine {
 
         switch type {
         case "assistant":
+            pendingAskUser = false // Reset at start of new turn
             if let message = json["message"] as? [String: Any] {
                 // Extract model info
                 if let model = message["model"] as? String {
@@ -225,6 +227,12 @@ actor ClaudeCodeSession: AIEngine {
                     onStatusUpdate?(model, inputTokens, outputTokens)
                 }
             }
+            // Result means the agent finished processing this message
+            // But NOT if the turn ended with AskUserQuestion (agent is waiting for user input)
+            if !pendingAskUser {
+                let resultText = json["result"] as? String ?? "Task completed"
+                onComplete?(resultText)
+            }
 
         case "system":
             if let subtype = json["subtype"] as? String, subtype == "init" {
@@ -243,6 +251,7 @@ actor ClaudeCodeSession: AIEngine {
         guard let name = block["name"] as? String else { return }
 
         if name == "AskUserQuestion" {
+            pendingAskUser = true
             if let input = block["input"] as? [String: Any] {
                 // Build a structured questions array to send to iOS
                 var questionsPayload: [[String: Any]] = []
