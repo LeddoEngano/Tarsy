@@ -21,11 +21,13 @@ class DaemonManager: ObservableObject {
     private var orchestrator: WorkspaceOrchestrator?
     private let screenCapture = ScreenCaptureService()
     private var mjpegServer: MJPEGStreamServer?
+    private var h264Encoder: H264Encoder?
     private let openClaw = OpenClawService()
     private let remoteInput = RemoteInputService()
     private let relayClient = RelayClient()
     private var heartbeatTimer: Timer?
     private var devServerSessions: [String: String] = [:] // workspacePath -> terminalSessionId
+    private var devServerDetectedPorts: [String: Int] = [:] // workspacePath -> detected port
     private var displaySleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var systemSleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var lastActiveClientId: String = "relay"
@@ -575,7 +577,7 @@ class DaemonManager: ObservableObject {
                 aiContext: aiContext,
                 onOutput: { [weak self] output in
                     Task {
-                        await self?.wsServer?.send(
+                        await self?.sendToClientOrRelay(
                             WSPacket(action: .claudeOutput, payload: ["sessionId": sid, "output": output]),
                             to: clientId
                         )
@@ -583,7 +585,7 @@ class DaemonManager: ObservableObject {
                 },
                 onComplete: { [weak self] (message: String) in
                     Task {
-                        await self?.wsServer?.send(
+                        await self?.sendToClientOrRelay(
                             WSPacket(action: .claudeComplete, payload: ["sessionId": sid, "message": message]),
                             to: clientId
                         )
@@ -596,7 +598,7 @@ class DaemonManager: ObservableObject {
                 onAskUser: { [weak self] (questionsJson: String, _: [String]) in
                     Task {
                         // questionsJson is already a JSON string of the full questions array
-                        await self?.wsServer?.send(
+                        await self?.sendToClientOrRelay(
                             WSPacket(action: .claudeAskUser, payload: [
                                 "sessionId": sid,
                                 "questions": questionsJson
@@ -689,7 +691,7 @@ class DaemonManager: ObservableObject {
             try await openClaw.sendMessage(message, agentId: agentId) { [weak self] chunk in
                 fullResponse += chunk
                 Task {
-                    await self?.wsServer?.send(
+                    await self?.sendToClientOrRelay(
                         WSPacket(action: .openclawOutput, payload: ["output": chunk]),
                         to: clientId
                     )
@@ -757,6 +759,7 @@ class DaemonManager: ObservableObject {
                     if !wasReady, await serverReady.isReady {
                         let detectedPort = self?.extractPort(from: output)
                         if let port = detectedPort {
+                            await MainActor.run { self?.devServerDetectedPorts[expandedPath] = port }
                             await self?.sendToClientOrRelay(
                                 WSPacket(action: .devServerStart, payload: [
                                     "status": "ready",
@@ -782,8 +785,9 @@ class DaemonManager: ObservableObject {
             }
             needsSudo = (rewrittenCmd != command)
 
-            // Source shell config first to ensure PATH has npm/node/pnpm/etc.
-            let fullCommand = "source ~/.zshrc 2>/dev/null; source ~/.zprofile 2>/dev/null; \(rewrittenCmd)"
+            // Source shell config + common version managers to ensure PATH has npm/node/pnpm/etc.
+            let cmdName = command.components(separatedBy: " ").first ?? command
+            let fullCommand = "echo \"[DEBUG] HOME=$HOME\"; echo \"[DEBUG] PATH=$PATH\"; ls -la $HOME/.nvm/nvm.sh 2>&1; export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && echo \"[DEBUG] nvm loaded\" || echo \"[DEBUG] nvm.sh not found or failed\"; echo \"[DEBUG] PATH after nvm=$PATH\"; which \(cmdName) 2>&1; \(rewrittenCmd)"
 
             await terminalManager.sendInput(fullCommand, to: sessionId)
             log("devServerStart: running '\(command)' in \(expandedPath)\(needsSudo ? " (with sudo)" : "")")
@@ -829,6 +833,7 @@ class DaemonManager: ObservableObject {
             try? await Task.sleep(nanoseconds: 500_000_000)
             await terminalManager.closeSession(sessionId)
             devServerSessions.removeValue(forKey: expandedPath)
+            devServerDetectedPorts.removeValue(forKey: expandedPath)
             log("devServerStop: stopped for \(expandedPath)")
         }
 
@@ -861,8 +866,19 @@ class DaemonManager: ObservableObject {
             }
         }
 
+        var statusPayload: [String: String] = ["running": running ? "true" : "false"]
+        // Include the port so the iOS client can auto-connect when switching modes
+        if running, let port = portFromUrl(streamUrl) {
+            statusPayload["port"] = "\(port)"
+        } else if running, let sessionId = devServerSessions[expandedPath] {
+            // Try to find the port from detected dev server output
+            if let detected = devServerDetectedPorts[expandedPath] {
+                statusPayload["port"] = "\(detected)"
+            }
+        }
+
         await sendToClientOrRelay(
-            WSPacket(action: .devServerStatus, payload: ["running": running ? "true" : "false"], id: packet.id),
+            WSPacket(action: .devServerStatus, payload: statusPayload, id: packet.id),
             to: clientId
         )
     }
@@ -1307,20 +1323,10 @@ class DaemonManager: ObservableObject {
         let streamUrl = packet.payload?["streamUrl"]
         let quality = packet.payload?["quality"]
 
-        // Handle quality change for existing stream
-        if let quality, screenCapture.isCapturing {
-            if quality == "high" {
-                await mjpegServer?.setQuality(jpegQuality: 0.7, maxFrameSize: 500_000)
-                log("streamStart: quality boosted to HIGH (fullscreen)")
-            } else {
-                let isRelay = clientId == "relay"
-                let isLocal = !isRelay && !(packet.payload?["ip"]?.hasPrefix("100.") ?? true)
-                await mjpegServer?.setQuality(
-                    jpegQuality: isLocal ? 0.65 : 0.55,
-                    maxFrameSize: isLocal ? 500_000 : 300_000
-                )
-                log("streamStart: quality restored to \(isLocal ? "LAN" : "relay")")
-            }
+        // Handle quality change for existing stream (H.264: force keyframe on quality change)
+        if quality != nil, screenCapture.isCapturing {
+            h264Encoder?.forceKeyframe()
+            log("streamStart: quality change — forced keyframe")
             return
         }
 
@@ -1367,37 +1373,68 @@ class DaemonManager: ObservableObject {
                 log("streamStart: MJPEG server started on port 8643")
             }
 
-            // Detect connection type and set quality accordingly
+            // H.264 hardware encoding for ALL connections (LAN + relay)
             let ipPayload = packet.payload?["ip"] ?? ""
             let isLocalConnection = !ipPayload.isEmpty && !ipPayload.hasPrefix("100.")
             let isRelay = clientId == "relay"
+
             let fps: Int
             let scale: CGFloat
+            let bitrate: Int
+
             if isLocalConnection && !isRelay {
-                // Local WiFi — best quality
-                fps = 15
+                // LAN — higher quality H.264
+                fps = 20
                 scale = 1.0
-                await mjpegServer?.setQuality(jpegQuality: 0.85, maxFrameSize: 1_500_000)
-                log("streamStart: LAN — high quality (15fps, 1.0x, q0.85)")
+                bitrate = 4_000_000 // 4 Mbps — LAN can handle it
             } else {
-                // Relay / remote — prioritize quality over fps
-                fps = 8
-                scale = 0.85
-                await mjpegServer?.setQuality(jpegQuality: 0.75, maxFrameSize: 800_000)
-                log("streamStart: relay — quality priority (8fps, 0.85x, q0.75)")
+                // Relay / 4G — optimized H.264
+                fps = 15
+                scale = 0.75
+                bitrate = 1_500_000 // 1.5 Mbps — works on 4G
             }
 
-            // Wire screen capture to MJPEG (local + relay)
-            screenCapture.onFrame = { [weak self] cgImage in
-                Task {
-                    await self?.mjpegServer?.sendFrame(cgImage)
+            // Setup H.264 encoder
+            let captureWidth = Int(window.frame.width * scale)
+            let captureHeight = Int((window.frame.height) * scale)
+            let encoder = H264Encoder()
+            encoder.configure(width: captureWidth, height: captureHeight, fps: fps, bitrate: bitrate)
+            self.h264Encoder = encoder
 
-                    // Also send frame via relay for remote clients
-                    if let jpegData = await self?.mjpegServer?.encodeFrame(cgImage) {
-                        await self?.relayClient.sendBinary(jpegData)
+            // H.264 output → send to clients (LAN WebSocket + relay)
+            let relay = self.relayClient
+            let wsServer = self.wsServer
+            let targetClientId = clientId
+            var sendInFlight = false
+            encoder.onEncodedFrame = { encodedData in
+                // Prefix with "H264" so iOS knows it's H.264
+                var prefixedData = Data("H264".utf8)
+                prefixedData.append(encodedData)
+
+                guard !sendInFlight else { return } // backpressure
+
+                if isRelay {
+                    sendInFlight = true
+                    Task {
+                        await relay.sendBinary(prefixedData) {
+                            sendInFlight = false
+                        }
+                    }
+                } else {
+                    // LAN — send via WebSocket server
+                    Task {
+                        await wsServer?.broadcastBinary(prefixedData)
                     }
                 }
             }
+
+            // Feed pixel buffers directly to H.264 encoder (no CGImage conversion needed)
+            screenCapture.onFrame = nil
+            screenCapture.onPixelBuffer = { [weak encoder] pixelBuffer in
+                encoder?.encode(pixelBuffer)
+            }
+
+            log("streamStart: H.264 \(isRelay ? "relay" : "LAN") (\(fps)fps, \(captureWidth)x\(captureHeight), \(bitrate/1000)kbps)")
 
             let ownerApp = window.owningApplication?.applicationName ?? ""
             let isSimulator = ownerApp == "Simulator"
@@ -1414,13 +1451,12 @@ class DaemonManager: ObservableObject {
 
             log("streamStart: capture started")
 
-            let streamPort: UInt16 = 8643
             await sendToClientOrRelay(
                 WSPacket(action: .streamStart, payload: [
-                    "port": "\(streamPort)",
                     "window": window.title ?? "unknown",
                     "width": "\(Int(window.frame.width))",
-                    "height": "\(Int(window.frame.height))"
+                    "height": "\(Int(window.frame.height))",
+                    "codec": "h264"
                 ], id: packet.id),
                 to: clientId
             )
@@ -1460,8 +1496,11 @@ class DaemonManager: ObservableObject {
 
     private func handleStreamStop(clientId: String, packet: WSPacket) async {
         await screenCapture.stopCapture()
+        screenCapture.onPixelBuffer = nil
         await mjpegServer?.stop()
         mjpegServer = nil
+        h264Encoder?.stop()
+        h264Encoder = nil
 
         await sendToClientOrRelay(
             WSPacket(action: .streamStop, id: packet.id),
@@ -1600,7 +1639,7 @@ class DaemonManager: ObservableObject {
                     aiContext: aiContext,
                     onOutput: { [weak self] output in
                         Task {
-                            await self?.wsServer?.send(
+                            await self?.sendToClientOrRelay(
                                 WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": "claude"]),
                                 to: clientId
                             )
@@ -1608,7 +1647,7 @@ class DaemonManager: ObservableObject {
                     },
                     onComplete: { [weak self] (message: String) in
                         Task {
-                            await self?.wsServer?.send(
+                            await self?.sendToClientOrRelay(
                                 WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": "claude"]),
                                 to: clientId
                             )
@@ -1616,7 +1655,7 @@ class DaemonManager: ObservableObject {
                     },
                     onAskUser: { [weak self] questionsJson, _ in
                         Task {
-                            await self?.wsServer?.send(
+                            await self?.sendToClientOrRelay(
                                 WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": "claude"]),
                                 to: clientId
                             )
@@ -1664,7 +1703,7 @@ class DaemonManager: ObservableObject {
                 apiKey: apiKey,
                 onOutput: { [weak self] output in
                     Task {
-                        await self?.wsServer?.send(
+                        await self?.sendToClientOrRelay(
                             WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": engineTypeRaw]),
                             to: clientId
                         )
@@ -1672,7 +1711,7 @@ class DaemonManager: ObservableObject {
                 },
                 onComplete: { [weak self] (message: String) in
                     Task {
-                        await self?.wsServer?.send(
+                        await self?.sendToClientOrRelay(
                             WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": engineTypeRaw]),
                             to: clientId
                         )

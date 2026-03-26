@@ -32,7 +32,7 @@ public class ConnectionManager: ObservableObject {
     private let maxReconnectAttempts = 10
 
     public var onPacketReceived: ((WSPacket) -> Void)?
-    public var onStreamFrameReceived: ((Data) -> Void)? // Binary MJPEG frames from relay
+    public var onStreamFrameReceived: ((Data) -> Void)?
     public var onScreenshotReceived: ((Data) -> Void)? // Binary screenshot from relay (prefixed with "SCRN")
     /// Called when a sudoRequest arrives. Set this to show a password prompt and call the completion with the password.
     public var onSudoRequest: ((WSPacket) -> Void)?
@@ -240,8 +240,18 @@ public class ConnectionManager: ObservableObject {
                     return
                 }
 
-                if let data = content, let packet = try? WSPacket.decode(from: data) {
-                    self?.handlePacket(packet)
+                if let data = content {
+                    // Check for binary stream data (H.264 or screenshot)
+                    let prefix = data.prefix(4)
+                    let prefixStr = prefix.count == 4 ? String(data: prefix, encoding: .utf8) : nil
+
+                    if prefixStr == "H264" {
+                        self?.onStreamFrameReceived?(data)
+                    } else if prefixStr == "SCRN" {
+                        self?.onScreenshotReceived?(Data(data.dropFirst(4)))
+                    } else if let packet = try? WSPacket.decode(from: data) {
+                        self?.handlePacket(packet)
+                    }
                 }
 
                 self?.receiveLANLoop()
@@ -312,15 +322,12 @@ public class ConnectionManager: ObservableObject {
                             self?.handlePacket(packet)
                         }
                     case .data(let data):
-                        // Check for "SCRN" prefix = screenshot, otherwise = stream frame
                         let prefix = data.prefix(4)
-                        if prefix.count == 4 && String(data: prefix, encoding: .utf8) == "SCRN" {
-                            let jpegData = data.dropFirst(4)
-                            self?.onScreenshotReceived?(Data(jpegData))
+                        let prefixStr = prefix.count == 4 ? String(data: prefix, encoding: .utf8) : nil
+
+                        if prefixStr == "SCRN" {
+                            self?.onScreenshotReceived?(Data(data.dropFirst(4)))
                         } else {
-                            if self?.onStreamFrameReceived == nil {
-                                print("[WS] Binary frame received (\(data.count) bytes) but onStreamFrameReceived is nil!")
-                            }
                             self?.onStreamFrameReceived?(data)
                         }
                     @unknown default:
