@@ -1,11 +1,14 @@
 import SwiftUI
 import TarsyShared
 import Network
+import AVFoundation
 
 class MJPEGStreamViewModel: ObservableObject {
     @Published var currentFrame: UIImage?
     @Published var isConnected = false
     @Published var fps: Int = 0
+    /// True when using H.264 codec (relay), false for MJPEG (LAN)
+    @Published var isH264Mode = false
 
     private var connection: NWConnection?
     private var frameCount = 0
@@ -14,11 +17,15 @@ class MJPEGStreamViewModel: ObservableObject {
     private let jpegStart = Data([0xFF, 0xD8])
     private let jpegEnd = Data([0xFF, 0xD9])
     private var lastFrameTime: CFAbsoluteTime = 0
-    private let minFrameInterval: CFAbsoluteTime = 1.0 / 15.0 // Max 15 fps
-    private let processingQueue = DispatchQueue(label: "mjpeg.processing", qos: .userInitiated)
+    private let minFrameInterval: CFAbsoluteTime = 1.0 / 30.0 // Allow up to 30 fps display
+    private let processingQueue = DispatchQueue(label: "mjpeg.processing", qos: .userInteractive)
     private var totalFramesReceived = 0
     private var framesDroppedThrottle = 0
     private var framesFailedDecode = 0
+    private let h264Prefix = Data("H264".utf8)
+
+    /// H.264 decoder for relay mode
+    let h264Decoder = H264Decoder()
 
     func connect(host: String, port: UInt16) {
         disconnect()
@@ -63,7 +70,6 @@ class MJPEGStreamViewModel: ObservableObject {
     }
 
     func disconnect() {
-        print("[MJPEG] disconnect() called — stack trace: \(Thread.callStackSymbols.prefix(6).joined(separator: "\n"))")
         connection?.cancel()
         connection = nil
         fpsTimer?.invalidate()
@@ -73,32 +79,54 @@ class MJPEGStreamViewModel: ObservableObject {
         buffer.removeAll()
         frameCount = 0
         fps = 0
+        isH264Mode = false
+        h264Decoder.stop()
     }
 
-    /// Receive a raw JPEG frame from relay (binary WebSocket message)
+    /// Receive a binary frame from relay — auto-detects H.264 vs MJPEG
     func receiveRelayFrame(_ data: Data) {
         totalFramesReceived += 1
 
         if fpsTimer == nil {
-            print("[MJPEG] fpsTimer was nil, creating new timer")
-            fpsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-                DispatchQueue.main.async {
-                    guard let self else { return }
-                    let displayed = self.frameCount
-                    self.fps = displayed
-                    self.frameCount = 0
-                    if displayed == 0 {
-                        print("[MJPEG] FPS=0 | received=\(self.totalFramesReceived) droppedThrottle=\(self.framesDroppedThrottle) failedDecode=\(self.framesFailedDecode) isConnected=\(self.isConnected) hasFrame=\(self.currentFrame != nil) timerOK=\(self.fpsTimer != nil)")
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.fpsTimer == nil else { return }
+                self.fpsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        self.fps = self.frameCount
+                        self.frameCount = 0
+                        if self.fps == 0 {
+                            print("[Stream] FPS=0 | received=\(self.totalFramesReceived) mode=\(self.isH264Mode ? "H264" : "MJPEG")")
+                        }
                     }
                 }
             }
         }
 
-        processingQueue.async { [weak self] in
-            guard let self else {
-                print("[MJPEG] receiveRelayFrame: self is nil (deallocated)")
-                return
+        // Check for H.264 prefix
+        if data.count > 4 && data.prefix(4) == h264Prefix {
+            // H.264 frame — send to hardware decoder (strips "H264" prefix)
+            let h264Data = Data(data.dropFirst(4))
+            if !isH264Mode {
+                print("[Stream] Switching to H.264 mode, first frame size=\(h264Data.count)")
+                DispatchQueue.main.async { [weak self] in
+                    self?.isH264Mode = true
+                    self?.isConnected = true
+                    self?.h264Decoder.start()
+                }
             }
+            h264Decoder.receiveFrame(h264Data)
+            // Count H264 frames for FPS directly in view model
+            DispatchQueue.main.async { [weak self] in
+                self?.frameCount += 1
+            }
+            return
+        }
+
+        // MJPEG fallback
+        processingQueue.async { [weak self] in
+            guard let self else { return }
+
             let now = CFAbsoluteTimeGetCurrent()
             let elapsed = now - self.lastFrameTime
             guard elapsed >= self.minFrameInterval else {
@@ -115,13 +143,12 @@ class MJPEGStreamViewModel: ObservableObject {
                 }
             } else {
                 self.framesFailedDecode += 1
-                print("[MJPEG] Failed to decode JPEG frame, size=\(data.count) bytes")
             }
         }
     }
 
     private func receiveData() {
-        connection?.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
+        connection?.receive(minimumIncompleteLength: 1, maximumLength: 262144) { [weak self] data, _, isComplete, error in
             guard let self else { return }
 
             if let data {
@@ -177,7 +204,7 @@ class MJPEGStreamViewModel: ObservableObject {
 }
 
 struct StreamPlayerView: View {
-    @StateObject private var viewModel = MJPEGStreamViewModel()
+    @ObservedObject var viewModel: MJPEGStreamViewModel
     @EnvironmentObject var machineService: MachineService
     @EnvironmentObject var connectionManager: ConnectionManager
 
@@ -192,57 +219,44 @@ struct StreamPlayerView: View {
     @Binding var interactiveOptions: [InteractiveOption]?
     var onInteractiveChoice: ((InteractiveOption) -> Void)?
     var onMultiQuestionSubmit: (([String: String]) -> Void)?
+    var onVoiceMessage: ((String) -> Void)?
     @State private var isFullscreen = false
     @State private var isDevServerRunning = false
     @State private var isDevServerStarting = false
+    @State private var isStartingStream = false
     @State private var gearRotation: Double = 0
-    @State private var showNoCommandAlert = false
-    @State private var showGoToMenu = false
-    @State private var showCustomUrlInput = false
-    @State private var customUrl = ""
 
     var body: some View {
         ZStack {
             TarsyTheme.backgroundSecondary
 
-            if isActive, let frame = viewModel.currentFrame {
+            if isActive && (viewModel.isH264Mode || viewModel.currentFrame != nil) {
+                // Stream content — H.264 or MJPEG
                 VStack(spacing: 0) {
-                    Image(uiImage: frame)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .onTapGesture(count: 2) {
-                            isFullscreen.toggle()
-                        }
+                    if viewModel.isH264Mode, let layer = viewModel.h264Decoder.displayLayer {
+                        H264PlayerView(displayLayer: layer)
+                            .id("h264-\(isFullscreen)")
+                            .aspectRatio(16.0/13.0, contentMode: .fit)
+                            .clipped()
+                            .onTapGesture(count: 2) {
+                                isFullscreen.toggle()
+                            }
+                    } else if let frame = viewModel.currentFrame {
+                        Image(uiImage: frame)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .onTapGesture(count: 2) {
+                                isFullscreen.toggle()
+                            }
+                    }
                     Spacer(minLength: 0)
                 }
 
-                // Overlay controls
-                HStack {
-                    // Left column: gear + action buttons
-                    VStack(spacing: 8) {
-                        devServerGear
-
-                        // Screenshot
-                        streamButton("camera.viewfinder") {
-                            saveScreenshot()
-                        }
-                        // Fullscreen
-                        streamButton(isFullscreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") {
-                            isFullscreen.toggle()
-                        }
-                        // Stop
-                        streamButton("stop.fill") {
-                            stopStream()
-                        }
-
+                // Overlay controls (shared for both H.264 and MJPEG)
+                VStack {
+                    // Top row: FPS + fullscreen (top-right)
+                    HStack {
                         Spacer()
-                    }
-
-                    Spacer()
-
-                    // Right column: FPS + go to
-                    VStack {
-                        // FPS badge
                         Text("\(viewModel.fps) fps")
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(TarsyTheme.textSecondary)
@@ -250,53 +264,56 @@ struct StreamPlayerView: View {
                             .padding(.vertical, 3)
                             .background(TarsyTheme.backgroundPrimary.opacity(0.7))
                             .cornerRadius(4)
+                        streamButton("arrow.up.left.and.arrow.down.right") {
+                            isFullscreen.toggle()
+                        }
+                    }
 
+                    Spacer()
+
+                    // Bottom row: gear (left) + screenshot (right)
+                    HStack {
+                        if isWebMode {
+                            devServerGear
+                        }
                         Spacer()
-
-                        // Go to... (only for non-mobile stacks)
-                        if workspace.stack != .mobile {
-                            goToButton
+                        streamButton("camera.viewfinder") {
+                            saveScreenshot()
                         }
                     }
                 }
                 .padding(8)
-            } else if isActive && viewModel.currentFrame == nil {
+            } else if isActive && viewModel.currentFrame == nil && !viewModel.isH264Mode {
                 VStack(spacing: 12) {
                     ProgressView()
                         .tint(TarsyTheme.accentAmber)
-                    Text("connecting to stream...")
+                    Text(isStartingStream ? "starting..." : "connecting to stream...")
                         .font(TarsyTheme.monoFontSmall)
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
             } else {
-                ZStack(alignment: .topLeading) {
-                    VStack(spacing: 12) {
-                        Image(systemName: "eye")
-                            .font(.system(size: 40))
-                            .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
+                VStack(spacing: 12) {
+                    Image(systemName: "eye")
+                        .font(.system(size: 40))
+                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
 
-                        Text("stream offline")
-                            .font(TarsyTheme.monoFont)
-                            .foregroundColor(TarsyTheme.textSecondary)
+                    Text("stream offline")
+                        .font(TarsyTheme.monoFont)
+                        .foregroundColor(TarsyTheme.textSecondary)
 
-                        Button(action: { startStream() }) {
-                            Text("start stream")
-                                .font(TarsyTheme.monoFontSmall)
-                                .foregroundColor(TarsyTheme.accentAmber)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(TarsyTheme.accentAmber, lineWidth: 1)
-                                )
-                        }
+                    Button(action: { startStreamWithAutoSetup() }) {
+                        Text("start stream")
+                            .font(TarsyTheme.monoFontSmall)
+                            .foregroundColor(TarsyTheme.accentAmber)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(TarsyTheme.accentAmber, lineWidth: 1)
+                            )
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                    // Gear icon even when stream is offline
-                    devServerGear
-                        .padding(8)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .cornerRadius(12)
@@ -318,25 +335,21 @@ struct StreamPlayerView: View {
                 interactiveQuestions: $interactiveQuestions,
                 interactiveOptions: $interactiveOptions,
                 onInteractiveChoice: onInteractiveChoice,
-                onMultiQuestionSubmit: onMultiQuestionSubmit
+                onMultiQuestionSubmit: onMultiQuestionSubmit,
+                onVoiceMessage: onVoiceMessage
             )
         }
         .onAppear {
-            print("[StreamPlayer] onAppear — isFullscreen=\(isFullscreen) isActive=\(isActive)")
             checkDevServerStatus()
-        }
-        .onDisappear {
-            print("[StreamPlayer] onDisappear — isFullscreen=\(isFullscreen) isActive=\(isActive)")
-            if !isFullscreen {
-                viewModel.disconnect()
-            }
         }
     }
 
-    // MARK: - Dev Server Gear
+    private var isWebMode: Bool { workspace.stack == .web || workspace.stack == .fullstack }
+
+    // MARK: - Dev Server Gear (status indicator + restart only)
 
     private var devServerGear: some View {
-        Button(action: { toggleDevServer() }) {
+        Button(action: { restartDevServer() }) {
             Image(systemName: "gearshape.fill")
                 .font(.system(size: 14))
                 .foregroundColor(gearColor)
@@ -345,7 +358,7 @@ struct StreamPlayerView: View {
                 .background(TarsyTheme.backgroundPrimary.opacity(0.7))
                 .cornerRadius(6)
         }
-        .disabled(isDevServerStarting)
+        .disabled(!isDevServerRunning || isDevServerStarting)
         .onChange(of: isDevServerRunning) { _, running in
             if running {
                 startGearAnimation()
@@ -360,86 +373,12 @@ struct StreamPlayerView: View {
                 stopGearAnimation()
             }
         }
-        .alert("dev server not configured", isPresented: $showNoCommandAlert) {
-            Button("ok", role: .cancel) {}
-        } message: {
-            Text("set the dev server command in workspace settings (e.g. npm run dev)")
-        }
     }
 
     private var gearColor: Color {
         if isDevServerRunning { return TarsyTheme.statusRunning }
         if isDevServerStarting { return TarsyTheme.accentAmber }
         return TarsyTheme.textSecondary
-    }
-
-    // MARK: - Go To Button
-
-    private var goToButton: some View {
-        Menu {
-            // Option 1: localhost with detected port
-            Button(action: { openUrlOnMac(localhostUrl) }) {
-                Label(localhostUrl, systemImage: "network")
-            }
-
-            // Option 2: configured stream URL (if set)
-            if let url = workspace.streamUrl, !url.isEmpty {
-                Button(action: { openUrlOnMac(url) }) {
-                    Label(url, systemImage: "link")
-                }
-            }
-
-            Divider()
-
-            // Option 3: custom URL
-            Button(action: { showCustomUrlInput = true }) {
-                Label("custom url...", systemImage: "pencil")
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "safari")
-                    .font(.caption)
-                Text("go to")
-                    .font(.system(size: 10, design: .monospaced))
-            }
-            .foregroundColor(.white)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(TarsyTheme.backgroundPrimary.opacity(0.7))
-            .cornerRadius(6)
-        }
-        .alert("open url", isPresented: $showCustomUrlInput) {
-            TextField("https://...", text: $customUrl)
-                .autocorrectionDisabled()
-                .textInputAutocapitalization(.never)
-            Button("go") {
-                let url = customUrl.hasPrefix("http") ? customUrl : "https://\(customUrl)"
-                openUrlOnMac(url)
-                customUrl = ""
-            }
-            Button("cancel", role: .cancel) { customUrl = "" }
-        }
-    }
-
-    private var localhostUrl: String {
-        if let url = workspace.streamUrl, !url.isEmpty,
-           let parsed = URL(string: url),
-           let port = parsed.port {
-            return "http://localhost:\(port)"
-        }
-        // Fallback: guess common ports based on stack
-        let port: Int
-        switch workspace.stack {
-        case .web: port = 3000
-        case .mobile: port = 8081
-        case .backend: port = 8000
-        case .fullstack: port = 3000
-        }
-        return "http://localhost:\(port)"
-    }
-
-    private func openUrlOnMac(_ urlString: String) {
-        connectionManager.send(WSPacket(action: .browserOpenUrl, payload: ["url": urlString]))
     }
 
     private func startGearAnimation() {
@@ -456,17 +395,9 @@ struct StreamPlayerView: View {
 
     // MARK: - Dev Server Actions
 
-    private func toggleDevServer() {
-        if isDevServerRunning {
-            stopDevServer()
-        } else {
-            startDevServer()
-        }
-    }
-
-    private func startDevServer() {
+    private func startDevServer(completion: (() -> Void)? = nil) {
         guard let command = workspace.devServerCommand, !command.isEmpty else {
-            showNoCommandAlert = true
+            completion?()
             return
         }
 
@@ -486,28 +417,35 @@ struct StreamPlayerView: View {
         connectionManager.addListener("devserver") { packet in
             if packet.action == .devServerStart {
                 let status = packet.payload?["status"] ?? ""
+                if status == "starting" { return }
+
                 DispatchQueue.main.async {
                     isDevServerStarting = false
-                    isDevServerRunning = (status == "running" || status == "already_running" || status == "started_unconfirmed")
+                    isDevServerRunning = (status == "ready" || status == "running" || status == "already_running" || status == "started_unconfirmed")
+
+                    if let portStr = packet.payload?["port"], let port = Int(portStr) {
+                        UserDefaults.standard.set(port, forKey: "devport_\(workspace.id)")
+                    }
+                    completion?()
                 }
                 connectionManager.removeListener("devserver")
             } else if packet.action == .sudoResult, packet.payload?["status"] == "cancelled" {
                 DispatchQueue.main.async {
                     isDevServerStarting = false
+                    completion?()
                 }
                 connectionManager.removeListener("devserver")
             } else if packet.action == .sudoRequest {
-                // Sudo dialog is being shown — extend timeout
                 waitingForSudo = true
             } else if packet.action == .error {
                 DispatchQueue.main.async {
                     isDevServerStarting = false
+                    completion?()
                 }
                 connectionManager.removeListener("devserver")
             }
         }
 
-        // Timeout: if no response in 20s (60s if sudo involved), stop waiting
         Task {
             try? await Task.sleep(nanoseconds: 20_000_000_000)
             if waitingForSudo {
@@ -516,17 +454,20 @@ struct StreamPlayerView: View {
             if isDevServerStarting {
                 isDevServerStarting = false
                 connectionManager.removeListener("devserver")
+                await MainActor.run { completion?() }
             }
         }
     }
 
-    private func stopDevServer() {
+    private func restartDevServer() {
+        guard isDevServerRunning else { return }
         connectionManager.send(WSPacket(action: .devServerStop, payload: ["path": workspace.localPath]))
 
         connectionManager.addListener("devserver-stop") { packet in
             if packet.action == .devServerStop {
                 DispatchQueue.main.async {
                     isDevServerRunning = false
+                    startDevServer()
                 }
                 connectionManager.removeListener("devserver-stop")
             }
@@ -545,8 +486,12 @@ struct StreamPlayerView: View {
 
         connectionManager.addListener("devserver-status") { packet in
             if packet.action == .devServerStatus {
+                let running = packet.payload?["running"] == "true"
                 DispatchQueue.main.async {
-                    isDevServerRunning = packet.payload?["running"] == "true"
+                    isDevServerRunning = running
+                    if running, let portStr = packet.payload?["port"], let port = Int(portStr) {
+                        UserDefaults.standard.set(port, forKey: "devport_\(workspace.id)")
+                    }
                 }
                 connectionManager.removeListener("devserver-status")
             }
@@ -555,51 +500,61 @@ struct StreamPlayerView: View {
 
     // MARK: - Stream Actions
 
-    private func startStream() {
+    /// Auto-setup: start dev server if needed, open browser on Mac, then start streaming
+    private func startStreamWithAutoSetup() {
         isActive = true
+        isStartingStream = true
 
-        // Build payload with streamUrl and connection IP
+        let needsDevServer = isWebMode && !isDevServerRunning && workspace.devServerCommand != nil && !workspace.devServerCommand!.isEmpty
+
+        let afterDevServer = {
+            // Open browser on Mac for web projects
+            if self.isWebMode {
+                self.openBrowserOnMac()
+            }
+            // Start the actual stream
+            self.startStream()
+            self.isStartingStream = false
+        }
+
+        if needsDevServer {
+            startDevServer(completion: afterDevServer)
+        } else {
+            afterDevServer()
+        }
+    }
+
+    private func openBrowserOnMac() {
+        let url: String
+        if let streamUrl = workspace.streamUrl, !streamUrl.isEmpty {
+            url = streamUrl
+        } else {
+            let port: Int
+            switch workspace.stack {
+            case .web, .fullstack: port = 3000
+            case .mobile: port = 8081
+            case .backend: port = 8000
+            }
+            url = "http://localhost:\(port)"
+        }
+        connectionManager.send(WSPacket(action: .browserOpenUrl, payload: ["url": url]))
+    }
+
+    private func startStream() {
         var payload: [String: String] = ["stack": workspace.stack.rawValue]
         if let url = workspace.streamUrl, !url.isEmpty {
             payload["streamUrl"] = url
         }
         if let ip = machineService.bestIP {
-            payload["ip"] = ip // So Mac knows if we're local or VPN
+            payload["ip"] = ip
         }
 
-        // Send stream:start via WebSocket — Mac will start capture + MJPEG server
         connectionManager.send(WSPacket(action: .streamStart, payload: payload))
 
-        if connectionManager.connectionMode == .relay {
-            // Relay mode: frames come via binary WebSocket messages
-            connectionManager.onStreamFrameReceived = { [weak viewModel] data in
-                viewModel?.receiveRelayFrame(data)
-            }
-        } else {
-            // LAN mode: connect directly to MJPEG HTTP server
-            connectionManager.addListener("stream") { [self] packet in
-                if packet.action == .streamStart, let port = packet.payload?["port"] {
-                    if let ip = machineService.bestIP {
-                        viewModel.connect(host: ip, port: UInt16(port) ?? 8643)
-                    }
-                    connectionManager.removeListener("stream")
-                }
-            }
-
-            // Fallback: if no response in 3s, try connecting anyway
-            Task {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                if !viewModel.isConnected, let ip = machineService.bestIP {
-                    viewModel.connect(host: ip, port: 8643)
-                }
-            }
+        // H.264 frames arrive via WebSocket (both LAN and relay)
+        connectionManager.onStreamFrameReceived = { [weak viewModel] data in
+            viewModel?.receiveRelayFrame(data)
         }
-    }
-
-    private func stopStream() {
-        connectionManager.send(WSPacket(action: .streamStop))
-        viewModel.disconnect()
-        isActive = false
     }
 
     private func saveScreenshot() {

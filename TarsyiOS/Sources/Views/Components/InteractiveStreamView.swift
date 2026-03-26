@@ -1,5 +1,6 @@
 import SwiftUI
 import TarsyShared
+import AVFoundation
 
 // MARK: - Hidden Keyboard Capture
 
@@ -87,6 +88,7 @@ struct InteractiveStreamView: View {
     @Binding var interactiveOptions: [InteractiveOption]?
     var onInteractiveChoice: ((InteractiveOption) -> Void)?
     var onMultiQuestionSubmit: (([String: String]) -> Void)?
+    var onVoiceMessage: ((String) -> Void)?
 
     private var isWebMode: Bool { workspaceStack == .web || workspaceStack == .fullstack }
 
@@ -160,7 +162,22 @@ struct InteractiveStreamView: View {
                 // Stream image — fills all available space
                 GeometryReader { geo in
                     ZStack {
-                        if let frame = viewModel.currentFrame {
+                        if viewModel.isH264Mode, let layer = viewModel.h264Decoder.displayLayer {
+                            H264PlayerView(displayLayer: layer)
+                                .id("h264-fullscreen")
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .background(
+                                    GeometryReader { imageGeo in
+                                        Color.clear
+                                            .onAppear { imageContentSize = imageGeo.size }
+                                            .onChange(of: imageGeo.size) { _, s in imageContentSize = s }
+                                    }
+                                )
+                                .gesture(tapGesture(containerSize: geo.size))
+                                .gesture(scrollGesture(containerSize: geo.size))
+                                .gesture(pinchGesture(containerSize: geo.size))
+                                .gesture(longPressGesture(containerSize: geo.size))
+                        } else if let frame = viewModel.currentFrame {
                             Image(uiImage: frame)
                                 .resizable()
                                 .aspectRatio(contentMode: .fit)
@@ -963,6 +980,9 @@ struct InteractiveStreamView: View {
         voiceInput.stopRecording()
 
         guard !transcription.isEmpty else { return }
+
+        // Persist voice message to chat history
+        onVoiceMessage?(transcription)
 
         // Append voice directive so the agent acts immediately
         let voiceDirective = """
