@@ -34,10 +34,13 @@ struct PaginatedQuestionCard: View {
     let onSubmitAll: ([String: String]) -> Void
     let onDismiss: () -> Void
 
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var currentIndex: Int = 0
     @State private var singleAnswers: [Int: String] = [:]
     @State private var multiAnswers: [Int: Set<String>] = [:]
     @State private var customInputs: [Int: String] = [:]
+
+    private var isCompact: Bool { verticalSizeClass == .compact }
 
     private var safeIndex: Int {
         max(0, min(currentIndex, questions.count - 1))
@@ -60,29 +63,48 @@ struct PaginatedQuestionCard: View {
     private var cardContent: some View {
         let question = questions[safeIndex]
         return VStack(alignment: .leading, spacing: 0) {
-            // Navigation header
+            // Navigation header / dismiss
             if totalQuestions > 1 {
                 navigationHeader
+            } else {
+                HStack {
+                    Spacer()
+                    Button(action: onDismiss) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, isCompact ? 8 : 14)
             }
 
             // Question text
             Text(question.question)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: isCompact ? 13 : 15, weight: .semibold))
                 .foregroundColor(TarsyTheme.textPrimary)
                 .padding(.horizontal, 16)
-                .padding(.top, totalQuestions > 1 ? 8 : 16)
-                .padding(.bottom, 12)
+                .padding(.top, isCompact ? 4 : 8)
+                .padding(.bottom, isCompact ? 6 : 12)
 
-            // Options
-            optionsList(for: question)
+            // Options (scrollable in landscape)
+            if isCompact {
+                ScrollView {
+                    optionsList(for: question)
+                }
+                .frame(maxHeight: 120)
+            } else {
+                optionsList(for: question)
+            }
 
             // Custom text input
             customInputField(for: question)
         }
+        .frame(maxWidth: isCompact ? 400 : .infinity)
         .background(TarsyTheme.backgroundSecondary)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .clipShape(RoundedRectangle(cornerRadius: isCompact ? 12 : 16))
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: isCompact ? 12 : 16)
                 .stroke(TarsyTheme.textSecondary.opacity(0.2), lineWidth: 1)
         )
     }
@@ -118,7 +140,7 @@ struct PaginatedQuestionCard: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 14)
+        .padding(.top, isCompact ? 8 : 14)
     }
 
     // MARK: - Options List
@@ -158,21 +180,21 @@ struct PaginatedQuestionCard: View {
                 }
             }
         }) {
-            HStack(spacing: 12) {
+            HStack(spacing: isCompact ? 8 : 12) {
                 Text("\(optIndex)")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: isCompact ? 12 : 14, weight: .medium))
                     .foregroundColor(singleAnswers[idx] == option ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
-                    .frame(width: 28)
+                    .frame(width: isCompact ? 22 : 28)
 
                 Text(option)
-                    .font(.system(size: 15))
+                    .font(.system(size: isCompact ? 13 : 15))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .multilineTextAlignment(.leading)
 
                 Spacer()
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.horizontal, isCompact ? 12 : 16)
+            .padding(.vertical, isCompact ? 8 : 14)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -193,11 +215,11 @@ struct PaginatedQuestionCard: View {
             }
             multiAnswers[idx] = current
         }) {
-            HStack(spacing: 12) {
+            HStack(spacing: isCompact ? 8 : 12) {
                 ZStack {
                     Circle()
                         .fill(selected ? TarsyTheme.accentAmber : Color.clear)
-                        .frame(width: 28, height: 28)
+                        .frame(width: isCompact ? 22 : 28, height: isCompact ? 22 : 28)
                         .overlay(
                             Circle()
                                 .stroke(selected ? TarsyTheme.accentAmber : TarsyTheme.textSecondary.opacity(0.4), lineWidth: 2)
@@ -205,20 +227,20 @@ struct PaginatedQuestionCard: View {
 
                     if selected {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 13, weight: .bold))
+                            .font(.system(size: isCompact ? 10 : 13, weight: .bold))
                             .foregroundColor(.white)
                     }
                 }
 
                 Text(option)
-                    .font(.system(size: 15))
+                    .font(.system(size: isCompact ? 13 : 15))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .multilineTextAlignment(.leading)
 
                 Spacer()
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
+            .padding(.horizontal, isCompact ? 12 : 16)
+            .padding(.vertical, isCompact ? 6 : 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -233,7 +255,7 @@ struct PaginatedQuestionCard: View {
 
         return HStack(spacing: 8) {
             Image(systemName: "paperclip")
-                .font(.system(size: 14))
+                .font(.system(size: isCompact ? 12 : 14))
                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
 
             TextField("", text: Binding(
@@ -241,7 +263,7 @@ struct PaginatedQuestionCard: View {
                 set: { customInputs[idx] = $0 }
             ), prompt: Text("Digite sua resposta...")
                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.4)))
-                .font(.system(size: 14))
+                .font(.system(size: isCompact ? 12 : 14))
                 .foregroundColor(TarsyTheme.textPrimary)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
@@ -261,17 +283,17 @@ struct PaginatedQuestionCard: View {
                 }) {
                     Circle()
                         .fill(TarsyTheme.accentAmber)
-                        .frame(width: 32, height: 32)
+                        .frame(width: isCompact ? 26 : 32, height: isCompact ? 26 : 32)
                         .overlay(
                             Image(systemName: "arrow.up")
-                                .font(.system(size: 14, weight: .bold))
+                                .font(.system(size: isCompact ? 12 : 14, weight: .bold))
                                 .foregroundColor(.white)
                         )
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, isCompact ? 12 : 16)
+        .padding(.vertical, isCompact ? 8 : 12)
         .overlay(
             Divider()
                 .background(TarsyTheme.textSecondary.opacity(0.15)),
@@ -334,6 +356,9 @@ struct InteractiveOptionsView: View {
     let options: [InteractiveOption]
     let onSelect: (InteractiveOption) -> Void
 
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    private var isCompact: Bool { verticalSizeClass == .compact }
+
     var body: some View {
         VStack(spacing: 6) {
             if options.count <= 3 && options.contains(where: { $0.style != .numbered }) {
@@ -369,7 +394,7 @@ struct InteractiveOptionsView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: isCompact ? 400 : .infinity, alignment: .leading)
     }
 }
 

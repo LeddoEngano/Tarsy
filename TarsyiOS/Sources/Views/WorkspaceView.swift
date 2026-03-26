@@ -34,15 +34,34 @@ struct WorkspaceView: View {
     @StateObject private var chatService = ChatService()
     @State private var showGitSheet = false
     @State private var showFileExplorer = false
+    @State private var showMCPStore = false
     @State private var checkpointFeedback: String? = nil
     @State private var isRecording = false
     @StateObject private var voiceInput = VoiceInputManager()
+    @StateObject private var todoManager = VoiceTodoManager()
     @State private var engineModel = ""
     @State private var contextPercent: Double = 0
     @State private var currentBranch = ""
+    @State private var viewMode: ViewMode = .browser
+    @State private var keyboardHeight: CGFloat = 0
+
+    private enum ViewMode: String {
+        case browser, stream
+    }
 
     private var currentTab: TerminalTab {
         tabs[selectedTabIndex]
+    }
+
+    private var activeSessionIdBinding: Binding<String?> {
+        Binding(
+            get: { tabs[selectedTabIndex].sessionId },
+            set: { tabs[selectedTabIndex].sessionId = $0 }
+        )
+    }
+
+    private func handleSessionCreated(_ sessionId: String) {
+        tabs[selectedTabIndex].sessionId = sessionId
     }
 
     @FocusState private var isInputFocused: Bool
@@ -54,28 +73,81 @@ struct WorkspaceView: View {
 
             VStack(spacing: 0) {
                 // Stream area
-                StreamPlayerView(workspace: workspace, isActive: $isStreamActive) { image in
-                    let data = image.jpegData(compressionQuality: 0.8)
-                    attachments.append(Attachment(
-                        name: "screenshot",
-                        type: .image,
-                        thumbnail: image,
-                        data: data
-                    ))
+                if workspace.stack == .web || workspace.stack == .fullstack {
+                    if viewMode == .browser {
+                        WebBrowserView(workspace: workspace, onScreenshot: { image in
+                            let data = image.jpegData(compressionQuality: 0.8)
+                            attachments.append(Attachment(
+                                name: "screenshot",
+                                type: .image,
+                                thumbnail: image,
+                                data: data
+                            ))
+                        }, isActive: $isStreamActive)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: isInputFocused ? 0 : UIScreen.main.bounds.height * 0.35)
+                            .clipped()
+                            .animation(.easeInOut(duration: 0.25), value: isInputFocused)
+                    } else {
+                        StreamPlayerView(
+                            workspace: workspace,
+                            isActive: $isStreamActive,
+                            onScreenshot: { image in
+                                let data = image.jpegData(compressionQuality: 0.8)
+                                attachments.append(Attachment(name: "screenshot", type: .image, thumbnail: image, data: data))
+                            },
+                            activeSessionId: activeSessionIdBinding,
+                            activeEngineType: currentTab.engineType ?? .claude,
+                            onSessionCreated: handleSessionCreated,
+                            todoManager: todoManager,
+                            interactiveQuestions: $interactiveQuestions,
+                            interactiveOptions: $interactiveOptions,
+                            onInteractiveChoice: { sendInteractiveChoice($0) },
+                            onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) }
+                        )
+                            .frame(maxWidth: .infinity)
+                            .frame(height: isInputFocused ? 0 : UIScreen.main.bounds.height * 0.35)
+                            .clipped()
+                            .animation(.easeInOut(duration: 0.25), value: isInputFocused)
+                    }
+                } else {
+                    StreamPlayerView(
+                        workspace: workspace,
+                        isActive: $isStreamActive,
+                        onScreenshot: { image in
+                            let data = image.jpegData(compressionQuality: 0.8)
+                            attachments.append(Attachment(name: "screenshot", type: .image, thumbnail: image, data: data))
+                        },
+                        activeSessionId: activeSessionIdBinding,
+                        activeEngineType: currentTab.engineType ?? .claude,
+                        onSessionCreated: handleSessionCreated,
+                        todoManager: todoManager,
+                        interactiveQuestions: $interactiveQuestions,
+                        interactiveOptions: $interactiveOptions,
+                        onInteractiveChoice: { sendInteractiveChoice($0) },
+                        onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) }
+                    )
+                        .frame(maxWidth: .infinity)
+                        .frame(height: isInputFocused ? 0 : UIScreen.main.bounds.height * 0.35)
+                        .clipped()
+                        .animation(.easeInOut(duration: 0.25), value: isInputFocused)
                 }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: isInputFocused ? 0 : UIScreen.main.bounds.height * 0.35)
-                    .clipped()
-                    .animation(.easeInOut(duration: 0.25), value: isInputFocused)
 
                 // Tabs bar
                 tabBar
 
                 Divider().background(TarsyTheme.backgroundTertiary)
 
-                // Chat area + floating question card
+                // Chat area + view mode switch + floating question card
                 ZStack(alignment: .bottom) {
-                    chatArea
+                    VStack(spacing: 0) {
+                        chatArea
+
+                        // View mode switch (web/fullstack only)
+                        if workspace.stack == .web || workspace.stack == .fullstack {
+                            viewModeSwitch
+                        }
+                    }
 
                     if let questions = interactiveQuestions {
                         PaginatedQuestionCard(
@@ -98,7 +170,10 @@ struct WorkspaceView: View {
 
                 // Input bar
                 inputBar
+                    .padding(.bottom, isInputFocused ? max(keyboardHeight - 34, 0) : 0)
+                    .animation(.easeInOut(duration: 0.25), value: keyboardHeight)
             }
+            .ignoresSafeArea(.keyboard)
             .onTapGesture { isInputFocused = false }
 
             // Checkpoint feedback toast
@@ -129,6 +204,10 @@ struct WorkspaceView: View {
         }
         .sheet(isPresented: $showFileExplorer) {
             FileExplorerView(workspace: workspace)
+                .environmentObject(connectionManager)
+        }
+        .sheet(isPresented: $showMCPStore) {
+            MCPStoreView(workspacePath: workspace.localPath)
                 .environmentObject(connectionManager)
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -165,6 +244,9 @@ struct WorkspaceView: View {
                         Button(action: { showFileExplorer = true }) {
                             Label("file explorer", systemImage: "folder")
                         }
+                        Button(action: { showMCPStore = true }) {
+                            Label("integrations", systemImage: "puzzlepiece.extension")
+                        }
                         NavigationLink(destination: AIContextEditorView(workspace: workspace).environmentObject(workspaceService)) {
                             Label("ai context", systemImage: "brain")
                         }
@@ -187,6 +269,14 @@ struct WorkspaceView: View {
         }
         .onDisappear {
             cleanupHandler()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
+            if let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                keyboardHeight = frame.height
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            keyboardHeight = 0
         }
     }
 
@@ -328,6 +418,10 @@ struct WorkspaceView: View {
             interactiveQuestions = nil
         }
 
+        if let sessionId = currentTab.sessionId {
+            todoManager.markResumed(sessionId: sessionId)
+        }
+
         let msg = ChatMessage(
             workspaceId: workspace.id,
             tabId: currentTab.id,
@@ -352,6 +446,10 @@ struct WorkspaceView: View {
         withAnimation {
             interactiveQuestions = nil
             interactiveOptions = nil
+        }
+
+        if let sessionId = currentTab.sessionId {
+            todoManager.markResumed(sessionId: sessionId)
         }
 
         // Format answers as readable text
@@ -398,6 +496,49 @@ struct WorkspaceView: View {
         }
     }
 
+    private var viewModeSwitch: some View {
+        HStack(spacing: 0) {
+            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { viewMode = .browser } }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "iphone")
+                        .font(.system(size: 10))
+                    Text("browser")
+                        .font(.system(size: 11, design: .monospaced))
+                }
+                    .foregroundColor(viewMode == .browser ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+            }
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.2)) { viewMode = .stream }
+                openBrowserOnMacIfNeeded()
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "display")
+                        .font(.system(size: 10))
+                    Text("stream")
+                        .font(.system(size: 11, design: .monospaced))
+                }
+                    .foregroundColor(viewMode == .stream ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+            }
+        }
+        .background(
+            GeometryReader { geo in
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(TarsyTheme.backgroundTertiary)
+                    .frame(width: geo.size.width / 2, height: geo.size.height)
+                    .offset(x: viewMode == .browser ? 0 : geo.size.width / 2)
+                    .animation(.easeInOut(duration: 0.2), value: viewMode)
+            }
+        )
+        .background(TarsyTheme.backgroundSecondary)
+        .cornerRadius(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
     private var inputBar: some View {
         VStack(spacing: 0) {
             // Attachments preview
@@ -429,7 +570,7 @@ struct WorkspaceView: View {
                     .onSubmit { sendMessage() }
 
                 // Action buttons row
-                HStack(spacing: 0) {
+                HStack(spacing: 4) {
                     Button(action: { showAttachmentPicker.toggle() }) {
                         Image(systemName: "plus")
                             .font(.system(size: 18, weight: .medium))
@@ -451,6 +592,44 @@ struct WorkspaceView: View {
                                 .monospacedDigit()
                         }
                         .transition(.opacity)
+                    }
+
+                    // Voice tasks button (left of mic)
+                    if todoManager.hasActiveItems {
+                        Button { todoManager.isMinimized ? todoManager.expand() : todoManager.minimize() } label: {
+                            ZStack {
+                                if todoManager.hasQuestionItems {
+                                    Image(systemName: "questionmark")
+                                        .font(.system(size: 14, weight: .bold))
+                                        .foregroundColor(TarsyTheme.accentAmber)
+                                } else if let tool = todoManager.items.last(where: { $0.status == .working })?.currentTool {
+                                    Image(systemName: VoiceTodoManager.iconForTool(tool))
+                                        .font(.system(size: 14))
+                                        .foregroundColor(TarsyTheme.accentAmber)
+                                } else {
+                                    ProgressView()
+                                        .scaleEffect(0.6)
+                                        .tint(TarsyTheme.accentAmber)
+                                }
+                            }
+                            .frame(width: 32, height: 32)
+                            .background(TarsyTheme.accentAmber.opacity(0.15))
+                            .cornerRadius(16)
+                            .overlay(
+                                Group {
+                                    if todoManager.activeCount > 1 {
+                                        Text("\(todoManager.activeCount)")
+                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                            .foregroundColor(.white)
+                                            .frame(width: 16, height: 16)
+                                            .background(TarsyTheme.accentAmber)
+                                            .clipShape(Circle())
+                                            .offset(x: 10, y: -10)
+                                    }
+                                }
+                            )
+                        }
+                        .transition(.scale(scale: 0.5).combined(with: .opacity))
                     }
 
                     Image(systemName: isRecording ? "mic.fill" : "mic")
@@ -478,12 +657,20 @@ struct WorkspaceView: View {
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
                 .animation(.easeInOut(duration: 0.2), value: isRecording)
+                .animation(.easeInOut(duration: 0.25), value: todoManager.hasActiveItems)
             }
             .overlay(
                 RoundedRectangle(cornerRadius: 20)
                     .stroke(isRecording ? TarsyTheme.accentAmber : Color.clear, lineWidth: 1.5)
             )
             .if_iOS26GlassEffect()
+            .overlay(alignment: .bottomTrailing) {
+                if !todoManager.items.isEmpty && !todoManager.isMinimized {
+                    VoiceTodoOverlay(todoManager: todoManager)
+                        .padding(.trailing, 10)
+                        .padding(.bottom, 52)
+                }
+            }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
 
@@ -493,45 +680,45 @@ struct WorkspaceView: View {
                 Button(action: { pullBranch() }) {
                     HStack(spacing: 3) {
                         Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 9))
+                            .font(.system(size: 10))
                         Text(currentBranch.isEmpty ? workspace.currentBranch ?? "main" : currentBranch)
                             .lineLimit(1)
                         Image(systemName: "arrow.down")
-                            .font(.system(size: 7))
+                            .font(.system(size: 8))
                     }
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(TarsyTheme.textSecondary)
                 }
 
                 Text("  |  ")
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
 
                 // Engine + model
                 HStack(spacing: 3) {
                     Image(systemName: currentTab.engineType?.iconName ?? "brain.head.profile")
-                        .font(.system(size: 9))
+                        .font(.system(size: 10))
                     Text(engineDisplayName)
                         .lineLimit(1)
                 }
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(TarsyTheme.textSecondary)
 
                 if contextPercent > 0 {
                     Text("  |  ")
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                         .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
 
                     // Context %
                     Text("\(Int(contextPercent))% ctx")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(contextPercent > 80 ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
                 }
 
                 Spacer()
             }
             .padding(.horizontal, 20)
-            .padding(.bottom, 4)
+            .padding(.bottom, 6)
         }
         .background(TarsyTheme.backgroundPrimary)
         .confirmationDialog("Attach", isPresented: $showAttachmentPicker) {
@@ -619,6 +806,22 @@ struct WorkspaceView: View {
     }
 
     // MARK: - Actions
+
+    private func openBrowserOnMacIfNeeded() {
+        let url: String
+        if let streamUrl = workspace.streamUrl, !streamUrl.isEmpty {
+            url = streamUrl
+        } else {
+            let port: Int
+            switch workspace.stack {
+            case .web, .fullstack: port = 3000
+            case .mobile: port = 8081
+            case .backend: port = 8000
+            }
+            url = "http://localhost:\(port)"
+        }
+        connectionManager.send(WSPacket(action: .browserOpenUrl, payload: ["url": url]))
+    }
 
     private func sendMessage() {
         guard !messageText.isEmpty || !attachments.isEmpty else { return }
@@ -777,9 +980,14 @@ struct WorkspaceView: View {
                     isAgentThinking = false
                     agentActivity = nil
                     await chatService.saveLastAssistantMessage()
+                    let sid = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
+                    todoManager.markCompleted(sessionId: sid)
                 case .claudeCreate:
                     if let sessionId = packet.payload?["sessionId"] {
                         tabs[selectedTabIndex].sessionId = sessionId
+                        for i in todoManager.items.indices where todoManager.items[i].sessionId == "pending" {
+                            todoManager.items[i].sessionId = sessionId
+                        }
                     }
                 case .claudeAskUser:
                     handleEngineAskUser(packet)
@@ -791,9 +999,15 @@ struct WorkspaceView: View {
                     isAgentThinking = false
                     agentActivity = nil
                     await chatService.saveLastAssistantMessage()
+                    let eSid = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
+                    todoManager.markCompleted(sessionId: eSid)
                 case .engineCreate:
                     if let sessionId = packet.payload?["sessionId"] {
                         tabs[selectedTabIndex].sessionId = sessionId
+                        // Update pending todo items with real sessionId
+                        for i in todoManager.items.indices where todoManager.items[i].sessionId == "pending" {
+                            todoManager.items[i].sessionId = sessionId
+                        }
                     }
                 case .engineAskUser:
                     handleEngineAskUser(packet)
@@ -850,10 +1064,19 @@ struct WorkspaceView: View {
 
     private func handleEngineOutput(_ packet: WSPacket) {
         isAgentThinking = false
+        // If we get output, the agent is working again (no longer waiting for question)
+        let sessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
+        todoManager.markResumed(sessionId: sessionId)
         if let output = packet.payload?["output"] {
             if output.hasPrefix("🔧") {
                 let clean = output.trimmingCharacters(in: .whitespacesAndNewlines)
                 agentActivity = clean
+                // Extract tool name (format: "🔧 ToolName: description")
+                let withoutEmoji = clean.dropFirst(2) // Remove "🔧 "
+                let toolName = String(withoutEmoji.prefix(while: { $0 != ":" })).trimmingCharacters(in: .whitespaces)
+                if !toolName.isEmpty {
+                    todoManager.updateTool(sessionId: sessionId, tool: toolName)
+                }
             } else {
                 agentActivity = nil
                 chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
@@ -863,6 +1086,8 @@ struct WorkspaceView: View {
 
     private func handleEngineAskUser(_ packet: WSPacket) {
         isAgentThinking = false
+        let sessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
+        todoManager.markQuestion(sessionId: sessionId)
         if let questionsJson = packet.payload?["questions"],
            let questionsData = questionsJson.data(using: .utf8),
            let questions = try? JSONDecoder().decode([InteractiveQuestion].self, from: questionsData) {

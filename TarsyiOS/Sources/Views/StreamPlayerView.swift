@@ -16,6 +16,9 @@ class MJPEGStreamViewModel: ObservableObject {
     private var lastFrameTime: CFAbsoluteTime = 0
     private let minFrameInterval: CFAbsoluteTime = 1.0 / 15.0 // Max 15 fps
     private let processingQueue = DispatchQueue(label: "mjpeg.processing", qos: .userInitiated)
+    private var totalFramesReceived = 0
+    private var framesDroppedThrottle = 0
+    private var framesFailedDecode = 0
 
     func connect(host: String, port: UInt16) {
         disconnect()
@@ -60,6 +63,7 @@ class MJPEGStreamViewModel: ObservableObject {
     }
 
     func disconnect() {
+        print("[MJPEG] disconnect() called — stack trace: \(Thread.callStackSymbols.prefix(6).joined(separator: "\n"))")
         connection?.cancel()
         connection = nil
         fpsTimer?.invalidate()
@@ -73,19 +77,34 @@ class MJPEGStreamViewModel: ObservableObject {
 
     /// Receive a raw JPEG frame from relay (binary WebSocket message)
     func receiveRelayFrame(_ data: Data) {
+        totalFramesReceived += 1
+
         if fpsTimer == nil {
+            print("[MJPEG] fpsTimer was nil, creating new timer")
             fpsTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                 DispatchQueue.main.async {
-                    self?.fps = self?.frameCount ?? 0
-                    self?.frameCount = 0
+                    guard let self else { return }
+                    let displayed = self.frameCount
+                    self.fps = displayed
+                    self.frameCount = 0
+                    if displayed == 0 {
+                        print("[MJPEG] FPS=0 | received=\(self.totalFramesReceived) droppedThrottle=\(self.framesDroppedThrottle) failedDecode=\(self.framesFailedDecode) isConnected=\(self.isConnected) hasFrame=\(self.currentFrame != nil) timerOK=\(self.fpsTimer != nil)")
+                    }
                 }
             }
         }
 
         processingQueue.async { [weak self] in
-            guard let self else { return }
+            guard let self else {
+                print("[MJPEG] receiveRelayFrame: self is nil (deallocated)")
+                return
+            }
             let now = CFAbsoluteTimeGetCurrent()
-            guard now - self.lastFrameTime >= self.minFrameInterval else { return }
+            let elapsed = now - self.lastFrameTime
+            guard elapsed >= self.minFrameInterval else {
+                self.framesDroppedThrottle += 1
+                return
+            }
             self.lastFrameTime = now
 
             if let image = UIImage(data: data) {
@@ -94,6 +113,9 @@ class MJPEGStreamViewModel: ObservableObject {
                     self.isConnected = true
                     self.frameCount += 1
                 }
+            } else {
+                self.framesFailedDecode += 1
+                print("[MJPEG] Failed to decode JPEG frame, size=\(data.count) bytes")
             }
         }
     }
@@ -162,6 +184,14 @@ struct StreamPlayerView: View {
     let workspace: Workspace
     @Binding var isActive: Bool
     var onScreenshot: ((UIImage) -> Void)? = nil
+    @Binding var activeSessionId: String?
+    var activeEngineType: AIEngineType = .claude
+    var onSessionCreated: ((String) -> Void)? = nil
+    @ObservedObject var todoManager: VoiceTodoManager
+    @Binding var interactiveQuestions: [InteractiveQuestion]?
+    @Binding var interactiveOptions: [InteractiveOption]?
+    var onInteractiveChoice: ((InteractiveOption) -> Void)?
+    var onMultiQuestionSubmit: (([String: String]) -> Void)?
     @State private var isFullscreen = false
     @State private var isDevServerRunning = false
     @State private var isDevServerStarting = false
@@ -277,14 +307,29 @@ struct StreamPlayerView: View {
             InteractiveStreamView(
                 viewModel: viewModel,
                 connectionManager: connectionManager,
-                onClose: { isFullscreen = false }
+                workspaceStack: workspace.stack,
+                onClose: { isFullscreen = false },
+                engineSessionId: $activeSessionId,
+                engineType: activeEngineType,
+                workspacePath: workspace.localPath,
+                aiContext: workspace.aiContext ?? "",
+                onSessionCreated: onSessionCreated,
+                todoManager: todoManager,
+                interactiveQuestions: $interactiveQuestions,
+                interactiveOptions: $interactiveOptions,
+                onInteractiveChoice: onInteractiveChoice,
+                onMultiQuestionSubmit: onMultiQuestionSubmit
             )
         }
         .onAppear {
+            print("[StreamPlayer] onAppear — isFullscreen=\(isFullscreen) isActive=\(isActive)")
             checkDevServerStatus()
         }
         .onDisappear {
-            viewModel.disconnect()
+            print("[StreamPlayer] onDisappear — isFullscreen=\(isFullscreen) isActive=\(isActive)")
+            if !isFullscreen {
+                viewModel.disconnect()
+            }
         }
     }
 
