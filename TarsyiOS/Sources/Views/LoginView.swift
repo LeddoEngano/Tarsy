@@ -1,4 +1,5 @@
 import SwiftUI
+import AuthenticationServices
 import TarsyShared
 
 struct LoginView: View {
@@ -28,8 +29,57 @@ struct LoginView: View {
 
                 Spacer()
 
-                // Form
                 VStack(spacing: 16) {
+                    // Sign in with Apple
+                    SignInWithAppleButton(.signIn) { request in
+                        let nonce = authManager.generateNonce()
+                        request.requestedScopes = [.email, .fullName]
+                        request.nonce = authManager.sha256(nonce)
+                    } onCompletion: { result in
+                        Task {
+                            await authManager.handleAppleSignIn(result: result)
+                        }
+                    }
+                    .signInWithAppleButtonStyle(.white)
+                    .frame(height: 50)
+                    .cornerRadius(12)
+
+                    // Sign in with GitHub
+                    Button(action: {
+                        Task { await authManager.signInWithGitHub() }
+                    }) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("Sign in with GitHub")
+                                .font(.system(size: 17, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 50)
+                        .background(Color(white: 0.15))
+                        .cornerRadius(12)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+
+                    // Divider
+                    HStack {
+                        Rectangle()
+                            .fill(TarsyTheme.textSecondary.opacity(0.3))
+                            .frame(height: 1)
+                        Text("or")
+                            .font(TarsyTheme.monoFontSmall)
+                            .foregroundColor(TarsyTheme.textSecondary)
+                        Rectangle()
+                            .fill(TarsyTheme.textSecondary.opacity(0.3))
+                            .frame(height: 1)
+                    }
+                    .padding(.vertical, 4)
+
+                    // Email/Password form
                     TextField("", text: $email, prompt: Text("email").foregroundColor(TarsyTheme.textSecondary))
                         .textFieldStyle(.plain)
                         .font(TarsyTheme.monoFont)

@@ -16,16 +16,32 @@ targets:
     platform: macOS
     sources:
       - Sources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleIconName: AppIcon
+        CFBundleDisplayName: Tarsy
+        CFBundleName: Tarsy
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        LSUIElement: true
+        LSApplicationCategoryType: "public.app-category.developer-tools"
+        NSAppleEventsUsageDescription: "Tarsy needs to control your browser to manage tabs and navigate pages."
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - com.tarsy.macos
+    entitlements:
+      path: TarsymacOS.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.network.server: true
+        com.apple.security.automation.apple-events: true
+        com.apple.developer.applesignin:
+          - Default
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tarsy.macos
-        GENERATE_INFOPLIST_FILE: "YES"
-        INFOPLIST_VALUES: >-
-          CFBundleDisplayName=Tarsy
-          CFBundleName=Tarsy
-          CFBundleShortVersionString=0.1.0
-          CFBundleVersion=1
-          LSUIElement=YES
         DEVELOPMENT_TEAM: "J2M334NJ3L"
         CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_STYLE: "Automatic"

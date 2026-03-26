@@ -1,6 +1,7 @@
 import SwiftUI
 import TarsyShared
 import ScreenCaptureKit
+import AuthenticationServices
 
 struct OnboardingWindow: View {
     @EnvironmentObject var authManager: AuthManager
@@ -135,6 +136,56 @@ struct OnboardingWindow: View {
                 .foregroundColor(Color(hex: "a89e91"))
 
             VStack(spacing: 12) {
+                // Sign in with Apple
+                SignInWithAppleButton(.signIn) { request in
+                    let nonce = authManager.generateNonce()
+                    request.requestedScopes = [.email, .fullName]
+                    request.nonce = authManager.sha256(nonce)
+                } onCompletion: { result in
+                    Task {
+                        await authManager.handleAppleSignIn(result: result)
+                    }
+                }
+                .signInWithAppleButtonStyle(.white)
+                .frame(height: 44)
+                .cornerRadius(8)
+
+                // Sign in with GitHub
+                Button(action: {
+                    Task { await authManager.signInWithGitHub() }
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chevron.left.forwardslash.chevron.right")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("Sign in with GitHub")
+                            .font(.system(size: 14, weight: .medium))
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 44)
+                    .background(Color(hex: "2a2a2a"))
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                // Divider
+                HStack {
+                    Rectangle()
+                        .fill(Color(hex: "6b6b6b").opacity(0.3))
+                        .frame(height: 1)
+                    Text("or")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(Color(hex: "6b6b6b"))
+                    Rectangle()
+                        .fill(Color(hex: "6b6b6b").opacity(0.3))
+                        .frame(height: 1)
+                }
+                .padding(.vertical, 4)
+
                 TextField("", text: $email, prompt: Text("email").foregroundColor(Color(hex: "6b6b6b")))
                     .textFieldStyle(.plain)
                     .font(.system(size: 14, design: .monospaced))
@@ -195,6 +246,7 @@ struct OnboardingWindow: View {
     @State private var hasScreenRecording = false
     @State private var hasAccessibility = false
     @State private var hasFilesAccess = false
+    @State private var hasAutomation = false
     @State private var isCheckingPermissions = false
 
     private var allPermissionsGranted: Bool {
@@ -369,6 +421,108 @@ struct OnboardingWindow: View {
         }
 
         return accessCount >= 2
+    }
+
+    private var automationRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: hasAutomation ? "checkmark.circle.fill" : "xmark.circle")
+                .font(.system(size: 18))
+                .foregroundColor(hasAutomation ? Color(hex: "7a8b6f") : Color(hex: "c4704b"))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("automation")
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundColor(Color(hex: "e8e0d4"))
+                Text("control browser tabs via apple events")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Color(hex: "6b6b6b"))
+            }
+
+            Spacer()
+
+            if !hasAutomation {
+                Button(action: { requestAutomationPermission() }) {
+                    Text("grant access")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Color(hex: "d4a574"))
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(Color(hex: "d4a574"), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(12)
+        .background(Color(hex: "2a2a2a"))
+        .cornerRadius(8)
+    }
+
+    @State private var automationDenied = false
+
+    @State private var automationUserAttempts = 0
+
+    private func requestAutomationPermission() {
+        automationUserAttempts += 1
+        let attempt = automationUserAttempts
+
+        // Bring app to foreground — LSUIElement apps may not get TCC dialogs otherwise
+        NSApp.activate(ignoringOtherApps: true)
+
+        // Run on background thread — AEDeterminePermissionToAutomateTarget blocks until user responds
+        DispatchQueue.global(qos: .userInitiated).async {
+            let succeeded = checkAutomationWithAEAPI(askUser: true)
+
+            DispatchQueue.main.async {
+                hasAutomation = succeeded
+                if succeeded {
+                    automationDenied = false
+                } else if attempt >= 2 {
+                    automationDenied = true
+                    openSettings("Privacy_Automation")
+                }
+            }
+        }
+    }
+
+    /// Uses AEDeterminePermissionToAutomateTarget to check/trigger automation permission.
+    /// Targets Finder (always running). askUser=true shows the macOS consent dialog.
+    private func checkAutomationWithAEAPI(askUser: Bool) -> Bool {
+        let targetDescriptor = NSAppleEventDescriptor(bundleIdentifier: "com.apple.finder")
+        guard let aeDesc = targetDescriptor.aeDesc else {
+            print("[Automation] Failed to create AE descriptor")
+            return false
+        }
+
+        let status = AEDeterminePermissionToAutomateTarget(
+            aeDesc,
+            typeWildCard,
+            typeWildCard,
+            askUser
+        )
+
+        print("[Automation] AEDeterminePermissionToAutomateTarget status: \(status)")
+
+        switch status {
+        case noErr:
+            return true
+        case OSStatus(errAEEventNotPermitted): // -1743: denied
+            return false
+        case OSStatus(procNotFound): // -600: Finder not running (unlikely)
+            return false
+        default:
+            return false
+        }
+    }
+
+    private func checkAutomationPermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: checkAutomationWithAEAPI(askUser: false))
+            }
+        }
     }
 
     private func openSettings(_ key: String) {

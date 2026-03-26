@@ -18,6 +18,11 @@ struct TarsymacOSApp: App {
                         hasCompletedOnboarding = true
                     }
                 }
+                .onOpenURL { url in
+                    Task {
+                        await authManager.handleOAuthCallback(url: url)
+                    }
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)

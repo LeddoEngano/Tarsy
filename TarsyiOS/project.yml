@@ -42,9 +42,17 @@ targets:
         NSCameraUsageDescription: "Tarsy can use the camera to capture and send images to the AI agent."
         NSMicrophoneUsageDescription: "Tarsy uses the microphone for voice-to-text input to send commands to the AI agent."
         NSSpeechRecognitionUsageDescription: "Tarsy uses speech recognition to convert your voice into text commands."
+        CFBundleURLTypes:
+          - CFBundleURLSchemes:
+              - com.tarsy.ios
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSAllowsArbitraryLoads: true
+    entitlements:
+      path: TarsyiOS.entitlements
+      properties:
+        com.apple.developer.applesignin:
+          - Default
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tarsy.ios
@@ -53,3 +61,8 @@ targets:
         CODE_SIGN_STYLE: "Automatic"
     dependencies:
       - package: TarsyShared
+schemes:
+  TarsyiOS:
+    build:
+      targets:
+        TarsyiOS: all
