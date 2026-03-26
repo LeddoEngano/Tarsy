@@ -39,6 +39,21 @@ public enum WSAction: String, Codable, Sendable {
 
     // Browser
     case browserOpenUrl = "browser:open_url"
+    case browserBack = "browser:back"
+    case browserForward = "browser:forward"
+    case browserRefresh = "browser:refresh"
+    case browserMobileViewport = "browser:mobile_viewport"
+    case browserDesktopViewport = "browser:desktop_viewport"
+    case browserTabList = "browser:tab_list"
+    case browserTabListResult = "browser:tab_list_result"
+    case browserTabSwitch = "browser:tab_switch"
+    case browserTabClose = "browser:tab_close"
+
+    // HTTP Proxy (WKWebView tunnel)
+    case proxyDetectPorts = "proxy:detect_ports"
+    case proxyDetectPortsResult = "proxy:detect_ports_result"
+    case proxyRequest = "proxy:request"
+    case proxyResponse = "proxy:response"
 
     // Terminal
     case terminalCreate = "terminal:create"
@@ -97,6 +112,12 @@ public enum WSAction: String, Codable, Sendable {
 
     // Engine Status (model, tokens, context %)
     case engineStatus = "engine:status"
+
+    // MCP Store
+    case mcpList = "mcp:list"
+    case mcpListResult = "mcp:list_result"
+    case mcpHealthCheck = "mcp:health_check"
+    case mcpHealthResult = "mcp:health_result"
 
     // Relay
     case relayMachineOnline = "relay:machine_online"

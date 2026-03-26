@@ -36,6 +36,7 @@ actor RelayClient {
 
         session = URLSession(configuration: .default)
         let ws = session!.webSocketTask(with: url)
+        ws.maximumMessageSize = 4 * 1024 * 1024 // 4MB
         self.webSocket = ws
         ws.resume()
 

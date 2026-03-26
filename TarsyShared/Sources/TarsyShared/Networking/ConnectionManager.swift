@@ -275,6 +275,7 @@ public class ConnectionManager: ObservableObject {
 
         relaySession = URLSession(configuration: .default)
         let task = relaySession!.webSocketTask(with: url)
+        task.maximumMessageSize = 4 * 1024 * 1024 // 4MB
         self.relayTask = task
         task.resume()
 
@@ -317,6 +318,9 @@ public class ConnectionManager: ObservableObject {
                             let jpegData = data.dropFirst(4)
                             self?.onScreenshotReceived?(Data(jpegData))
                         } else {
+                            if self?.onStreamFrameReceived == nil {
+                                print("[WS] Binary frame received (\(data.count) bytes) but onStreamFrameReceived is nil!")
+                            }
                             self?.onStreamFrameReceived?(data)
                         }
                     @unknown default:
