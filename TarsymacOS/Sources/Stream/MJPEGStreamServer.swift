@@ -3,12 +3,16 @@ import Network
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
+import os
 
 actor MJPEGStreamServer {
     private var listener: NWListener?
     private var connections: [String: NWConnection] = [:]
     private let port: UInt16
     private let boundary = "tarsyframe"
+    private var relaySendInFlight = false
+    // Track connections with errors to stop sending immediately (before actor processes removal)
+    private let _deadConnections = OSAllocatedUnfairLock(initialState: Set<String>())
 
     init(port: UInt16 = 8643) {
         self.port = port
@@ -39,33 +43,52 @@ actor MJPEGStreamServer {
 
     private var jpegQuality: CGFloat = 0.6
     private var maxFrameSize: Int = 200_000
+    // Thread-safe quality value for nonisolated encoding
+    private let _currentQuality = OSAllocatedUnfairLock(initialState: CGFloat(0.6))
 
     func setQuality(jpegQuality: CGFloat, maxFrameSize: Int) {
         self.jpegQuality = jpegQuality
         self.maxFrameSize = maxFrameSize
+        _currentQuality.withLock { $0 = jpegQuality }
     }
 
-    func sendFrame(_ cgImage: CGImage) {
+    /// Encode JPEG off-actor — no actor hop needed, runs on caller's thread
+    nonisolated func encodeJPEG(_ cgImage: CGImage) -> Data? {
+        let quality = _currentQuality.withLock { $0 }
+        return Self.jpegEncodeStatic(cgImage, quality: quality)
+    }
+
+    /// Send pre-encoded JPEG data to local MJPEG clients
+    func sendEncodedFrame(_ jpegData: Data) {
         guard !connections.isEmpty else { return }
-        guard let jpegData = jpegEncode(cgImage, quality: jpegQuality) else { return }
-        guard jpegData.count < maxFrameSize else { return }
 
         let header = "--\(boundary)\r\nContent-Type: image/jpeg\r\nContent-Length: \(jpegData.count)\r\n\r\n"
         guard let headerData = header.data(using: .ascii) else { return }
 
         var frameData = Data()
+        frameData.reserveCapacity(headerData.count + jpegData.count + 4)
         frameData.append(headerData)
         frameData.append(jpegData)
         frameData.append("\r\n".data(using: .ascii)!)
 
-        for (id, connection) in connections {
+        let deadConns = _deadConnections.withLock { $0 }
+        for (id, connection) in connections where !deadConns.contains(id) {
             connection.send(content: frameData, completion: .contentProcessed { [weak self] error in
                 if let error {
+                    // Mark as dead immediately (lock-based, no actor hop)
+                    self?._deadConnections.withLock { $0.insert(id) }
                     print("[MJPEG] Send error for \(id): \(error)")
                     Task { await self?.removeConnection(id) }
                 }
             })
         }
+    }
+
+    /// Legacy: Encode + send in one call (for backwards compat)
+    func sendFrame(_ cgImage: CGImage) -> Data? {
+        guard let jpegData = jpegEncodeStatic(cgImage, quality: jpegQuality) else { return nil }
+        sendEncodedFrame(jpegData)
+        return jpegData
     }
 
     var clientCount: Int {
@@ -101,19 +124,20 @@ actor MJPEGStreamServer {
     }
 
     private func removeConnection(_ id: String) {
+        guard connections[id] != nil else { return } // Already removed
         connections[id]?.cancel()
         connections.removeValue(forKey: id)
+        _deadConnections.withLock { $0.remove(id) }
         print("[MJPEG] Client disconnected: \(id) (total: \(connections.count))")
     }
 
-    // Encode frame as JPEG data (for relay forwarding)
-    func encodeFrame(_ image: CGImage) -> Data? {
-        let data = jpegEncode(image, quality: jpegQuality)
-        guard let data, data.count < maxFrameSize else { return nil }
-        return data
-    }
+    /// Check if relay is ready for a new frame (not still sending the previous one)
+    var isRelayReady: Bool { !relaySendInFlight }
 
-    private func jpegEncode(_ image: CGImage, quality: CGFloat) -> Data? {
+    func markRelaySending() { relaySendInFlight = true }
+    func markRelaySent() { relaySendInFlight = false }
+
+    private nonisolated static func jpegEncodeStatic(_ image: CGImage, quality: CGFloat) -> Data? {
         let data = NSMutableData()
         guard let destination = CGImageDestinationCreateWithData(data as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else {
             return nil
@@ -122,5 +146,9 @@ actor MJPEGStreamServer {
         CGImageDestinationAddImage(destination, image, options as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { return nil }
         return data as Data
+    }
+
+    private func jpegEncodeStatic(_ image: CGImage, quality: CGFloat) -> Data? {
+        Self.jpegEncodeStatic(image, quality: quality)
     }
 }

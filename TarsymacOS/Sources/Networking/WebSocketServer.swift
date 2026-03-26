@@ -66,6 +66,21 @@ actor WebSocketServer {
         }
     }
 
+    /// Send raw binary data to a specific client (for H.264 frames)
+    func sendBinary(_ data: Data, to clientId: String) {
+        guard let connection = connections[clientId] else { return }
+        let metadata = NWProtocolWebSocket.Metadata(opcode: .binary)
+        let context = NWConnection.ContentContext(identifier: "ws-binary", metadata: [metadata])
+        connection.send(content: data, contentContext: context, isComplete: true, completion: .idempotent)
+    }
+
+    /// Send raw binary data to all connected clients
+    func broadcastBinary(_ data: Data) {
+        for clientId in connections.keys {
+            sendBinary(data, to: clientId)
+        }
+    }
+
     private func handleNewConnection(_ connection: NWConnection) {
         let clientId = UUID().uuidString
         connections[clientId] = connection

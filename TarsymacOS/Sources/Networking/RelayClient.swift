@@ -79,6 +79,17 @@ actor RelayClient {
         }
     }
 
+    func sendBinary(_ data: Data, completion: @escaping @Sendable () -> Void) {
+        guard let ws = webSocket else { completion(); return }
+        let message = URLSessionWebSocketTask.Message.data(data)
+        ws.send(message) { error in
+            if let error {
+                print("[Relay] Binary send error: \(error)")
+            }
+            completion()
+        }
+    }
+
     // MARK: - Receive Loop
 
     private func receiveLoop() {

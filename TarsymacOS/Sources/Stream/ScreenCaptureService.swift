@@ -2,6 +2,7 @@ import Foundation
 import ScreenCaptureKit
 import CoreGraphics
 import CoreImage
+import VideoToolbox
 
 @MainActor
 class ScreenCaptureService: NSObject, ObservableObject {
@@ -15,6 +16,8 @@ class ScreenCaptureService: NSObject, ObservableObject {
     private var hasPermission = false
 
     var onFrame: ((CGImage) -> Void)?
+    /// Direct pixel buffer callback for H.264 encoding (avoids CGImage conversion)
+    var onPixelBuffer: ((CVPixelBuffer) -> Void)?
 
     // Request permission once at startup without triggering a capture
     func requestPermission() async {
@@ -132,6 +135,10 @@ class ScreenCaptureService: NSObject, ObservableObject {
                 self?.onFrame?(image)
             }
         }
+        // Wire pixel buffer handler for H.264 path
+        streamOutput?.pixelBufferHandler = onPixelBuffer != nil ? { [weak self] pixelBuffer in
+            self?.onPixelBuffer?(pixelBuffer)
+        } : nil
 
         // Only create new SCStream if we don't have one
         stream = SCStream(filter: filter, configuration: config, delegate: nil)
@@ -154,7 +161,7 @@ class ScreenCaptureService: NSObject, ObservableObject {
 
 private class StreamOutput: NSObject, SCStreamOutput {
     let handler: (CGImage) -> Void
-    private let ciContext = CIContext() // Reuse CIContext for performance
+    var pixelBufferHandler: ((CVPixelBuffer) -> Void)?
 
     init(handler: @escaping (CGImage) -> Void) {
         self.handler = handler
@@ -164,8 +171,16 @@ private class StreamOutput: NSObject, SCStreamOutput {
         guard type == .screen,
               let imageBuffer = sampleBuffer.imageBuffer else { return }
 
-        let ciImage = CIImage(cvPixelBuffer: imageBuffer)
-        guard let cgImage = ciContext.createCGImage(ciImage, from: ciImage.extent) else { return }
+        // If H.264 encoder is connected, send pixel buffer directly (no conversion needed)
+        if let pixelBufferHandler {
+            pixelBufferHandler(imageBuffer)
+            return
+        }
+
+        // Fallback: convert to CGImage for MJPEG path
+        var cgImage: CGImage?
+        VTCreateCGImageFromCVPixelBuffer(imageBuffer, options: nil, imageOut: &cgImage)
+        guard let cgImage else { return }
 
         handler(cgImage)
     }
