@@ -173,7 +173,71 @@ class TerminalSession {
             process.currentDirectoryURL = URL(fileURLWithPath: dir)
         }
 
-        process.environment = ProcessInfo.processInfo.environment
+        // Enrich PATH with common tool locations that Xcode's sandbox doesn't include
+        var env = ProcessInfo.processInfo.environment
+        // Sandbox makes HOME point to container — use real user home instead
+        let realHome = FileManager.default.homeDirectoryForCurrentUser.path
+            .replacingOccurrences(of: "/Library/Containers/com.tarsy.macos/Data", with: "")
+        let home = realHome.isEmpty ? (env["HOME"] ?? NSHomeDirectory()) : realHome
+        // Set HOME to real home so child processes (nvm, etc.) find their config
+        env["HOME"] = home
+        let extraPaths = [
+            "/opt/homebrew/bin",                  // Homebrew (Apple Silicon)
+            "/usr/local/bin",                     // Homebrew (Intel) / system tools
+            "\(home)/.local/share/pnpm",          // pnpm standalone
+            "\(home)/.bun/bin",                   // bun
+            "\(home)/.cargo/bin",                 // rust/cargo
+            "\(home)/.volta/bin",                 // volta
+            "\(home)/go/bin",                     // go
+        ]
+        var resolvedPaths = extraPaths.filter { FileManager.default.fileExists(atPath: $0) }
+
+        // nvm: list all node version dirs and add their bin/
+        let nvmDir = "\(home)/.nvm/versions/node"
+        let nvmDirExists = FileManager.default.fileExists(atPath: nvmDir)
+        print("[TerminalSession] nvm dir \(nvmDir) exists: \(nvmDirExists)")
+        if nvmDirExists {
+            do {
+                let versions = try FileManager.default.contentsOfDirectory(atPath: nvmDir)
+                print("[TerminalSession] nvm versions found: \(versions)")
+                for version in versions {
+                    let binPath = "\(nvmDir)/\(version)/bin"
+                    if FileManager.default.fileExists(atPath: binPath) {
+                        resolvedPaths.append(binPath)
+                    }
+                }
+            } catch {
+                print("[TerminalSession] ERROR listing nvm dir: \(error)")
+            }
+        }
+
+        // Also try common node manager paths directly
+        let additionalNodePaths = [
+            "\(home)/.nvm/versions/node",  // will be scanned above
+            "\(home)/.fnm/node-versions",  // fnm
+            "\(home)/.asdf/shims",         // asdf
+            "\(home)/.proto/shims",        // proto
+            "\(home)/.local/share/fnm/node-versions", // fnm alternative
+        ]
+        for dir in additionalNodePaths {
+            if FileManager.default.fileExists(atPath: dir) {
+                if let subs = try? FileManager.default.contentsOfDirectory(atPath: dir) {
+                    for sub in subs {
+                        let binPath = "\(dir)/\(sub)/bin"
+                        if FileManager.default.fileExists(atPath: binPath) {
+                            resolvedPaths.append(binPath)
+                        }
+                    }
+                }
+            }
+        }
+
+        let currentPath = env["PATH"] ?? "/usr/bin:/bin"
+        let enrichedPath = (resolvedPaths + [currentPath]).joined(separator: ":")
+        env["PATH"] = enrichedPath
+        print("[TerminalSession] Enriched PATH additions: \(resolvedPaths)")
+        print("[TerminalSession] Full PATH: \(enrichedPath)")
+        process.environment = env
 
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData

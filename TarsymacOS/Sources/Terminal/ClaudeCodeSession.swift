@@ -14,8 +14,10 @@ actor ClaudeCodeSession: AIEngine {
     private var onOutput: (@Sendable (String) -> Void)?
     private var onComplete: (@Sendable (String) -> Void)?
     private var onAskUser: (@Sendable (String, [String]) -> Void)?
-    private var onStatusUpdate: (@Sendable (String, Int, Int) -> Void)? // model, inputTokens, outputTokens
+    private var onStatusUpdate: (@Sendable (String, Int, Int) -> Void)? // model, cumulativeInputTokens, cumulativeOutputTokens
     private var pendingAskUser = false // Track if last turn ended with AskUserQuestion
+    private var cumulativeInputTokens: Int = 0
+    private var cumulativeOutputTokens: Int = 0
 
     init(id: String, workspacePath: String, aiContext: String? = nil) {
         self.id = id
@@ -66,6 +68,12 @@ actor ClaudeCodeSession: AIEngine {
         env.removeValue(forKey: "CLAUDECODE")
         env.removeValue(forKey: "CLAUDE_CODE")
         env["TERM"] = "dumb"
+        // Fix sandbox HOME — use real user home for child processes
+        let realHome = FileManager.default.homeDirectoryForCurrentUser.path
+            .replacingOccurrences(of: "/Library/Containers/com.tarsy.macos/Data", with: "")
+        if !realHome.isEmpty {
+            env["HOME"] = realHome
+        }
         proc.environment = env
 
         let stdin = Pipe()
@@ -198,7 +206,9 @@ actor ClaudeCodeSession: AIEngine {
                     let usage = message["usage"] as? [String: Any]
                     let inputTokens = usage?["input_tokens"] as? Int ?? 0
                     let outputTokens = usage?["output_tokens"] as? Int ?? 0
-                    onStatusUpdate?(model, inputTokens, outputTokens)
+                    cumulativeInputTokens += inputTokens
+                    cumulativeOutputTokens += outputTokens
+                    onStatusUpdate?(model, cumulativeInputTokens, cumulativeOutputTokens)
                 }
 
                 if let content = message["content"] as? [[String: Any]] {
@@ -223,8 +233,10 @@ actor ClaudeCodeSession: AIEngine {
                 let model = json["model"] as? String ?? ""
                 let inputTokens = usage["input_tokens"] as? Int ?? 0
                 let outputTokens = usage["output_tokens"] as? Int ?? 0
+                cumulativeInputTokens += inputTokens
+                cumulativeOutputTokens += outputTokens
                 if !model.isEmpty {
-                    onStatusUpdate?(model, inputTokens, outputTokens)
+                    onStatusUpdate?(model, cumulativeInputTokens, cumulativeOutputTokens)
                 }
             }
             // Result means the agent finished processing this message
@@ -319,16 +331,22 @@ actor ClaudeCodeSession: AIEngine {
     }
 
     private func findClaudeCLI() -> String {
+        // Use real home, not sandbox container
+        let realHome = FileManager.default.homeDirectoryForCurrentUser.path
+            .replacingOccurrences(of: "/Library/Containers/com.tarsy.macos/Data", with: "")
+        let home = realHome.isEmpty ? NSHomeDirectory() : realHome
         let paths = [
             "/opt/homebrew/bin/claude",
-            "\(NSHomeDirectory())/.local/bin/claude",
+            "\(home)/.local/bin/claude",
             "/usr/local/bin/claude",
-            "\(NSHomeDirectory())/.claude/bin/claude",
-            "\(NSHomeDirectory())/.npm-global/bin/claude"
+            "\(home)/.claude/bin/claude",
+            "\(home)/.npm-global/bin/claude",
+            "\(NSHomeDirectory())/.local/bin/claude",  // also check sandbox path
         ]
         for path in paths {
             if FileManager.default.fileExists(atPath: path) { return path }
         }
+        print("[ClaudeCode] WARNING: claude CLI not found in any of: \(paths)")
         return "/opt/homebrew/bin/claude"
     }
 }
