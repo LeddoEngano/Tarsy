@@ -30,11 +30,10 @@ class VoiceTodoManager: ObservableObject {
         let item = VoiceTodoItem(id: nextId, text: text, sessionId: sessionId)
         let itemId = nextId
         nextId += 1
-        items.append(item)
-
-        // Show expanded, then auto-minimize after 2s
+        // Set expanded before appending so the overlay renders expanded on first item
+        isMinimized = false
         withAnimation(.easeInOut(duration: 0.25)) {
-            isMinimized = false
+            items.append(item)
         }
         scheduleMinimize()
 
@@ -108,7 +107,7 @@ class VoiceTodoManager: ObservableObject {
         if name.contains("edit") { return "pencil.line" }
         if name.contains("write") { return "doc.badge.plus" }
         if name.contains("grep") || name.contains("search") { return "magnifyingglass" }
-        if name.contains("glob") { return "folder.badge.magnifyingglass" }
+        if name.contains("glob") { return "folder.fill" }
         if name.contains("bash") || name.contains("terminal") { return "terminal" }
         if name.contains("mcp") { return "puzzlepiece.extension" }
         if name.contains("list") && name.contains("file") { return "folder" }

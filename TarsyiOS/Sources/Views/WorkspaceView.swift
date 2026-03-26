@@ -39,6 +39,7 @@ struct WorkspaceView: View {
     @State private var isRecording = false
     @StateObject private var voiceInput = VoiceInputManager()
     @StateObject private var todoManager = VoiceTodoManager()
+    @StateObject private var streamViewModel = MJPEGStreamViewModel()
     @State private var engineModel = ""
     @State private var contextPercent: Double = 0
     @State private var currentBranch = ""
@@ -89,48 +90,10 @@ struct WorkspaceView: View {
                             .clipped()
                             .animation(.easeInOut(duration: 0.25), value: isInputFocused)
                     } else {
-                        StreamPlayerView(
-                            workspace: workspace,
-                            isActive: $isStreamActive,
-                            onScreenshot: { image in
-                                let data = image.jpegData(compressionQuality: 0.8)
-                                attachments.append(Attachment(name: "screenshot", type: .image, thumbnail: image, data: data))
-                            },
-                            activeSessionId: activeSessionIdBinding,
-                            activeEngineType: currentTab.engineType ?? .claude,
-                            onSessionCreated: handleSessionCreated,
-                            todoManager: todoManager,
-                            interactiveQuestions: $interactiveQuestions,
-                            interactiveOptions: $interactiveOptions,
-                            onInteractiveChoice: { sendInteractiveChoice($0) },
-                            onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) }
-                        )
-                            .frame(maxWidth: .infinity)
-                            .frame(height: isInputFocused ? 0 : UIScreen.main.bounds.height * 0.35)
-                            .clipped()
-                            .animation(.easeInOut(duration: 0.25), value: isInputFocused)
+                        streamPlayerContent
                     }
                 } else {
-                    StreamPlayerView(
-                        workspace: workspace,
-                        isActive: $isStreamActive,
-                        onScreenshot: { image in
-                            let data = image.jpegData(compressionQuality: 0.8)
-                            attachments.append(Attachment(name: "screenshot", type: .image, thumbnail: image, data: data))
-                        },
-                        activeSessionId: activeSessionIdBinding,
-                        activeEngineType: currentTab.engineType ?? .claude,
-                        onSessionCreated: handleSessionCreated,
-                        todoManager: todoManager,
-                        interactiveQuestions: $interactiveQuestions,
-                        interactiveOptions: $interactiveOptions,
-                        onInteractiveChoice: { sendInteractiveChoice($0) },
-                        onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) }
-                    )
-                        .frame(maxWidth: .infinity)
-                        .frame(height: isInputFocused ? 0 : UIScreen.main.bounds.height * 0.35)
-                        .clipped()
-                        .animation(.easeInOut(duration: 0.25), value: isInputFocused)
+                    streamPlayerContent
                 }
 
                 // Tabs bar
@@ -138,16 +101,9 @@ struct WorkspaceView: View {
 
                 Divider().background(TarsyTheme.backgroundTertiary)
 
-                // Chat area + view mode switch + floating question card
+                // Chat area + floating question card
                 ZStack(alignment: .bottom) {
-                    VStack(spacing: 0) {
-                        chatArea
-
-                        // View mode switch (web/fullstack only)
-                        if workspace.stack == .web || workspace.stack == .fullstack {
-                            viewModeSwitch
-                        }
-                    }
+                    chatArea
 
                     if let questions = interactiveQuestions {
                         PaginatedQuestionCard(
@@ -166,6 +122,11 @@ struct WorkspaceView: View {
                         .transition(.opacity.combined(with: .move(edge: .bottom)))
                         .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
                     }
+                }
+
+                // View mode switch (web/fullstack only)
+                if workspace.stack == .web || workspace.stack == .fullstack {
+                    viewModeSwitch
                 }
 
                 // Input bar
@@ -496,6 +457,31 @@ struct WorkspaceView: View {
         }
     }
 
+    private var streamPlayerContent: some View {
+        StreamPlayerView(
+            viewModel: streamViewModel,
+            workspace: workspace,
+            isActive: $isStreamActive,
+            onScreenshot: { image in
+                let data = image.jpegData(compressionQuality: 0.8)
+                attachments.append(Attachment(name: "screenshot", type: .image, thumbnail: image, data: data))
+            },
+            activeSessionId: activeSessionIdBinding,
+            activeEngineType: currentTab.engineType ?? .claude,
+            onSessionCreated: handleSessionCreated,
+            todoManager: todoManager,
+            interactiveQuestions: $interactiveQuestions,
+            interactiveOptions: $interactiveOptions,
+            onInteractiveChoice: { sendInteractiveChoice($0) },
+            onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) },
+            onVoiceMessage: { persistVoiceMessage($0) }
+        )
+            .frame(maxWidth: .infinity)
+            .frame(height: isInputFocused ? 0 : UIScreen.main.bounds.height * 0.35)
+            .clipped()
+            .animation(.easeInOut(duration: 0.25), value: isInputFocused)
+    }
+
     private var viewModeSwitch: some View {
         HStack(spacing: 0) {
             Button(action: { withAnimation(.easeInOut(duration: 0.2)) { viewMode = .browser } }) {
@@ -511,7 +497,6 @@ struct WorkspaceView: View {
             }
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) { viewMode = .stream }
-                openBrowserOnMacIfNeeded()
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "display")
@@ -533,10 +518,10 @@ struct WorkspaceView: View {
                     .animation(.easeInOut(duration: 0.2), value: viewMode)
             }
         )
-        .background(TarsyTheme.backgroundSecondary)
+        .background(TarsyTheme.backgroundSecondary.opacity(0.9))
         .cornerRadius(12)
+        .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
         .padding(.horizontal, 12)
-        .padding(.vertical, 6)
     }
 
     private var inputBar: some View {
@@ -665,7 +650,7 @@ struct WorkspaceView: View {
             )
             .if_iOS26GlassEffect()
             .overlay(alignment: .bottomTrailing) {
-                if !todoManager.items.isEmpty && !todoManager.isMinimized {
+                if !todoManager.items.isEmpty {
                     VoiceTodoOverlay(todoManager: todoManager)
                         .padding(.trailing, 10)
                         .padding(.bottom, 52)
@@ -807,20 +792,16 @@ struct WorkspaceView: View {
 
     // MARK: - Actions
 
-    private func openBrowserOnMacIfNeeded() {
-        let url: String
-        if let streamUrl = workspace.streamUrl, !streamUrl.isEmpty {
-            url = streamUrl
-        } else {
-            let port: Int
-            switch workspace.stack {
-            case .web, .fullstack: port = 3000
-            case .mobile: port = 8081
-            case .backend: port = 8000
-            }
-            url = "http://localhost:\(port)"
+    private func persistVoiceMessage(_ transcription: String) {
+        let msg = ChatMessage(
+            workspaceId: workspace.id,
+            tabId: currentTab.id,
+            role: .user,
+            content: transcription
+        )
+        Task {
+            await chatService.addMessage(msg)
         }
-        connectionManager.send(WSPacket(action: .browserOpenUrl, payload: ["url": url]))
     }
 
     private func sendMessage() {

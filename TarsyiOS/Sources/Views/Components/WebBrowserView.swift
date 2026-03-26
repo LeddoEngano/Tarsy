@@ -346,6 +346,11 @@ struct WebBrowserView: View {
                 case .devServerStatus:
                     if packet.payload?["running"] == "true" {
                         isDevServerRunning = true
+                        // Auto-connect if we have a port and aren't connected yet
+                        if let portStr = packet.payload?["port"], let port = Int(portStr),
+                           state == .idle || state == .detecting {
+                            selectPort(port)
+                        }
                     }
 
                 case .devServerStart:
@@ -772,18 +777,27 @@ struct WebViewContainer: UIViewRepresentable {
                 return
             }
 
-            if url.scheme == "tarsy-http" || url.host == "localhost" || url.host?.starts(with: "192.168") == true || url.host?.starts(with: "10.") == true {
+            if isLocalURL(url) {
                 decisionHandler(.allow)
                 return
             }
 
             if url.scheme == "https" || url.scheme == "http" {
+                print("[WebBrowser] Opening external URL: \(url.absoluteString)")
                 UIApplication.shared.open(url)
                 decisionHandler(.cancel)
                 return
             }
 
             decisionHandler(.allow)
+        }
+
+        private func isLocalURL(_ url: URL) -> Bool {
+            if url.scheme == "tarsy-http" || url.scheme == "tarsy-https" { return true }
+            guard let host = url.host else { return false }
+            if host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" || host == "::1" || host == "[::1]" { return true }
+            if host.starts(with: "192.168.") || host.starts(with: "10.") || host.starts(with: "172.") { return true }
+            return false
         }
 
         deinit {

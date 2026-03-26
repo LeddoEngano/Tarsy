@@ -93,6 +93,17 @@ class TarsyProxySchemeHandler: NSObject, WKURLSchemeHandler {
             responseHeaders = parsed
         }
 
+        // Rewrite Location header on redirects to keep tarsy-http scheme
+        // so WKWebView doesn't try to follow redirects outside the custom scheme handler
+        if (300...399).contains(statusCode), let location = responseHeaders["Location"] ?? responseHeaders["location"] {
+            let rewritten = location
+                .replacingOccurrences(of: "http://localhost", with: "tarsy-http://localhost")
+                .replacingOccurrences(of: "http://127.0.0.1", with: "tarsy-http://127.0.0.1")
+                .replacingOccurrences(of: "http://0.0.0.0", with: "tarsy-http://0.0.0.0")
+            responseHeaders["Location"] = rewritten
+            responseHeaders.removeValue(forKey: "location")
+        }
+
         // Decode body
         let bodyData: Data
         if let bodyBase64 = packet.payload?["body"], !bodyBase64.isEmpty {
@@ -101,10 +112,10 @@ class TarsyProxySchemeHandler: NSObject, WKURLSchemeHandler {
             bodyData = Data()
         }
 
-        // Create response
-        let url = URL(string: "tarsy-http://proxy") ?? URL(string: "about:blank")!
+        // Create response — use the original task URL to keep context
+        let responseUrl = task.request.url ?? URL(string: "tarsy-http://proxy")!
         let response = HTTPURLResponse(
-            url: url,
+            url: responseUrl,
             statusCode: statusCode,
             httpVersion: "HTTP/1.1",
             headerFields: responseHeaders
