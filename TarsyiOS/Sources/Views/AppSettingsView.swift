@@ -5,10 +5,12 @@ import Security
 struct AppSettingsView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var subscriptionManager: SubscriptionManager
+    @EnvironmentObject var connectionManager: ConnectionManager
     @State private var apiKeys: [APIKeyEntry] = []
     @State private var editingProvider: AIEngineType?
     @State private var keyInput = ""
     @State private var showPaywall = false
+    @State private var showMCPStore = false
 
     var body: some View {
         NavigationStack {
@@ -134,6 +136,10 @@ struct AppSettingsView: View {
         }
         .fullScreenCover(isPresented: $showPaywall) {
             PaywallView()
+        }
+        .sheet(isPresented: $showMCPStore) {
+            MCPStoreView(workspacePath: nil)
+                .environmentObject(connectionManager)
         }
     }
 
