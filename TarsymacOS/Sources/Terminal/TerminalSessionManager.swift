@@ -43,11 +43,12 @@ actor TerminalSessionManager {
         id: String = UUID().uuidString,
         workspacePath: String,
         aiContext: String? = nil,
+        permissionMode: AgentPermissionConfig.PermissionMode = .dangerous,
         onOutput: @escaping @Sendable (String) -> Void,
         onComplete: @escaping @Sendable (String) -> Void,
         onAskUser: @escaping @Sendable (String, [String]) -> Void = { _, _ in }
     ) throws -> String {
-        let session = ClaudeCodeSession(id: id, workspacePath: workspacePath, aiContext: aiContext)
+        let session = ClaudeCodeSession(id: id, workspacePath: workspacePath, aiContext: aiContext, permissionMode: permissionMode)
         claudeSessions[id] = session
 
         Task {
@@ -95,6 +96,7 @@ actor TerminalSessionManager {
         workspacePath: String,
         command: String? = nil,
         apiKey: String? = nil,
+        permissionMode: AgentPermissionConfig.PermissionMode = .dangerous,
         onOutput: @escaping @Sendable (String) -> Void,
         onComplete: @escaping @Sendable (String) -> Void,
         onAskUser: @escaping @Sendable (String, [String]) -> Void = { _, _ in }
@@ -102,11 +104,11 @@ actor TerminalSessionManager {
         let engine: any AIEngine
 
         if engineType == .claude {
-            let session = ClaudeCodeSession(id: id, workspacePath: workspacePath)
+            let session = ClaudeCodeSession(id: id, workspacePath: workspacePath, permissionMode: permissionMode)
             claudeSessions[id] = session
             engine = session
         } else {
-            let session = GenericCLIEngine(id: id, engineType: engineType, workspacePath: workspacePath, command: command, apiKey: apiKey)
+            let session = GenericCLIEngine(id: id, engineType: engineType, workspacePath: workspacePath, command: command, apiKey: apiKey, permissionMode: permissionMode)
             engine = session
         }
 

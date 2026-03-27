@@ -7,6 +7,7 @@ actor GenericCLIEngine: AIEngine {
     let workspacePath: String
     let command: String
     let apiKey: String?
+    let permissionMode: AgentPermissionConfig.PermissionMode
     private var process: Process?
     private var stdinPipe: Pipe?
     private var isRunning = false
@@ -15,12 +16,13 @@ actor GenericCLIEngine: AIEngine {
     private var onComplete: (@Sendable (String) -> Void)?
     private var onAskUser: (@Sendable (String, [String]) -> Void)?
 
-    init(id: String, engineType: AIEngineType, workspacePath: String, command: String? = nil, apiKey: String? = nil) {
+    init(id: String, engineType: AIEngineType, workspacePath: String, command: String? = nil, apiKey: String? = nil, permissionMode: AgentPermissionConfig.PermissionMode = .dangerous) {
         self.id = id
         self.engineType = engineType
         self.workspacePath = workspacePath
         self.command = command ?? engineType.defaultCommand ?? "echo"
         self.apiKey = apiKey
+        self.permissionMode = permissionMode
     }
 
     func setHandlers(
@@ -125,11 +127,19 @@ actor GenericCLIEngine: AIEngine {
     private func argsForEngine() -> [String] {
         switch engineType {
         case .gemini:
-            return [] // gemini CLI runs interactively
+            return []
         case .codex:
-            return [] // codex CLI runs interactively
+            if permissionMode == .dangerous {
+                return ["--approval-mode", "full-auto"]
+            } else {
+                return ["--approval-mode", "suggest"]
+            }
         case .aider:
-            return ["--no-auto-commits", "--no-git"]
+            if permissionMode == .dangerous {
+                return []
+            } else {
+                return ["--no-auto-commits", "--no-git"]
+            }
         case .custom, .claude:
             return []
         }

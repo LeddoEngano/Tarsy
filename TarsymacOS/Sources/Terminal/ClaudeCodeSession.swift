@@ -6,6 +6,7 @@ actor ClaudeCodeSession: AIEngine {
     let engineType: AIEngineType = .claude
     let workspacePath: String
     let aiContext: String?
+    let permissionMode: AgentPermissionConfig.PermissionMode
     private var process: Process?
     private var stdinPipe: Pipe?
     private var isRunning = false
@@ -19,10 +20,11 @@ actor ClaudeCodeSession: AIEngine {
     private var cumulativeInputTokens: Int = 0
     private var cumulativeOutputTokens: Int = 0
 
-    init(id: String, workspacePath: String, aiContext: String? = nil) {
+    init(id: String, workspacePath: String, aiContext: String? = nil, permissionMode: AgentPermissionConfig.PermissionMode = .dangerous) {
         self.id = id
         self.workspacePath = workspacePath
         self.aiContext = aiContext
+        self.permissionMode = permissionMode
     }
 
     func setHandlers(
@@ -49,11 +51,14 @@ actor ClaudeCodeSession: AIEngine {
 
         var args = [
             "-p",
-            "--dangerously-skip-permissions",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
             "--verbose"
         ]
+
+        if permissionMode == .dangerous {
+            args.insert("--dangerously-skip-permissions", at: 1)
+        }
 
         if let ctx = aiContext, !ctx.isEmpty {
             args.append(contentsOf: ["--system-prompt", ctx])
