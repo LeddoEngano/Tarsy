@@ -12,6 +12,12 @@ struct ActiveSessionsView: View {
     @State private var sessionToContinue: UltraContextSession?
     @State private var isLoadingDetail = false
 
+    // Edit mode
+    @State private var isEditing = false
+    @State private var selectedIds: Set<String> = []
+    @State private var showDeleteConfirm = false
+    @State private var isDeleting = false
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -28,12 +34,29 @@ struct ActiveSessionsView: View {
                 } else if client.sessions.isEmpty {
                     emptyView
                 } else {
-                    sessionList
+                    VStack(spacing: 0) {
+                        sessionList
+
+                        if isEditing && !selectedIds.isEmpty {
+                            deleteBar
+                        }
+                    }
                 }
             }
             .navigationTitle("active sessions")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !client.sessions.isEmpty {
+                        Button(isEditing ? "done" : "edit") {
+                            withAnimation {
+                                isEditing.toggle()
+                                if !isEditing { selectedIds.removeAll() }
+                            }
+                        }
+                        .foregroundColor(TarsyTheme.accentAmber)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("done") { dismiss() }
                         .foregroundColor(TarsyTheme.accentAmber)
@@ -62,7 +85,63 @@ struct ActiveSessionsView: View {
         } message: {
             Text(continueMessage)
         }
+        .alert("Delete sessions?", isPresented: $showDeleteConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete \(selectedIds.count)", role: .destructive) {
+                Task { await deleteSessions() }
+            }
+        } message: {
+            Text("This will permanently delete \(selectedIds.count) session\(selectedIds.count == 1 ? "" : "s") and all their messages.")
+        }
     }
+
+    // MARK: - Delete bar
+
+    private var deleteBar: some View {
+        HStack {
+            Button {
+                if selectedIds.count == client.sessions.count {
+                    selectedIds.removeAll()
+                } else {
+                    selectedIds = Set(client.sessions.map(\.id))
+                }
+            } label: {
+                Text(selectedIds.count == client.sessions.count ? "deselect all" : "select all")
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundColor(TarsyTheme.accentAmber)
+            }
+
+            Spacer()
+
+            Button {
+                showDeleteConfirm = true
+            } label: {
+                HStack(spacing: 6) {
+                    if isDeleting {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(.white)
+                    } else {
+                        Image(systemName: "trash")
+                            .font(.system(size: 13))
+                    }
+                    Text("delete (\(selectedIds.count))")
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                }
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(TarsyTheme.accentTerracotta)
+                .cornerRadius(8)
+            }
+            .disabled(isDeleting)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(TarsyTheme.backgroundSecondary)
+    }
+
+    // MARK: - Views
 
     private var emptyView: some View {
         VStack(spacing: 16) {
@@ -87,12 +166,18 @@ struct ActiveSessionsView: View {
             LazyVStack(spacing: 10) {
                 ForEach(client.sessions) { session in
                     Button {
-                        Task { await loadDetail(session) }
+                        if isEditing {
+                            toggleSelection(session.id)
+                        } else {
+                            Task { await loadDetail(session) }
+                        }
                     } label: {
                         SessionCard(
                             session: session,
                             workspaceName: matchWorkspace(for: session)?.name,
-                            isLoading: isLoadingDetail && selectedSession?.id == session.id
+                            isLoading: isLoadingDetail && selectedSession?.id == session.id,
+                            isEditing: isEditing,
+                            isSelected: selectedIds.contains(session.id)
                         )
                     }
                 }
@@ -104,12 +189,34 @@ struct ActiveSessionsView: View {
         }
     }
 
+    // MARK: - Actions
+
+    private func toggleSelection(_ id: String) {
+        if selectedIds.contains(id) {
+            selectedIds.remove(id)
+        } else {
+            selectedIds.insert(id)
+        }
+    }
+
+    private func deleteSessions() async {
+        isDeleting = true
+        let ids = Array(selectedIds)
+        do {
+            try await client.deleteContexts(ids: ids)
+            selectedIds.removeAll()
+            if client.sessions.isEmpty { isEditing = false }
+        } catch {
+            print("[ActiveSessions] Delete error: \(error)")
+        }
+        isDeleting = false
+    }
+
     private func loadDetail(_ session: UltraContextSession) async {
         selectedSession = session
         isLoadingDetail = true
         do {
             var full = try await client.getContext(id: session.id)
-            // Carry over metadata from list response
             full = UltraContextSession(
                 id: full.id,
                 messages: full.messages,
@@ -136,8 +243,6 @@ struct ActiveSessionsView: View {
         }
         return "This will start a new agent tab with context from this session."
     }
-
-    // MARK: - Workspace matching
 
     private func matchWorkspace(for session: UltraContextSession?) -> Workspace? {
         guard let path = session?.projectPath else { return nil }
@@ -178,9 +283,17 @@ private struct SessionCard: View {
     let session: UltraContextSession
     var workspaceName: String?
     var isLoading: Bool = false
+    var isEditing: Bool = false
+    var isSelected: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
+            if isEditing {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 20))
+                    .foregroundColor(isSelected ? TarsyTheme.accentAmber : TarsyTheme.textSecondary.opacity(0.4))
+            }
+
             Image(systemName: session.hasImage ? "photo" : "brain.head.profile")
                 .font(.system(size: 18))
                 .foregroundColor(session.hasImage ? TarsyTheme.accentTerracotta : TarsyTheme.accentAmber)
@@ -218,14 +331,16 @@ private struct SessionCard: View {
 
             Spacer()
 
-            if isLoading {
-                ProgressView()
-                    .scaleEffect(0.7)
-                    .tint(TarsyTheme.accentAmber)
-            } else {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12))
-                    .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
+            if !isEditing {
+                if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.7)
+                        .tint(TarsyTheme.accentAmber)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12))
+                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
+                }
             }
         }
         .padding(12)
@@ -233,7 +348,7 @@ private struct SessionCard: View {
         .cornerRadius(10)
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(TarsyTheme.backgroundTertiary, lineWidth: 1)
+                .stroke(isSelected ? TarsyTheme.accentAmber : TarsyTheme.backgroundTertiary, lineWidth: isSelected ? 1.5 : 1)
         )
     }
 

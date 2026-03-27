@@ -144,6 +144,20 @@ public class UltraContextClient: ObservableObject {
         return try JSONDecoder().decode([UltraContextSession].self, from: data)
     }
 
+    public func deleteContexts(ids: [String]) async throws {
+        guard let url = URL(string: proxyURL) else { throw URLError(.badURL) }
+        guard let token = await authToken() else { throw URLError(.userAuthenticationRequired) }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue(TarsyConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        let payload: [String: Any] = ["action": "delete", "ids": ids]
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
+        let (_, _) = try await URLSession.shared.data(for: req)
+        sessions.removeAll { ids.contains($0.id) }
+    }
+
     // MARK: - Load sessions
 
     public func loadSessions() async {

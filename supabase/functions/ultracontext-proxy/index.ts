@@ -199,6 +199,42 @@ serve(async (req) => {
       return new Response(data, { status: res.status, headers: { "Content-Type": "application/json" } });
     }
 
+    // DELETE — POST ?action=delete, body: { ids: ["ctx_1", "ctx_2"] }
+    if (action === "delete" && payload.ids) {
+      const contextIds = Array.isArray(payload.ids) ? payload.ids : [payload.ids];
+      const results: { id: string; ok: boolean }[] = [];
+
+      for (const ctxId of contextIds) {
+        try {
+          // Get all messages to find their IDs
+          const getRes = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/${ctxId}`, {
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
+          });
+          const detail = await getRes.json();
+          const msgs = detail?.data ?? [];
+
+          if (msgs.length > 0) {
+            const msgIds = msgs.map((m: any) => m.id).filter(Boolean);
+            if (msgIds.length > 0) {
+              await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/${ctxId}`, {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
+                body: JSON.stringify({ ids: msgIds }),
+              });
+            }
+          }
+          contextOwners.delete(ctxId);
+          results.push({ id: ctxId, ok: true });
+        } catch {
+          results.push({ id: ctxId, ok: false });
+        }
+      }
+
+      return new Response(JSON.stringify({ deleted: results }), {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    }
+
     return new Response(JSON.stringify({ error: "Invalid action" }), {
       status: 400, headers: { "Content-Type": "application/json" },
     });
