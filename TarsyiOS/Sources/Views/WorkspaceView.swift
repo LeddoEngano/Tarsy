@@ -45,6 +45,7 @@ struct WorkspaceView: View {
     @State private var currentBranch = ""
     @State private var detectedAgents: [AIEngineType] = AIEngineType.allCases.filter { $0 != .custom }
     @State private var viewMode: ViewMode = .browser
+    @State private var showSessionPicker = false
     @State private var keyboardHeight: CGFloat = 0
     @State private var keyboardAnimation: Animation = .easeInOut(duration: 0.25)
 
@@ -219,6 +220,12 @@ struct WorkspaceView: View {
             MCPStoreView(workspacePath: workspace.localPath)
                 .environmentObject(connectionManager)
         }
+        .sheet(isPresented: $showSessionPicker) {
+            WorkspaceSessionPicker(workspace: workspace) { session in
+                showSessionPicker = false
+                continueSessionInTab(session)
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -347,10 +354,18 @@ struct WorkspaceView: View {
                 }
 
                 Menu {
-                    ForEach(detectedAgents, id: \.self) { engine in
-                        Button(action: { addEngineTab(engine) }) {
-                            Label(engine.displayName, systemImage: engine.iconName)
+                    Menu {
+                        ForEach(detectedAgents, id: \.self) { engine in
+                            Button(action: { addEngineTab(engine) }) {
+                                Label(engine.displayName, systemImage: engine.iconName)
+                            }
                         }
+                    } label: {
+                        Label("New chat", systemImage: "plus.bubble")
+                    }
+
+                    Button(action: { showSessionPicker = true }) {
+                        Label("Continue session", systemImage: "clock.arrow.circlepath")
                     }
                 } label: {
                     Image(systemName: "plus")
@@ -1026,6 +1041,33 @@ struct WorkspaceView: View {
         Task {
             await chatService.loadMessages(workspaceId: workspace.id, tabId: uniqueId)
         }
+    }
+
+    private func continueSessionInTab(_ session: UltraContextSession) {
+        let engineType = AIEngineType(rawValue: session.engineType ?? "claude") ?? .claude
+        let uniqueId = "\(engineType.rawValue)-\(UUID().uuidString.prefix(8))"
+        let title = session.displayTitle.prefix(20).description
+        let tabType: TerminalTab.TabType = engineType == .claude ? .claude : .engine
+        let tab = TerminalTab(id: uniqueId, title: title, isFixed: false, type: tabType, sessionId: nil, engineType: engineType)
+        tabs.append(tab)
+        selectedTabIndex = tabs.count - 1
+
+        let contextSummary = session.messages
+            .suffix(10)
+            .map { "[\($0.role)] \($0.content)" }
+            .joined(separator: "\n")
+        let message = "Continue the following session. Here's the recent context:\n\n\(contextSummary)"
+
+        connectionManager.send(WSPacket(
+            action: .engineCreate,
+            payload: [
+                "workspacePath": workspace.localPath,
+                "workspaceId": workspace.id.uuidString,
+                "engineType": engineType.rawValue,
+                "message": String(message.prefix(4000)),
+                "tabId": uniqueId
+            ]
+        ))
     }
 
     private func closeTab(at index: Int) {
