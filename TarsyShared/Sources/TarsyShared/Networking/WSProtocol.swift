@@ -129,6 +129,16 @@ public enum WSAction: String, Codable, Sendable {
     case sudoResponse = "sudo:response"
     case sudoResult = "sudo:result"
 
+    // Agent Detection
+    case agentsDetected = "agents:detected"
+
+    // Agent Settings
+    case agentSettings = "agent:settings"
+    case agentSettingsUpdate = "agent:settings_update"
+
+    // UltraContext
+    case ultracontextStatus = "ultracontext:status"
+
     // System
     case auth
     case authSuccess = "auth:success"

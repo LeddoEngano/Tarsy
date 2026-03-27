@@ -123,14 +123,53 @@ public class AuthManager: ObservableObject {
             #elseif os(macOS)
             let scheme = "com.tarsy.macos"
             #endif
-            try await supabase.auth.signInWithOAuth(
+            let redirectURL = URL(string: "\(scheme)://login-callback")!
+
+            // Get the OAuth URL from Supabase without opening it
+            let oauthURL = try supabase.auth.getOAuthSignInURL(
                 provider: .github,
-                redirectTo: URL(string: "\(scheme)://login-callback")
+                redirectTo: redirectURL
             )
+
+            // Use ASWebAuthenticationSession — auto-dismisses on callback
+            let callbackURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+                let session = ASWebAuthenticationSession(
+                    url: oauthURL,
+                    callbackURLScheme: scheme
+                ) { url, error in
+                    if let url {
+                        continuation.resume(returning: url)
+                    } else if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(throwing: NSError(domain: "AuthManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "OAuth cancelled"]))
+                    }
+                }
+                #if os(macOS)
+                session.presentationContextProvider = MacAuthPresenter.shared
+                #endif
+                session.prefersEphemeralWebBrowserSession = false
+                session.start()
+            }
+
+            // Exchange callback URL for session
+            let session = try await supabase.auth.session(from: callbackURL)
+            currentUser = session.user
+            isAuthenticated = true
         } catch {
-            errorMessage = error.localizedDescription
-            isLoading = false
+            // Check if user cancelled
+            let nsError = error as NSError
+            if nsError.domain == ASWebAuthenticationSessionErrorDomain,
+               nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
+                // User cancelled — not an error
+            } else if let session = try? await supabase.auth.session {
+                currentUser = session.user
+                isAuthenticated = true
+            } else {
+                errorMessage = error.localizedDescription
+            }
         }
+        isLoading = false
     }
 
     public func handleOAuthCallback(url: URL) async {
@@ -141,7 +180,7 @@ public class AuthManager: ObservableObject {
             currentUser = session.user
             isAuthenticated = true
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = "Login failed: \(error.localizedDescription). If you already have an account with this email via another provider, try logging in with that provider instead."
         }
         isLoading = false
     }
@@ -163,3 +202,15 @@ public class AuthManager: ObservableObject {
         return hashed.compactMap { String(format: "%02x", $0) }.joined()
     }
 }
+
+#if os(macOS)
+import AppKit
+
+class MacAuthPresenter: NSObject, ASWebAuthenticationPresentationContextProviding {
+    static let shared = MacAuthPresenter()
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        NSApplication.shared.keyWindow ?? ASPresentationAnchor()
+    }
+}
+#endif

@@ -412,6 +412,11 @@ public class ConnectionManager: ObservableObject {
 
         reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
+                // Refresh token before reconnecting (old token may have expired)
+                if let session = try? await supabase.auth.session {
+                    self?.authToken = session.accessToken
+                }
+
                 // Reconnect using the same mode
                 if self?.connectionMode == .relay || self?.host == nil {
                     self?.performRelayConnect()
