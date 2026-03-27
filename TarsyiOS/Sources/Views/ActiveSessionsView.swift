@@ -62,7 +62,6 @@ struct ActiveSessionsView: View {
         } message: {
             Text(continueMessage)
         }
-        }
     }
 
     private var emptyView: some View {
