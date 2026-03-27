@@ -20,46 +20,71 @@ class PushNotificationService {
         UNUserNotificationCenter.current().add(request)
     }
 
-    func notifyTaskComplete(workspace: String, summary: String) {
+    func notifyTaskComplete(workspace: String, summary: String, workspaceId: String? = nil) {
         sendLocalNotification(
             title: "Tarsy - \(workspace)",
             body: summary
         )
 
-        // Also push to Supabase for iOS delivery
         Task {
-            await sendRemotePush(title: "Tarsy - \(workspace)", body: summary)
+            await sendRemotePush(title: "Tarsy - \(workspace)", body: summary, workspaceId: workspaceId)
         }
     }
 
-    func notifyPRCreated(workspace: String, prNumber: String) {
+    func notifyPRCreated(workspace: String, prNumber: String, workspaceId: String? = nil) {
         sendLocalNotification(
             title: "Tarsy - \(workspace)",
             body: "PR #\(prNumber) created"
         )
 
         Task {
-            await sendRemotePush(title: "Tarsy - \(workspace)", body: "PR #\(prNumber) created")
+            await sendRemotePush(title: "Tarsy - \(workspace)", body: "PR #\(prNumber) created", workspaceId: workspaceId)
         }
     }
 
-    func notifyError(workspace: String, error: String) {
+    func notifyAgentQuestion(workspace: String, question: String, workspaceId: String? = nil) {
+        let body = question.prefix(100).description + (question.count > 100 ? "..." : "")
+        sendLocalNotification(
+            title: "Tarsy - \(workspace) needs input",
+            body: body
+        )
+
+        Task {
+            await sendRemotePush(
+                title: "Tarsy - \(workspace)",
+                body: "Agent needs your input: \(body)",
+                workspaceId: workspaceId
+            )
+        }
+    }
+
+    func notifyError(workspace: String, error: String, workspaceId: String? = nil) {
         sendLocalNotification(
             title: "Tarsy - \(workspace)",
             body: "Error: \(error)"
         )
+
+        Task {
+            await sendRemotePush(
+                title: "Tarsy - \(workspace)",
+                body: "Error: \(error)",
+                workspaceId: workspaceId
+            )
+        }
     }
 
-    private func sendRemotePush(title: String, body: String) async {
-        // Insert into a notifications table that triggers a Supabase Edge Function
-        // The Edge Function sends APNs to all registered iOS devices
+    private func sendRemotePush(title: String, body: String, workspaceId: String? = nil) async {
         do {
+            var payload: [String: String] = [
+                "title": title,
+                "body": body
+            ]
+            if let wsId = workspaceId {
+                payload["workspace_id"] = wsId
+            }
             try await supabase
                 .from("push_notifications")
-                .insert([
-                    "title": title,
-                    "body": body
-                ])
+                .insert(payload)
                 .execute()
         } catch {
             print("[Push] Failed to send remote push: \(error)")

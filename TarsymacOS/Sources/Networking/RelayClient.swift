@@ -12,6 +12,7 @@ actor RelayClient {
     private var onBinaryReceived: (@Sendable (Data) -> Void)?
 
     private var authToken: String?
+    private var isReconnecting = false
 
     func setHandlers(
         onPacket: @escaping @Sendable (WSPacket) -> Void,
@@ -23,8 +24,16 @@ actor RelayClient {
 
     func connect(token: String) async {
         self.authToken = token
+        // Only reset reconnect attempts on explicit connect (not reconnect)
+        if !isReconnecting {
+            reconnectAttempts = 0
+        }
+        isReconnecting = false
 
-        // Use dev URL for local testing, prod for release
+        performConnect(token: token)
+    }
+
+    private func performConnect(token: String) {
         let baseURL = TarsyConfig.relayURL
 
         guard let url = URL(string: "\(baseURL)?token=\(token)&role=machine") else {
@@ -34,15 +43,16 @@ actor RelayClient {
 
         print("[Relay] Connecting to \(baseURL)...")
 
+        // Cancel any existing connection
+        webSocket?.cancel(with: .goingAway, reason: nil)
+
         session = URLSession(configuration: .default)
         let ws = session!.webSocketTask(with: url)
         ws.maximumMessageSize = 4 * 1024 * 1024 // 4MB
         self.webSocket = ws
         ws.resume()
 
-        isConnected = true
-        reconnectAttempts = 0
-        print("[Relay] Connected as machine")
+        print("[Relay] Connecting as machine...")
 
         receiveLoop()
     }
@@ -51,6 +61,8 @@ actor RelayClient {
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
         isConnected = false
+        reconnectAttempts = 0
+        isReconnecting = false
         print("[Relay] Disconnected")
     }
 
@@ -103,6 +115,11 @@ actor RelayClient {
     private func handleReceive(_ result: Result<URLSessionWebSocketTask.Message, Error>) {
         switch result {
         case .success(let message):
+            if !isConnected {
+                isConnected = true
+                reconnectAttempts = 0
+                print("[Relay] Connected as machine")
+            }
             switch message {
             case .string(let text):
                 if let data = text.data(using: .utf8),
@@ -126,7 +143,7 @@ actor RelayClient {
     // MARK: - Reconnect
 
     private func scheduleReconnect() {
-        guard reconnectAttempts < maxReconnectAttempts, let token = authToken else {
+        guard reconnectAttempts < maxReconnectAttempts else {
             print("[Relay] Max reconnect attempts reached")
             return
         }
@@ -137,7 +154,22 @@ actor RelayClient {
 
         Task {
             try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000)
-            await connect(token: token)
+
+            // Force token refresh before reconnecting
+            do {
+                let refreshed = try await supabase.auth.refreshSession()
+                let token = refreshed.accessToken
+                print("[Relay] Token refreshed (exp changed: \(token != self.authToken))")
+                self.authToken = token
+                self.isReconnecting = true
+                self.performConnect(token: token)
+            } catch {
+                print("[Relay] Token refresh failed: \(error.localizedDescription)")
+                // Can't reconnect without a valid token
+                if reconnectAttempts < maxReconnectAttempts {
+                    scheduleReconnect()
+                }
+            }
         }
     }
 }

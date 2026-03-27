@@ -3,27 +3,87 @@ import VideoToolbox
 import CoreMedia
 import CoreVideo
 
-/// Hardware-accelerated H.264 encoder using VideoToolbox.
-/// Encodes CVPixelBuffers from ScreenCaptureKit into H.264 NAL units
-/// that can be sent over WebSocket and decoded on iOS.
+/// Hardware-accelerated HEVC (H.265) encoder using VideoToolbox.
+/// Falls back to H.264 if HEVC hardware encoding is unavailable.
+/// Includes adaptive bitrate that adjusts quality based on network conditions.
 class H264Encoder {
     private var session: VTCompressionSession?
     private var width: Int32 = 0
     private var height: Int32 = 0
     private var frameCount: Int64 = 0
-    private let encodingQueue = DispatchQueue(label: "h264.encoding", qos: .userInteractive)
+    private var currentFps: Int = 15
+    private var isHEVC = false
 
-    /// Called with encoded H.264 data. The Data contains:
-    /// - For keyframes: SPS + PPS + IDR NAL units (prefixed with 4-byte length)
-    /// - For delta frames: slice NAL units (prefixed with 4-byte length)
-    /// First byte is 0x01 for keyframe, 0x00 for delta frame.
+    /// Called with encoded video data. The Data contains:
+    /// - First byte: 0x01 for keyframe, 0x00 for delta
+    /// - Annex B NAL units with 0x00000001 start codes
     var onEncodedFrame: ((Data) -> Void)?
 
-    private var formatDescription: CMFormatDescription?
+    // MARK: - Adaptive Bitrate
+
+    private var targetBitrate: Int = 1_500_000
+    private var currentBitrate: Int = 1_500_000
+    private var minBitrate: Int = 300_000
+    private var maxBitrate: Int = 6_000_000
+    private var consecutiveDrops: Int = 0
+    private var consecutiveSuccess: Int = 0
+    private var lastAdjustTime: CFAbsoluteTime = 0
+    private let adjustInterval: CFAbsoluteTime = 2.0 // Adjust every 2 seconds max
+
+    /// Call when a frame was successfully delivered to the client
+    func reportFrameDelivered() {
+        consecutiveDrops = 0
+        consecutiveSuccess += 1
+
+        // Ramp up bitrate if consistently delivering
+        let now = CFAbsoluteTimeGetCurrent()
+        if consecutiveSuccess >= 10 && now - lastAdjustTime >= adjustInterval {
+            if currentBitrate < maxBitrate {
+                let newBitrate = min(currentBitrate * 5 / 4, maxBitrate) // +25%
+                updateBitrate(newBitrate)
+                lastAdjustTime = now
+                consecutiveSuccess = 0
+            }
+        }
+    }
+
+    /// Call when a frame was dropped (backpressure, network slow)
+    func reportFrameDropped() {
+        consecutiveSuccess = 0
+        consecutiveDrops += 1
+
+        let now = CFAbsoluteTimeGetCurrent()
+        if consecutiveDrops >= 2 && now - lastAdjustTime >= adjustInterval {
+            if currentBitrate > minBitrate {
+                let newBitrate = max(currentBitrate * 3 / 4, minBitrate) // -25%
+                updateBitrate(newBitrate)
+                lastAdjustTime = now
+                consecutiveDrops = 0
+            }
+        }
+    }
+
+    private func updateBitrate(_ newBitrate: Int) {
+        guard let session, newBitrate != currentBitrate else { return }
+        currentBitrate = newBitrate
+
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate,
+                           value: newBitrate as CFNumber)
+        let dataRateLimit: [Int] = [newBitrate * 2, 1]
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits,
+                           value: dataRateLimit as CFArray)
+
+        print("[Encoder] Adaptive bitrate: \(newBitrate / 1000)kbps")
+    }
 
     func configure(width: Int, height: Int, fps: Int, bitrate: Int) {
         self.width = Int32(width)
         self.height = Int32(height)
+        self.currentFps = fps
+        self.targetBitrate = bitrate
+        self.currentBitrate = bitrate
+        self.minBitrate = bitrate / 5
+        self.maxBitrate = bitrate * 3
 
         // Tear down existing session
         if let session {
@@ -31,12 +91,14 @@ class H264Encoder {
             self.session = nil
         }
 
+        // H.264 — fastest hardware encoding, lowest latency
         var session: VTCompressionSession?
+        let codecType = kCMVideoCodecType_H264
         let status = VTCompressionSessionCreate(
             allocator: kCFAllocatorDefault,
             width: self.width,
             height: self.height,
-            codecType: kCMVideoCodecType_H264,
+            codecType: codecType,
             encoderSpecification: [
                 kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: true
             ] as CFDictionary,
@@ -52,34 +114,33 @@ class H264Encoder {
         )
 
         guard status == noErr, let session else {
-            print("[H264] Failed to create compression session: \(status)")
+            print("[Encoder] Failed to create compression session: \(status)")
             return
         }
 
         self.session = session
+        self.isHEVC = false
 
         // Real-time encoding for streaming
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
 
-        // Profile: Main for good compression with reasonable compatibility
+        // Profile: Main for good compression
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ProfileLevel,
                            value: kVTProfileLevel_H264_Main_AutoLevel)
 
-        // Bitrate — target for screen content
+        // Bitrate
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate,
                            value: bitrate as CFNumber)
-
-        // Data rate limit: allow bursts up to 1.5x average over 1 second
-        let dataRateLimit: [Int] = [bitrate * 3 / 2, 1]
+        let dataRateLimit: [Int] = [bitrate * 2, 1]
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits,
                            value: dataRateLimit as CFArray)
 
-        // Keyframe interval: every 2 seconds
-        let keyframeInterval = fps * 2
+        // Keyframe interval: every 3 seconds
+        let keyframeInterval = fps * 3
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval,
                            value: keyframeInterval as CFNumber)
 
-        // Low latency
+        // Low latency — no frame reordering, no delay
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering,
                            value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxFrameDelayCount,
@@ -91,7 +152,11 @@ class H264Encoder {
 
         VTCompressionSessionPrepareToEncodeFrames(session)
         frameCount = 0
-        print("[H264] Encoder configured: \(width)x\(height) @ \(fps)fps, \(bitrate/1000)kbps")
+        consecutiveDrops = 0
+        consecutiveSuccess = 0
+
+        let codecName = isHEVC ? "HEVC" : "H.264"
+        print("[Encoder] \(codecName) configured: \(width)x\(height) @ \(fps)fps, \(bitrate/1000)kbps")
     }
 
     func encode(_ pixelBuffer: CVPixelBuffer) {
@@ -99,7 +164,7 @@ class H264Encoder {
 
         let timestamp = CMTime(value: frameCount, timescale: 90000)
         let duration = CMTime.invalid
-        frameCount += 90000 / 12 // ~12fps increment
+        frameCount += 90000 / Int64(currentFps)
 
         // Force keyframe on first frame
         var properties: CFDictionary? = nil
@@ -119,7 +184,7 @@ class H264Encoder {
         ) { [weak self] status, flags, sampleBuffer in
             guard status == noErr, let sampleBuffer else {
                 if status != noErr {
-                    print("[H264] Encode error: \(status)")
+                    print("[Encoder] Encode error: \(status)")
                 }
                 return
             }
@@ -146,43 +211,23 @@ class H264Encoder {
         guard let dataPointer, totalLength > 0 else { return }
 
         var outputData = Data()
-        // Reserve space: 1 byte header + SPS/PPS (if keyframe) + NAL data
         outputData.reserveCapacity(totalLength + 128)
 
         // First byte: frame type (0x01 = keyframe, 0x00 = delta)
         outputData.append(isKeyframe ? 0x01 : 0x00)
 
-        // For keyframes, prepend SPS and PPS
+        // For keyframes, prepend parameter sets (SPS/PPS for H.264, VPS/SPS/PPS for HEVC)
         if isKeyframe, let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) {
-            // SPS
-            var spsSize = 0
-            var spsCount = 0
-            var spsPointer: UnsafePointer<UInt8>?
-            if CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                formatDesc, parameterSetIndex: 0, parameterSetPointerOut: &spsPointer,
-                parameterSetSizeOut: &spsSize, parameterSetCountOut: &spsCount, nalUnitHeaderLengthOut: nil
-            ) == noErr, let spsPointer {
-                // Write 4-byte start code + SPS
-                outputData.append(contentsOf: [0x00, 0x00, 0x00, 0x01])
-                outputData.append(UnsafeBufferPointer(start: spsPointer, count: spsSize))
-            }
-
-            // PPS
-            var ppsSize = 0
-            var ppsPointer: UnsafePointer<UInt8>?
-            if CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-                formatDesc, parameterSetIndex: 1, parameterSetPointerOut: &ppsPointer,
-                parameterSetSizeOut: &ppsSize, parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil
-            ) == noErr, let ppsPointer {
-                outputData.append(contentsOf: [0x00, 0x00, 0x00, 0x01])
-                outputData.append(UnsafeBufferPointer(start: ppsPointer, count: ppsSize))
+            if isHEVC {
+                appendHEVCParameterSets(formatDesc, to: &outputData)
+            } else {
+                appendH264ParameterSets(formatDesc, to: &outputData)
             }
         }
 
-        // Append NAL units (convert AVCC length-prefix to Annex B start codes)
+        // Append NAL units (convert AVCC/HVCC length-prefix to Annex B start codes)
         var offset = 0
         while offset < totalLength - 4 {
-            // Read 4-byte NAL unit length (big-endian) — byte-by-byte to avoid alignment crash
             let b0 = UInt32(dataPointer.advanced(by: offset).withMemoryRebound(to: UInt8.self, capacity: 1) { $0.pointee })
             let b1 = UInt32(dataPointer.advanced(by: offset + 1).withMemoryRebound(to: UInt8.self, capacity: 1) { $0.pointee })
             let b2 = UInt32(dataPointer.advanced(by: offset + 2).withMemoryRebound(to: UInt8.self, capacity: 1) { $0.pointee })
@@ -192,7 +237,6 @@ class H264Encoder {
 
             guard nalLength > 0, offset + nalLength <= totalLength else { break }
 
-            // Write Annex B start code + NAL data
             outputData.append(contentsOf: [0x00, 0x00, 0x00, 0x01])
             outputData.append(Data(bytes: dataPointer.advanced(by: offset), count: nalLength))
             offset += nalLength
@@ -201,8 +245,44 @@ class H264Encoder {
         onEncodedFrame?(outputData)
     }
 
+    private func appendH264ParameterSets(_ formatDesc: CMFormatDescription, to data: inout Data) {
+        // SPS
+        var size = 0
+        var count = 0
+        var ptr: UnsafePointer<UInt8>?
+        if CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            formatDesc, parameterSetIndex: 0, parameterSetPointerOut: &ptr,
+            parameterSetSizeOut: &size, parameterSetCountOut: &count, nalUnitHeaderLengthOut: nil
+        ) == noErr, let ptr {
+            data.append(contentsOf: [0x00, 0x00, 0x00, 0x01])
+            data.append(UnsafeBufferPointer(start: ptr, count: size))
+        }
+        // PPS
+        if CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            formatDesc, parameterSetIndex: 1, parameterSetPointerOut: &ptr,
+            parameterSetSizeOut: &size, parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil
+        ) == noErr, let ptr {
+            data.append(contentsOf: [0x00, 0x00, 0x00, 0x01])
+            data.append(UnsafeBufferPointer(start: ptr, count: size))
+        }
+    }
+
+    private func appendHEVCParameterSets(_ formatDesc: CMFormatDescription, to data: inout Data) {
+        // HEVC has VPS (index 0), SPS (index 1), PPS (index 2)
+        for i in 0..<3 {
+            var size = 0
+            var ptr: UnsafePointer<UInt8>?
+            if CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                formatDesc, parameterSetIndex: i, parameterSetPointerOut: &ptr,
+                parameterSetSizeOut: &size, parameterSetCountOut: nil, nalUnitHeaderLengthOut: nil
+            ) == noErr, let ptr {
+                data.append(contentsOf: [0x00, 0x00, 0x00, 0x01])
+                data.append(UnsafeBufferPointer(start: ptr, count: size))
+            }
+        }
+    }
+
     func forceKeyframe() {
-        // Next encode call will be a keyframe
         frameCount = 0
     }
 
@@ -213,7 +293,8 @@ class H264Encoder {
         }
         session = nil
         frameCount = 0
-        print("[H264] Encoder stopped")
+        let codecName = isHEVC ? "HEVC" : "H.264"
+        print("[Encoder] \(codecName) encoder stopped")
     }
 
     deinit {

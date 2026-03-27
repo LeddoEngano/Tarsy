@@ -115,6 +115,17 @@ struct MenuBarView: View {
             }
             .font(.system(size: 12, design: .monospaced))
 
+            if authManager.isAuthenticated {
+                Button("Sign Out (\(authManager.currentUser?.email ?? ""))") {
+                    Task {
+                        daemonManager.stop()
+                        await authManager.signOut()
+                    }
+                }
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.secondary)
+            }
+
             Divider()
 
             Button("Quit Tarsy") {
