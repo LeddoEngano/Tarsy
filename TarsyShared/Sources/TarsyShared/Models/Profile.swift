@@ -29,6 +29,32 @@ public struct Profile: Codable, Identifiable, Sendable {
         case updatedAt = "updated_at"
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        email = try container.decode(String.self, forKey: .email)
+        displayName = try container.decodeIfPresent(String.self, forKey: .displayName)
+        avatarUrl = try container.decodeIfPresent(String.self, forKey: .avatarUrl)
+        voiceLanguage = try container.decodeIfPresent(String.self, forKey: .voiceLanguage) ?? "en"
+        isPro = try container.decodeIfPresent(Bool.self, forKey: .isPro) ?? false
+        subscriptionStatus = try container.decodeIfPresent(String.self, forKey: .subscriptionStatus) ?? "inactive"
+        subscriptionEndDate = try container.decodeIfPresent(Date.self, forKey: .subscriptionEndDate)
+        onboarded = try container.decodeIfPresent(Bool.self, forKey: .onboarded) ?? false
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+
+        // agent_permissions can be a dict or a JSON-encoded string (legacy)
+        if let dict = try? container.decode([String: String].self, forKey: .agentPermissions) {
+            agentPermissions = dict
+        } else if let str = try? container.decode(String.self, forKey: .agentPermissions),
+                  let data = str.data(using: .utf8),
+                  let dict = try? JSONDecoder().decode([String: String].self, from: data) {
+            agentPermissions = dict
+        } else {
+            agentPermissions = [:]
+        }
+    }
+
     public init(
         id: UUID,
         email: String,

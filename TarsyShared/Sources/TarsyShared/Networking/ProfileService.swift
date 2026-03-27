@@ -60,14 +60,16 @@ public class ProfileService: ObservableObject {
         }
     }
 
+    private struct PermissionsUpdate: Encodable {
+        let agent_permissions: [String: String]
+    }
+
     public func updateAgentPermissions(_ permissions: [String: String]) async {
         guard let profileId = profile?.id else { return }
         do {
-            let jsonData = try JSONSerialization.data(withJSONObject: permissions)
-            let jsonString = String(data: jsonData, encoding: .utf8) ?? "{}"
             try await supabase
                 .from("profiles")
-                .update(["agent_permissions": jsonString])
+                .update(PermissionsUpdate(agent_permissions: permissions))
                 .eq("id", value: profileId.uuidString)
                 .execute()
             profile?.agentPermissions = permissions
