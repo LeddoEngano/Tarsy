@@ -14,6 +14,22 @@ const clients = new Map<string, Set<WebSocket>>();
 // Reverse lookup: ws -> { userId, role }
 const connections = new Map<WebSocket, { userId: string; role: "machine" | "client" }>();
 
+// Rate limiting: track messages per connection per second
+const MAX_MESSAGES_PER_SECOND = 120;
+const MAX_CLIENTS_PER_USER = 5;
+const messageCounts = new Map<WebSocket, { count: number; resetAt: number }>();
+
+function isRateLimited(ws: WebSocket): boolean {
+  const now = Date.now();
+  let entry = messageCounts.get(ws);
+  if (!entry || now >= entry.resetAt) {
+    entry = { count: 0, resetAt: now + 1000 };
+    messageCounts.set(ws, entry);
+  }
+  entry.count++;
+  return entry.count > MAX_MESSAGES_PER_SECOND;
+}
+
 async function validateToken(token: string): Promise<{ userId: string | null; error?: string }> {
   try {
     const { data, error } = await supabase.auth.getUser(token);
@@ -77,8 +93,14 @@ function registerConnection(ws: WebSocket, userId: string, role: "machine" | "cl
     if (!clients.has(userId)) {
       clients.set(userId, new Set());
     }
-    clients.get(userId)!.add(ws);
-    const count = clients.get(userId)!.size;
+    const userClients = clients.get(userId)!;
+    if (userClients.size >= MAX_CLIENTS_PER_USER) {
+      console.log(`[Relay] Too many clients for ${userId} (${userClients.size}), rejecting`);
+      ws.close(4002, "Too many connections");
+      return;
+    }
+    userClients.add(ws);
+    const count = userClients.size;
     const hasMachine = machines.has(userId);
     console.log(`[Relay] Client connected: ${userId} (clients=${count}, machine_online=${hasMachine})`);
   }
@@ -114,23 +136,19 @@ const server = Bun.serve({
       }), { headers: { "Content-Type": "application/json" } });
     }
 
-    // WebSocket upgrade — upgrade FIRST, validate token AFTER
+    // WebSocket upgrade — upgrade FIRST, validate token via first message
     // This prevents Fly.io proxy timeout during Supabase API call
     if (url.pathname === "/ws") {
+      // Accept token+role from query params (legacy) or first message (secure)
       const token = url.searchParams.get("token");
-      const role = url.searchParams.get("role") as "machine" | "client";
-
-      if (!token || !role || !["machine", "client"].includes(role)) {
-        console.log(`[Relay] Rejected: missing token or invalid role="${role}"`);
-        return new Response("Missing token or role", { status: 400 });
-      }
+      const role = url.searchParams.get("role") as "machine" | "client" | null;
 
       const upgraded = server.upgrade(req, {
-        data: { token, role },
+        data: { token: token || null, role: role || null },
       });
 
       if (!upgraded) {
-        console.log(`[Relay] WebSocket upgrade failed for role=${role}`);
+        console.log(`[Relay] WebSocket upgrade failed`);
         return new Response("WebSocket upgrade failed", { status: 500 });
       }
 
@@ -142,26 +160,65 @@ const server = Bun.serve({
 
   websocket: {
     async open(ws) {
-      const { token, role } = ws.data as { token: string; role: "machine" | "client" };
-      console.log(`[Relay] WS opened, validating ${role} token...`);
+      const { token, role } = ws.data as { token: string | null; role: "machine" | "client" | null };
 
-      const start = Date.now();
-      const { userId, error } = await validateToken(token);
-      const elapsed = Date.now() - start;
+      // If token+role provided in query params (legacy), validate immediately
+      if (token && role && ["machine", "client"].includes(role)) {
+        console.log(`[Relay] WS opened, validating ${role} token...`);
+        const start = Date.now();
+        const { userId, error } = await validateToken(token);
+        const elapsed = Date.now() - start;
 
-      if (!userId) {
-        console.log(`[Relay] Auth failed for ${role}: ${error} (${elapsed}ms)`);
-        ws.close(4001, "Invalid token");
+        if (!userId) {
+          console.log(`[Relay] Auth failed for ${role}: ${error} (${elapsed}ms)`);
+          ws.close(4001, "Invalid token");
+          return;
+        }
+
+        console.log(`[Relay] Auth OK for ${role} ${userId} (${elapsed}ms)`);
+        registerConnection(ws, userId, role);
+      } else {
+        // No token in URL — expect auth via first message
+        console.log(`[Relay] WS opened, awaiting auth message...`);
+      }
+    },
+
+    async message(ws, message) {
+      const info = connections.get(ws);
+
+      // If not yet authenticated, expect first message to be auth payload
+      if (!info) {
+        try {
+          const text = typeof message === "string" ? message : new TextDecoder().decode(message as ArrayBuffer);
+          const auth = JSON.parse(text) as { action?: string; token?: string; role?: string };
+
+          if (auth.action !== "auth" || !auth.token || !auth.role || !["machine", "client"].includes(auth.role)) {
+            console.log(`[Relay] Invalid auth message`);
+            ws.close(4001, "Invalid auth message");
+            return;
+          }
+
+          const start = Date.now();
+          const { userId, error } = await validateToken(auth.token);
+          const elapsed = Date.now() - start;
+
+          if (!userId) {
+            console.log(`[Relay] Auth failed for ${auth.role}: ${error} (${elapsed}ms)`);
+            ws.close(4001, "Invalid token");
+            return;
+          }
+
+          console.log(`[Relay] Auth OK for ${auth.role} ${userId} (${elapsed}ms)`);
+          registerConnection(ws, userId, auth.role as "machine" | "client");
+          ws.send(JSON.stringify({ action: "auth:ok" }));
+        } catch {
+          console.log(`[Relay] Auth message parse error`);
+          ws.close(4001, "Invalid auth message");
+        }
         return;
       }
 
-      console.log(`[Relay] Auth OK for ${role} ${userId} (${elapsed}ms)`);
-      registerConnection(ws, userId, role);
-    },
-
-    message(ws, message) {
-      const info = connections.get(ws);
-      if (!info) return; // Not yet authenticated, ignore
+      if (isRateLimited(ws)) return; // Drop excess messages silently
 
       if (info.role === "machine") {
         forwardToClients(info.userId, message as string | Buffer, ws);
@@ -172,6 +229,7 @@ const server = Bun.serve({
 
     close(ws, code, reason) {
       removeConnection(ws, code, reason);
+      messageCounts.delete(ws);
     },
 
     idleTimeout: 120, // seconds — send ping/pong to keep alive
