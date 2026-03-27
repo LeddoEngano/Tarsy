@@ -9,8 +9,6 @@ struct ActiveSessionsView: View {
     @EnvironmentObject var deepLinkRouter: DeepLinkRouter
     @State private var selectedSession: UltraContextSession?
     @State private var loadedSession: UltraContextSession?
-    @State private var showContinueConfirm = false
-    @State private var sessionToContinue: UltraContextSession?
     @State private var isLoadingDetail = false
 
     // Edit mode
@@ -73,20 +71,12 @@ struct ActiveSessionsView: View {
             await client.loadSessions()
         }
         .sheet(item: $loadedSession) { session in
-            SessionDetailView(session: session) { sessionToContinue in
-                self.sessionToContinue = sessionToContinue
-                showContinueConfirm = true
-            }
-        }
-        .alert("Continue this session?", isPresented: $showContinueConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("Continue") {
-                if let session = sessionToContinue {
+            SessionDetailView(session: session) { session in
+                loadedSession = nil  // dismiss detail first
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     continueSession(session)
                 }
             }
-        } message: {
-            Text(continueMessage)
         }
         .alert("Delete sessions?", isPresented: $showDeleteConfirm) {
             Button("Cancel", role: .cancel) {}
@@ -240,18 +230,17 @@ struct ActiveSessionsView: View {
         isLoadingDetail = false
     }
 
-    private var continueMessage: String {
-        if let ws = matchWorkspace(for: sessionToContinue) {
-            return "This will start a new agent tab in \(ws.name) with context from this session."
-        }
-        return "This will start a new agent tab with context from this session."
-    }
-
     private func matchWorkspace(for session: UltraContextSession?) -> Workspace? {
         guard let path = session?.projectPath else { return nil }
+        // Try exact match first, then prefix match, then directory name match
         return workspaceService.workspaces.first { ws in
-            let wsPath = ws.localPath
-            return wsPath == path || path.hasPrefix(wsPath) || wsPath.hasPrefix(path)
+            ws.localPath == path
+        } ?? workspaceService.workspaces.first { ws in
+            path.hasPrefix(ws.localPath) || ws.localPath.hasPrefix(path)
+        } ?? workspaceService.workspaces.first { ws in
+            let wsDir = ws.localPath.components(separatedBy: "/").last ?? ""
+            let sessionDir = path.components(separatedBy: "/").last ?? ""
+            return !wsDir.isEmpty && wsDir == sessionDir
         }
     }
 
