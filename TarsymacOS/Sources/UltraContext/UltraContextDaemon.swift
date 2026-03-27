@@ -6,7 +6,10 @@ import TarsyShared
 actor UltraContextSync {
     static let shared = UltraContextSync()
 
-    private let proxyURL = TarsyConfig.supabaseURL.absoluteString + "/functions/v1/ultracontext-proxy"
+    private let proxyURL: String = {
+        let base = TarsyConfig.supabaseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return base + "/functions/v1/ultracontext-proxy"
+    }()
 
     /// Maps engine sessionId -> UltraContext contextId
     private var contextMap: [String: String] = [:]
@@ -17,15 +20,16 @@ actor UltraContextSync {
         try? await supabase.auth.session.accessToken
     }
 
-    private func request(_ path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
-        guard let url = URL(string: "\(proxyURL)\(path)") else { throw URLError(.badURL) }
+    private func post(_ payload: [String: String]) async throws -> Data {
+        guard let url = URL(string: proxyURL) else { throw URLError(.badURL) }
         guard let token = await authToken() else { throw URLError(.userAuthenticationRequired) }
+        print("[UltraContext] POST \(proxyURL) action=\(payload["action"] ?? "?")")
         var req = URLRequest(url: url)
-        req.httpMethod = method
+        req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue(TarsyConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        req.httpBody = body
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, response) = try await URLSession.shared.data(for: req)
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
             let body = String(data: data, encoding: .utf8) ?? ""
@@ -39,15 +43,18 @@ actor UltraContextSync {
     }
 
     private func createContext() async throws -> String {
-        let data = try await request("/contexts", method: "POST")
+        let data = try await post(["action": "create"])
         let decoded = try JSONDecoder().decode(CreateContextResponse.self, from: data)
         return decoded.id
     }
 
     private func appendMessage(contextId: String, role: String, content: String) async throws {
-        let msg = ["role": role, "content": content]
-        let body = try JSONEncoder().encode(msg)
-        _ = try await request("/contexts/\(contextId)/messages", method: "POST", body: body)
+        _ = try await post([
+            "action": "message",
+            "id": contextId,
+            "role": role,
+            "content": content,
+        ])
     }
 
     // MARK: - Engine lifecycle

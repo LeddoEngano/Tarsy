@@ -1,7 +1,7 @@
 import Foundation
 
 public struct UltraContextMessage: Codable, Sendable {
-    public let role: String  // "user" or "assistant"
+    public let role: String
     public let content: String
     public let index: Int?
 
@@ -53,29 +53,29 @@ public class UltraContextClient: ObservableObject {
     private let proxyURL: String
 
     public init() {
-        self.proxyURL = TarsyConfig.supabaseURL.absoluteString + "/functions/v1/ultracontext-proxy"
+        let base = TarsyConfig.supabaseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        self.proxyURL = base + "/functions/v1/ultracontext-proxy"
     }
 
     public static func configured() -> UltraContextClient {
         UltraContextClient()
     }
 
-    /// Always configured — the proxy handles auth via Supabase token
     public var isConfigured: Bool { true }
 
     private func authToken() async -> String? {
         try? await supabase.auth.session.accessToken
     }
 
-    private func request(_ path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
-        guard let url = URL(string: "\(proxyURL)\(path)") else { throw URLError(.badURL) }
+    private func post(_ payload: [String: String]) async throws -> Data {
+        guard let url = URL(string: proxyURL) else { throw URLError(.badURL) }
         guard let token = await authToken() else { throw URLError(.userAuthenticationRequired) }
         var req = URLRequest(url: url)
-        req.httpMethod = method
+        req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue(TarsyConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
-        req.httpBody = body
+        req.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, _) = try await URLSession.shared.data(for: req)
         return data
     }
@@ -87,24 +87,22 @@ public class UltraContextClient: ObservableObject {
     }
 
     public func createContext() async throws -> UltraContextSession {
-        let data = try await request("/contexts", method: "POST")
+        let data = try await post(["action": "create"])
         let created = try JSONDecoder().decode(CreateContextResponse.self, from: data)
         return UltraContextSession(id: created.id, messages: [], version: nil, createdAt: nil, updatedAt: nil)
     }
 
     public func getContext(id: String) async throws -> UltraContextSession {
-        let data = try await request("/contexts/\(id)")
+        let data = try await post(["action": "get", "id": id])
         return try JSONDecoder().decode(UltraContextSession.self, from: data)
     }
 
     public func appendMessage(contextId: String, role: String, content: String) async throws {
-        let msg = ["role": role, "content": content]
-        let body = try JSONEncoder().encode(msg)
-        _ = try await request("/contexts/\(contextId)/messages", method: "POST", body: body)
+        _ = try await post(["action": "message", "id": contextId, "role": role, "content": content])
     }
 
     public func listContexts() async throws -> [UltraContextSession] {
-        let data = try await request("/contexts")
+        let data = try await post(["action": "list"])
         if let wrapper = try? JSONDecoder().decode([String: [UltraContextSession]].self, from: data),
            let contexts = wrapper["data"] {
             return contexts
