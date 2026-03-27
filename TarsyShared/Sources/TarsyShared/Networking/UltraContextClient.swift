@@ -24,6 +24,23 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
+
+    public init(id: String, messages: [UltraContextMessage], version: Int?, createdAt: String?, updatedAt: String?) {
+        self.id = id
+        self.messages = messages
+        self.version = version
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        messages = (try? container.decode([UltraContextMessage].self, forKey: .messages)) ?? []
+        version = try? container.decode(Int.self, forKey: .version)
+        createdAt = try? container.decode(String.self, forKey: .createdAt)
+        updatedAt = try? container.decode(String.self, forKey: .updatedAt)
+    }
 }
 
 /// Client that talks to UltraContext via Supabase Edge Function proxy.
@@ -64,9 +81,14 @@ public class UltraContextClient: ObservableObject {
 
     // MARK: - CRUD
 
+    private struct CreateContextResponse: Decodable {
+        let id: String
+    }
+
     public func createContext() async throws -> UltraContextSession {
         let data = try await request("/contexts", method: "POST")
-        return try JSONDecoder().decode(UltraContextSession.self, from: data)
+        let created = try JSONDecoder().decode(CreateContextResponse.self, from: data)
+        return UltraContextSession(id: created.id, messages: [], version: nil, createdAt: nil, updatedAt: nil)
     }
 
     public func getContext(id: String) async throws -> UltraContextSession {

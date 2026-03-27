@@ -29,9 +29,13 @@ actor UltraContextSync {
         return data
     }
 
+    private struct CreateContextResponse: Decodable {
+        let id: String
+    }
+
     private func createContext() async throws -> String {
         let data = try await request("/contexts", method: "POST")
-        let decoded = try JSONDecoder().decode(UltraContextSession.self, from: data)
+        let decoded = try JSONDecoder().decode(CreateContextResponse.self, from: data)
         return decoded.id
     }
 
