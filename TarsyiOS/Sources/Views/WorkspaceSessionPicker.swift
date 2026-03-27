@@ -7,11 +7,14 @@ struct WorkspaceSessionPicker: View {
     @Environment(\.dismiss) var dismiss
     @StateObject private var client = UltraContextClient.configured()
     let workspace: Workspace
-    let onSelect: (UltraContextSession) -> Void
+    let detectedAgents: [AIEngineType]
+    let onSelect: (UltraContextSession, AIEngineType) -> Void
 
     @State private var selectedSession: UltraContextSession?
     @State private var loadedSession: UltraContextSession?
     @State private var isLoadingDetail = false
+    @State private var showAgentPicker = false
+    @State private var pendingSession: UltraContextSession?
 
     var filteredSessions: [UltraContextSession] {
         client.sessions.filter { session in
@@ -82,6 +85,31 @@ struct WorkspaceSessionPicker: View {
         .task {
             await client.loadSessions()
         }
+        .confirmationDialog("Choose agent", isPresented: $showAgentPicker, titleVisibility: .visible) {
+            ForEach(detectedAgents, id: \.self) { engine in
+                Button(engine.displayName) {
+                    if var session = pendingSession {
+                        session = UltraContextSession(
+                            id: session.id,
+                            messages: session.messages,
+                            version: session.version,
+                            createdAt: session.createdAt,
+                            title: session.title,
+                            hasImage: session.hasImage,
+                            projectPath: session.projectPath,
+                            engineType: engine.rawValue,
+                            messageCount: session.messageCount
+                        )
+                        onSelect(session, engine)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingSession = nil
+            }
+        } message: {
+            Text("Which agent should continue this session?")
+        }
     }
 
     private func sessionRow(_ session: UltraContextSession) -> some View {
@@ -146,7 +174,8 @@ struct WorkspaceSessionPicker: View {
                 engineType: session.engineType ?? full.engineType,
                 messageCount: full.messages.count
             )
-            onSelect(enriched)
+            pendingSession = enriched
+            showAgentPicker = true
         } catch {
             print("[SessionPicker] Load error: \(error)")
         }

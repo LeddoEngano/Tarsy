@@ -221,9 +221,9 @@ struct WorkspaceView: View {
                 .environmentObject(connectionManager)
         }
         .sheet(isPresented: $showSessionPicker) {
-            WorkspaceSessionPicker(workspace: workspace) { session in
+            WorkspaceSessionPicker(workspace: workspace, detectedAgents: detectedAgents) { session, engine in
                 showSessionPicker = false
-                continueSessionInTab(session)
+                continueSessionInTab(session, engineType: engine)
             }
         }
         .navigationBarTitleDisplayMode(.inline)
@@ -1043,8 +1043,8 @@ struct WorkspaceView: View {
         }
     }
 
-    private func continueSessionInTab(_ session: UltraContextSession) {
-        let engineType = AIEngineType(rawValue: session.engineType ?? "claude") ?? .claude
+    private func continueSessionInTab(_ session: UltraContextSession, engineType: AIEngineType? = nil) {
+        let engineType = engineType ?? AIEngineType(rawValue: session.engineType ?? "claude") ?? .claude
         let uniqueId = "\(engineType.rawValue)-\(UUID().uuidString.prefix(8))"
         let title = session.displayTitle.prefix(20).description
         let tabType: TerminalTab.TabType = engineType == .claude ? .claude : .engine
