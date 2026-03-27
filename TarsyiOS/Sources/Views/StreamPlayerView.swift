@@ -651,6 +651,9 @@ struct StreamPlayerView: View {
 
     private func startStream() {
         var payload: [String: String] = ["stack": workspace.stack.rawValue]
+        if workspace.isFullScreen {
+            payload["workspaceType"] = "openclaw"
+        }
         if let url = workspace.streamUrl, !url.isEmpty {
             payload["streamUrl"] = url
         }

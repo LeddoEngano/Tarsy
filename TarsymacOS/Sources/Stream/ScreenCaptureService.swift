@@ -148,6 +148,52 @@ class ScreenCaptureService: NSObject, ObservableObject {
         print("[ScreenCapture] Started capturing: \(window.title ?? "unknown")")
     }
 
+    /// Capture the entire display (for OpenClaw full-screen mode)
+    func startDisplayCapture(fps: Int = 20, scale: CGFloat = 0.75) async throws {
+        if isCapturing {
+            try? await stream?.stopCapture()
+        }
+
+        // Refresh content if needed
+        if cachedContent == nil {
+            await refreshWindows()
+        }
+        guard let content = cachedContent else {
+            throw NSError(domain: "ScreenCapture", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot access screen content"])
+        }
+
+        guard let display = content.displays.first else {
+            throw NSError(domain: "ScreenCapture", code: 2, userInfo: [NSLocalizedDescriptionKey: "No display found"])
+        }
+
+        let contentHeight = display.height
+        let contentWidth = display.width
+
+        let config = SCStreamConfiguration()
+        config.width = Int(CGFloat(contentWidth) * scale)
+        config.height = Int(CGFloat(contentHeight) * scale)
+        config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+        config.queueDepth = 3
+        config.showsCursor = true
+
+        if streamOutput == nil {
+            streamOutput = StreamOutput { [weak self] image in
+                self?.onFrame?(image)
+            }
+        }
+        streamOutput?.pixelBufferHandler = onPixelBuffer != nil ? { [weak self] pixelBuffer in
+            self?.onPixelBuffer?(pixelBuffer)
+        } : nil
+
+        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+        stream = SCStream(filter: filter, configuration: config, delegate: nil)
+        try stream?.addStreamOutput(streamOutput!, type: .screen, sampleHandlerQueue: .global(qos: .userInteractive))
+        try await stream?.startCapture()
+        isCapturing = true
+        selectedWindow = nil
+        print("[ScreenCapture] Started full-display capture (\(config.width)x\(config.height))")
+    }
+
     func stopCapture() async {
         if let stream {
             try? await stream.stopCapture()

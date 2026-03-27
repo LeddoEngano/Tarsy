@@ -8,6 +8,7 @@ public struct CreateWorkspaceRequest: Encodable {
     public let repoUrl: String?
     public let localPath: String
     public let stack: String
+    public let workspaceType: String
     public let devServerCommand: String?
     public let streamUrl: String?
     public let aiContext: String?
@@ -19,18 +20,20 @@ public struct CreateWorkspaceRequest: Encodable {
         case repoUrl = "repo_url"
         case localPath = "local_path"
         case stack
+        case workspaceType = "workspace_type"
         case devServerCommand = "dev_server_command"
         case streamUrl = "stream_url"
         case aiContext = "ai_context"
     }
 
-    public init(userId: String, machineId: String, name: String, repoUrl: String?, localPath: String, stack: String, devServerCommand: String?, streamUrl: String?, aiContext: String?) {
+    public init(userId: String, machineId: String, name: String, repoUrl: String?, localPath: String, stack: String, workspaceType: String = "standard", devServerCommand: String?, streamUrl: String?, aiContext: String?) {
         self.userId = userId
         self.machineId = machineId
         self.name = name
         self.repoUrl = repoUrl
         self.localPath = localPath
         self.stack = stack
+        self.workspaceType = workspaceType
         self.devServerCommand = devServerCommand
         self.streamUrl = streamUrl
         self.aiContext = aiContext
