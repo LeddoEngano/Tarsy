@@ -76,7 +76,7 @@ actor MJPEGStreamServer {
             connection.send(content: frameData, completion: .contentProcessed { [weak self] error in
                 if let error {
                     // Mark as dead immediately (lock-based, no actor hop)
-                    self?._deadConnections.withLock { $0.insert(id) }
+                    _ = self?._deadConnections.withLock { $0.insert(id) }
                     print("[MJPEG] Send error for \(id): \(error)")
                     Task { await self?.removeConnection(id) }
                 }
@@ -127,7 +127,7 @@ actor MJPEGStreamServer {
         guard connections[id] != nil else { return } // Already removed
         connections[id]?.cancel()
         connections.removeValue(forKey: id)
-        _deadConnections.withLock { $0.remove(id) }
+        _ = _deadConnections.withLock { $0.remove(id) }
         print("[MJPEG] Client disconnected: \(id) (total: \(connections.count))")
     }
 

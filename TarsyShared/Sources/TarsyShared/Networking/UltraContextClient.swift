@@ -26,34 +26,37 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
     }
 }
 
+/// Client that talks to UltraContext via Supabase Edge Function proxy.
+/// The API key never leaves the server — only the user's Supabase auth token is used.
 @MainActor
 public class UltraContextClient: ObservableObject {
     @Published public var sessions: [UltraContextSession] = []
     @Published public var isLoading = false
 
-    private let baseURL: String
-    private let apiKey: String
+    private let proxyURL: String
 
-    public init(baseURL: String = "https://api.ultracontext.ai", apiKey: String? = nil) {
-        self.baseURL = baseURL
-        self.apiKey = apiKey ?? TarsyConfig.ultraContextAPIKey
+    public init() {
+        self.proxyURL = TarsyConfig.supabaseURL.absoluteString + "/functions/v1/ultracontext-proxy"
     }
 
-    /// Create a client using the bundled API key from TarsyConfig
     public static func configured() -> UltraContextClient {
         UltraContextClient()
     }
 
-    public var isConfigured: Bool { !apiKey.isEmpty }
+    /// Always configured — the proxy handles auth via Supabase token
+    public var isConfigured: Bool { true }
+
+    private func authToken() async -> String? {
+        try? await supabase.auth.session.accessToken
+    }
 
     private func request(_ path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
-        guard let url = URL(string: "\(baseURL)\(path)") else { throw URLError(.badURL) }
+        guard let url = URL(string: "\(proxyURL)\(path)") else { throw URLError(.badURL) }
+        guard let token = await authToken() else { throw URLError(.userAuthenticationRequired) }
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if !apiKey.isEmpty {
-            req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.httpBody = body
         let (data, _) = try await URLSession.shared.data(for: req)
         return data
@@ -79,7 +82,6 @@ public class UltraContextClient: ObservableObject {
 
     public func listContexts() async throws -> [UltraContextSession] {
         let data = try await request("/contexts")
-        // API might return { data: [...] } or just [...]
         if let wrapper = try? JSONDecoder().decode([String: [UltraContextSession]].self, from: data),
            let contexts = wrapper["data"] {
             return contexts
@@ -90,7 +92,6 @@ public class UltraContextClient: ObservableObject {
     // MARK: - Load sessions
 
     public func loadSessions() async {
-        guard isConfigured else { return }
         isLoading = true
         do {
             sessions = try await listContexts()

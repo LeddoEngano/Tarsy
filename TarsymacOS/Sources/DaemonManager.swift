@@ -1,4 +1,5 @@
 import Foundation
+import os
 import TarsyShared
 import Supabase
 import AppKit
@@ -71,11 +72,8 @@ class DaemonManager: ObservableObject {
         detectedAgents = AgentDetector.detectInstalledAgents()
         log("Detected agents: \(detectedAgents.map(\.rawValue))")
 
-        // 8. Start UltraContext daemon if installed
-        if UltraContextDaemon.shared.isInstalled() {
-            UltraContextDaemon.shared.start()
-            log("UltraContext daemon started")
-        }
+        // 8. UltraContext — syncs engine sessions via Supabase proxy
+        log("UltraContext sync ready")
 
         isRunning = true
     }
@@ -225,8 +223,8 @@ class DaemonManager: ObservableObject {
 
     private func validateAuthToken(_ token: String) async -> Bool {
         do {
-            let user = try await supabase.auth.user(jwt: token)
-            return user.id != nil
+            _ = try await supabase.auth.user(jwt: token)
+            return true
         } catch {
             return false
         }
@@ -378,12 +376,10 @@ class DaemonManager: ObservableObject {
             SudoPasswordManager.shared.handlePasswordResponse(packet: packet)
         // UltraContext
         case .ultracontextStatus:
-            let status = UltraContextDaemon.shared.status()
-            let installed = UltraContextDaemon.shared.isInstalled()
             await sendToClientOrRelay(
                 WSPacket(action: .ultracontextStatus, payload: [
-                    "installed": installed ? "true" : "false",
-                    "status": status
+                    "installed": "true",
+                    "status": "active"
                 ], id: packet.id),
                 to: clientId
             )
@@ -743,9 +739,9 @@ class DaemonManager: ObservableObject {
         }
 
         do {
-            var fullResponse = ""
+            let responseAccumulator = OSAllocatedUnfairLock(initialState: "")
             try await openClaw.sendMessage(message, agentId: agentId) { [weak self] chunk in
-                fullResponse += chunk
+                responseAccumulator.withLock { $0 += chunk }
                 Task {
                     await self?.sendToClientOrRelay(
                         WSPacket(action: .openclawOutput, payload: ["output": chunk]),
@@ -753,6 +749,7 @@ class DaemonManager: ObservableObject {
                     )
                 }
             }
+            let fullResponse = responseAccumulator.withLock { $0 }
             await sendToClientOrRelay(
                 WSPacket(action: .openclawComplete, payload: ["message": fullResponse], id: packet.id),
                 to: clientId
@@ -805,18 +802,19 @@ class DaemonManager: ObservableObject {
             // Monitor terminal output for server-ready signals and port detection
             let serverReady = DevServerReadySignal()
             await terminalManager.setOutputHandler(for: sessionId) { [weak self] output in
+                guard let strongSelf = self else { return }
                 Task {
                     let wasReady = await serverReady.isReady
                     await serverReady.check(output)
-                    await self?.detectSudoPromptInOutput(output, sessionId: sessionId)
-                    await MainActor.run { self?.log("devServer[\(sessionId.prefix(8))]: \(output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))") }
+                    await strongSelf.detectSudoPromptInOutput(output, sessionId: sessionId)
+                    await MainActor.run { strongSelf.log("devServer[\(sessionId.prefix(8))]: \(output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))") }
 
                     // Detect port from output and notify iOS
                     if !wasReady, await serverReady.isReady {
-                        let detectedPort = self?.extractPort(from: output)
+                        let detectedPort = strongSelf.extractPort(from: output)
                         if let port = detectedPort {
-                            await MainActor.run { self?.devServerDetectedPorts[expandedPath] = port }
-                            await self?.sendToClientOrRelay(
+                            await MainActor.run { strongSelf.devServerDetectedPorts[expandedPath] = port }
+                            await strongSelf.sendToClientOrRelay(
                                 WSPacket(action: .devServerStart, payload: [
                                     "status": "ready",
                                     "port": "\(port)",
@@ -926,7 +924,7 @@ class DaemonManager: ObservableObject {
         // Include the port so the iOS client can auto-connect when switching modes
         if running, let port = portFromUrl(streamUrl) {
             statusPayload["port"] = "\(port)"
-        } else if running, let sessionId = devServerSessions[expandedPath] {
+        } else if running, let _ = devServerSessions[expandedPath] {
             // Try to find the port from detected dev server output
             if let detected = devServerDetectedPorts[expandedPath] {
                 statusPayload["port"] = "\(detected)"
@@ -1212,7 +1210,7 @@ class DaemonManager: ObservableObject {
         addr.sin_addr.s_addr = inet_addr(host)
 
         let flags = fcntl(sock, F_GETFL, 0)
-        fcntl(sock, F_SETFL, flags | O_NONBLOCK)
+        _ = fcntl(sock, F_SETFL, flags | O_NONBLOCK)
 
         let result = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -1460,21 +1458,25 @@ class DaemonManager: ObservableObject {
             // Encoded frames → send to clients (LAN WebSocket + relay)
             let relay = self.relayClient
             let wsServer = self.wsServer
-            var sendInFlight = false
+            let sendInFlight = OSAllocatedUnfairLock(initialState: false)
             encoder.onEncodedFrame = { [weak encoder] encodedData in
                 // Prefix with "H264" (kept for compatibility — iOS checks this prefix)
                 var prefixedData = Data("H264".utf8)
                 prefixedData.append(encodedData)
 
                 if isRelay {
-                    guard !sendInFlight else {
+                    let alreadyInFlight = sendInFlight.withLock { val -> Bool in
+                        if val { return true }
+                        val = true
+                        return false
+                    }
+                    guard !alreadyInFlight else {
                         encoder?.reportFrameDropped()
                         return
                     }
-                    sendInFlight = true
-                    Task {
+                    Task { [weak encoder] in
                         await relay.sendBinary(prefixedData) {
-                            sendInFlight = false
+                            sendInFlight.withLock { $0 = false }
                             encoder?.reportFrameDelivered()
                         }
                     }
@@ -1549,7 +1551,7 @@ class DaemonManager: ObservableObject {
 
         log("streamStart: opening \(bundleId)")
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
-            try? await NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+            _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
         }
     }
 
@@ -1716,6 +1718,7 @@ class DaemonManager: ObservableObject {
                                 WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": "claude"]),
                                 to: clientId
                             )
+                            await UltraContextSync.shared.agentOutput(sessionId: sid, content: output)
                         }
                     },
                     onComplete: { [weak self] (message: String) in
@@ -1732,6 +1735,7 @@ class DaemonManager: ObservableObject {
                             if let taskId = await self?.sessionTaskMap[sid] {
                                 await self?.agentTaskService.updateStatus(taskId, status: .completed)
                             }
+                            await UltraContextSync.shared.engineCompleted(sessionId: sid, summary: message)
                         }
                     },
                     onAskUser: { [weak self] questionsJson, _ in
@@ -1772,9 +1776,12 @@ class DaemonManager: ObservableObject {
                     to: clientId
                 )
 
+                await UltraContextSync.shared.engineStarted(sessionId: sid, engineType: "claude", workspacePath: path)
+
                 if let msg = initialMessage, !msg.isEmpty {
                     let imagesJson = packet.payload?["images"]
                     await terminalManager.sendClaudeMessage(msg, images: imagesJson, to: sid)
+                    await UltraContextSync.shared.userMessage(sessionId: sid, content: msg)
 
                     // Create persistent task
                     if let wsIdStr = packet.payload?["workspaceId"], let wsId = UUID(uuidString: wsIdStr) {
@@ -1807,6 +1814,7 @@ class DaemonManager: ObservableObject {
                             WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": engineTypeRaw]),
                             to: clientId
                         )
+                        await UltraContextSync.shared.agentOutput(sessionId: sid, content: output)
                     }
                 },
                 onComplete: { [weak self] (message: String) in
@@ -1815,9 +1823,12 @@ class DaemonManager: ObservableObject {
                             WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": engineTypeRaw]),
                             to: clientId
                         )
+                        await UltraContextSync.shared.engineCompleted(sessionId: sid, summary: message)
                     }
                 }
             )
+
+            await UltraContextSync.shared.engineStarted(sessionId: sid, engineType: engineTypeRaw, workspacePath: path)
 
             await sendToClientOrRelay(
                 WSPacket(action: .engineCreate, payload: ["sessionId": sid, "engineType": engineTypeRaw], id: packet.id),
@@ -1826,6 +1837,7 @@ class DaemonManager: ObservableObject {
 
             if let msg = initialMessage, !msg.isEmpty {
                 await terminalManager.sendEngineMessage(msg, to: sid)
+                await UltraContextSync.shared.userMessage(sessionId: sid, content: msg)
 
                 // Create persistent task for generic engines
                 if let wsIdStr = packet.payload?["workspaceId"], let wsId = UUID(uuidString: wsIdStr) {
@@ -1853,6 +1865,7 @@ class DaemonManager: ObservableObject {
         } else {
             await terminalManager.sendEngineMessage(message, to: sessionId)
         }
+        await UltraContextSync.shared.userMessage(sessionId: sessionId, content: message)
     }
 
     private func handleEngineUserResponse(clientId: String, packet: WSPacket) async {
@@ -2556,7 +2569,7 @@ class DaemonManager: ObservableObject {
             // Stdio/command MCP — check if binary exists
             let command = packet.payload?["command"] ?? ""
             let binaryName = command.components(separatedBy: "/").last ?? command
-            let whichResult = await runGitCommand(["which", binaryName], at: NSHomeDirectory())
+            _ = await runGitCommand(["which", binaryName], at: NSHomeDirectory())
             // runGitCommand uses /usr/bin/git but we need /usr/bin/which — hack: use command directly
             let exists = FileManager.default.fileExists(atPath: command) ||
                          FileManager.default.fileExists(atPath: "/opt/homebrew/bin/\(binaryName)") ||
@@ -2577,7 +2590,7 @@ class DaemonManager: ObservableObject {
         )
     }
 
-    private func mcpType(from config: Any) -> String {
+    private nonisolated func mcpType(from config: Any) -> String {
         guard let dict = config as? [String: Any] else { return "unknown" }
         if let type = dict["type"] as? String { return type }
         if dict["command"] != nil { return "command" }
@@ -2585,7 +2598,7 @@ class DaemonManager: ObservableObject {
         return "unknown"
     }
 
-    private func mcpCommand(from config: Any) -> String {
+    private nonisolated func mcpCommand(from config: Any) -> String {
         guard let dict = config as? [String: Any] else { return "" }
         if let url = dict["url"] as? String { return url }
         if let cmd = dict["command"] as? String {

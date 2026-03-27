@@ -52,7 +52,7 @@ class TailscaleManager: ObservableObject {
         onOutput("→ Downloading tailscale-app...\n")
         installProgress = 0.1
 
-        let downloadResult = try await runProcess(
+        _ = try await runProcess(
             executable: brew,
             arguments: ["fetch", "--cask", "tailscale-app"],
             env: ["HOMEBREW_NO_AUTO_UPDATE": "1"],

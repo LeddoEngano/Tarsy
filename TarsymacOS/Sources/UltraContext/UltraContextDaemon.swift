@@ -1,103 +1,91 @@
 import Foundation
 import TarsyShared
 
-class UltraContextDaemon {
-    static let shared = UltraContextDaemon()
+/// Manages UltraContext sessions by pushing data via Supabase Edge Function proxy.
+/// The UltraContext API key stays on the server — only the Supabase auth token is used.
+actor UltraContextSync {
+    static let shared = UltraContextSync()
 
-    private var process: Process?
-    private(set) var isRunning = false
+    private let proxyURL = TarsyConfig.supabaseURL.absoluteString + "/functions/v1/ultracontext-proxy"
 
-    /// Check if ultracontext CLI is installed
-    func isInstalled() -> Bool {
-        let paths = [
-            "/opt/homebrew/bin/ultracontext",
-            "/usr/local/bin/ultracontext",
-            "\(realHome())/.local/bin/ultracontext",
-            "\(realHome())/.npm-global/bin/ultracontext"
-        ]
-        return paths.contains { FileManager.default.isExecutableFile(atPath: $0) }
+    /// Maps engine sessionId -> UltraContext contextId
+    private var contextMap: [String: String] = [:]
+
+    // MARK: - HTTP
+
+    private func authToken() async -> String? {
+        try? await supabase.auth.session.accessToken
     }
 
-    /// Find the ultracontext CLI path
-    func findCLI() -> String? {
-        let paths = [
-            "/opt/homebrew/bin/ultracontext",
-            "/usr/local/bin/ultracontext",
-            "\(realHome())/.local/bin/ultracontext",
-            "\(realHome())/.npm-global/bin/ultracontext"
-        ]
-        return paths.first { FileManager.default.isExecutableFile(atPath: $0) }
+    private func request(_ path: String, method: String = "GET", body: Data? = nil) async throws -> Data {
+        guard let url = URL(string: "\(proxyURL)\(path)") else { throw URLError(.badURL) }
+        guard let token = await authToken() else { throw URLError(.userAuthenticationRequired) }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.httpBody = body
+        let (data, _) = try await URLSession.shared.data(for: req)
+        return data
     }
 
-    /// Start the daemon
-    func start() {
-        guard !isRunning, let cliPath = findCLI() else {
-            print("[UltraContext] CLI not found or already running")
-            return
-        }
+    private func createContext() async throws -> String {
+        let data = try await request("/contexts", method: "POST")
+        let decoded = try JSONDecoder().decode(UltraContextSession.self, from: data)
+        return decoded.id
+    }
 
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: cliPath)
-        proc.arguments = ["start"]
+    private func appendMessage(contextId: String, role: String, content: String) async throws {
+        let msg = ["role": role, "content": content]
+        let body = try JSONEncoder().encode(msg)
+        _ = try await request("/contexts/\(contextId)/messages", method: "POST", body: body)
+    }
 
-        var env = ProcessInfo.processInfo.environment
-        env["HOME"] = realHome()
-        let apiKey = TarsyConfig.ultraContextAPIKey
-        if !apiKey.isEmpty {
-            env["ULTRACONTEXT_API_KEY"] = apiKey
-        }
-        proc.environment = env
+    // MARK: - Engine lifecycle
 
-        proc.terminationHandler = { [weak self] _ in
-            self?.isRunning = false
-            print("[UltraContext] Daemon stopped")
-        }
-
+    func engineStarted(sessionId: String, engineType: String, workspacePath: String) async {
         do {
-            try proc.run()
-            process = proc
-            isRunning = true
-            print("[UltraContext] Daemon started with PID \(proc.processIdentifier)")
+            let ctxId = try await createContext()
+            contextMap[sessionId] = ctxId
+            try await appendMessage(
+                contextId: ctxId,
+                role: "user",
+                content: "[engine:\(engineType)] Started in \(workspacePath)"
+            )
         } catch {
-            print("[UltraContext] Failed to start daemon: \(error)")
+            print("[UltraContext] Create context error: \(error)")
         }
     }
 
-    /// Stop the daemon
-    func stop() {
-        process?.terminate()
-        process = nil
-        isRunning = false
-    }
-
-    /// Get daemon status
-    func status() -> String {
-        guard let cliPath = findCLI() else { return "not installed" }
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: cliPath)
-        proc.arguments = ["status"]
-
-        let pipe = Pipe()
-        proc.standardOutput = pipe
-        proc.standardError = pipe
-
-        var env = ProcessInfo.processInfo.environment
-        env["HOME"] = realHome()
-        proc.environment = env
-
+    func userMessage(sessionId: String, content: String) async {
+        guard let ctxId = contextMap[sessionId] else { return }
         do {
-            try proc.run()
-            proc.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "unknown"
+            try await appendMessage(contextId: ctxId, role: "user", content: String(content.prefix(8000)))
         } catch {
-            return "error: \(error.localizedDescription)"
+            print("[UltraContext] Append user message error: \(error)")
         }
     }
 
-    private func realHome() -> String {
-        FileManager.default.homeDirectoryForCurrentUser.path
-            .replacingOccurrences(of: "/Library/Containers/com.tarsy.macos/Data", with: "")
+    func agentOutput(sessionId: String, content: String) async {
+        guard let ctxId = contextMap[sessionId], !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        do {
+            try await appendMessage(contextId: ctxId, role: "assistant", content: String(content.prefix(8000)))
+        } catch {
+            print("[UltraContext] Append output error: \(error)")
+        }
+    }
+
+    func engineCompleted(sessionId: String, summary: String) async {
+        guard let ctxId = contextMap[sessionId] else { return }
+        do {
+            try await appendMessage(contextId: ctxId, role: "assistant", content: "[completed] \(String(summary.prefix(4000)))")
+        } catch {
+            print("[UltraContext] Complete error: \(error)")
+        }
+        contextMap.removeValue(forKey: sessionId)
+    }
+
+    func engineClosed(sessionId: String) {
+        contextMap.removeValue(forKey: sessionId)
     }
 }
