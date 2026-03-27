@@ -22,6 +22,11 @@ struct ActiveSessionsView: View {
     @State private var pendingContinueSession: UltraContextSession?
     @State private var matchedWorkspaces: [Workspace] = []
 
+    // No workspace found
+    @State private var showNoWorkspaceAlert = false
+    @State private var showNewWorkspace = false
+    @State private var showPaywall = false
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -109,6 +114,27 @@ struct ActiveSessionsView: View {
             }
         } message: {
             Text("Multiple workspaces match this session. Which one should continue it?")
+        }
+        .alert("No workspace found", isPresented: $showNoWorkspaceAlert) {
+            Button("Create workspace") {
+                if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
+                    showNewWorkspace = true
+                } else {
+                    showPaywall = true
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingContinueSession = nil
+            }
+        } message: {
+            let projectName = pendingContinueSession?.projectName ?? "this project"
+            Text("There's no workspace configured for \(projectName) yet. Create one to continue the session.")
+        }
+        .sheet(isPresented: $showNewWorkspace) {
+            NewWorkspaceView()
+        }
+        .fullScreenCover(isPresented: $showPaywall) {
+            PaywallView()
         }
     }
 
@@ -277,20 +303,26 @@ struct ActiveSessionsView: View {
         matchWorkspaces(for: session).first
     }
 
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
+
     private func continueSession(_ session: UltraContextSession) {
         let matches = matchWorkspaces(for: session)
 
         if matches.count > 1 {
-            // Multiple matches — show picker
             pendingContinueSession = session
             matchedWorkspaces = matches
             showWorkspacePicker = true
             return
         }
 
-        let workspace = matches.first ?? workspaceService.workspaces.first
-        guard let workspace else { return }
-        launchInWorkspace(session: session, workspace: workspace)
+        if matches.count == 1 {
+            launchInWorkspace(session: session, workspace: matches[0])
+            return
+        }
+
+        // No workspace found for this project
+        pendingContinueSession = session
+        showNoWorkspaceAlert = true
     }
 
     private func launchInWorkspace(session: UltraContextSession, workspace: Workspace) {
