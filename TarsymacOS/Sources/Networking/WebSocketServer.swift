@@ -17,6 +17,10 @@ actor WebSocketServer {
         self.validateToken = validateToken
     }
 
+    func getPacketHandler() -> (@Sendable (String, WSPacket) async -> Void)? {
+        return onPacketReceived
+    }
+
     func setHandlers(
         onPacket: @escaping @Sendable (String, WSPacket) async -> Void,
         onConnect: @escaping @Sendable (String) -> Void,
@@ -145,7 +149,8 @@ actor WebSocketServer {
                 print("[WSServer] Received: \(packet.action.rawValue) from \(clientId)")
                 // Fire-and-forget: don't block the receive loop waiting for packet handling.
                 // This allows new messages (like sudoResponse) to arrive while a handler is suspended.
-                if let handler = self.onPacketReceived {
+                let handler = await self.getPacketHandler()
+                if let handler {
                     Task { await handler(clientId, packet) }
                 }
                 await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)

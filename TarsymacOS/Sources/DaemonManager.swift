@@ -1475,9 +1475,10 @@ class DaemonManager: ObservableObject {
                         return
                     }
                     Task { [weak encoder] in
+                        let enc = encoder
                         await relay.sendBinary(prefixedData) {
                             sendInFlight.withLock { $0 = false }
-                            encoder?.reportFrameDelivered()
+                            enc?.reportFrameDelivered()
                         }
                     }
                 } else {
