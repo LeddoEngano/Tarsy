@@ -4,25 +4,58 @@ import Supabase
 @MainActor
 public class MachineService: ObservableObject {
     @Published public var machine: Machine?
+    @Published public var machines: [Machine] = []
+    @Published public var selectedMachineId: UUID?
     @Published public var isOnline = false
     @Published public var hasTailscale = false
 
     public init() {}
 
+    /// The currently selected machine (or first online, or first available)
+    public var selectedMachine: Machine? {
+        if let id = selectedMachineId {
+            return machines.first { $0.id == id }
+        }
+        return machine
+    }
+
+    /// All machines that are currently online
+    public var onlineMachines: [Machine] {
+        machines.filter { $0.status == .online }
+    }
+
     public func fetchMachine() async {
         do {
             let session = try await supabase.auth.session
-            let machines: [Machine] = try await supabase
+            let allMachines: [Machine] = try await supabase
                 .from("machines")
                 .select()
                 .eq("user_id", value: session.user.id.uuidString)
+                .order("created_at")
                 .execute()
                 .value
-            machine = machines.first
+            machines = allMachines
+
+            // Select best machine: prefer currently selected, then first online, then first
+            if let selectedId = selectedMachineId, let selected = allMachines.first(where: { $0.id == selectedId }) {
+                machine = selected
+            } else if let online = allMachines.first(where: { $0.status == .online }) {
+                machine = online
+                selectedMachineId = online.id
+            } else {
+                machine = allMachines.first
+                selectedMachineId = machine?.id
+            }
             isOnline = machine?.status == .online
         } catch {
             print("[MachineService] Fetch error: \(error)")
         }
+    }
+
+    public func selectMachine(_ id: UUID) {
+        selectedMachineId = id
+        machine = machines.first { $0.id == id }
+        isOnline = machine?.status == .online
     }
 
     public func setTailscaleInstalled(_ installed: Bool) {
