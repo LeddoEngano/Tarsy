@@ -31,6 +31,10 @@ class DaemonManager: ObservableObject {
     private var displaySleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var systemSleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var lastActiveClientId: String = "relay"
+    private var detectedAgents: [AIEngineType] = []
+    private let agentTaskService = AgentTaskService()
+    private var sessionTaskMap: [String: UUID] = [:] // sessionId -> agentTask.id
+    let profileService = ProfileService()
 
     func start() async {
         // 0. Init orchestrator
@@ -58,6 +62,21 @@ class DaemonManager: ObservableObject {
         startHeartbeat()
 
         preventSleep()
+
+        // 6. Load user profile
+        await profileService.loadProfile()
+        log("Profile loaded: \(profileService.profile?.nameOrEmail ?? "none")")
+
+        // 7. Detect installed AI agents
+        detectedAgents = AgentDetector.detectInstalledAgents()
+        log("Detected agents: \(detectedAgents.map(\.rawValue))")
+
+        // 8. Start UltraContext daemon if installed
+        if UltraContextDaemon.shared.isInstalled() {
+            UltraContextDaemon.shared.start()
+            log("UltraContext daemon started")
+        }
+
         isRunning = true
     }
 
@@ -177,9 +196,17 @@ class DaemonManager: ObservableObject {
             onPacket: { [weak self] clientId, packet in
                 await self?.handlePacket(clientId: clientId, packet: packet)
             },
-            onConnect: { [weak self] _ in
+            onConnect: { [weak self] clientId in
                 Task { @MainActor in
                     self?.connectedClients += 1
+                    // Send detected agents to the newly connected client
+                    if let agents = self?.detectedAgents, !agents.isEmpty {
+                        let packet = WSPacket(
+                            action: .agentsDetected,
+                            payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
+                        )
+                        await self?.sendToClientOrRelay(packet, to: clientId)
+                    }
                 }
             },
             onDisconnect: { [weak self] _ in
@@ -349,6 +376,17 @@ class DaemonManager: ObservableObject {
             await handleSudoRequest(clientId: clientId, packet: packet)
         case .sudoResponse:
             SudoPasswordManager.shared.handlePasswordResponse(packet: packet)
+        // UltraContext
+        case .ultracontextStatus:
+            let status = UltraContextDaemon.shared.status()
+            let installed = UltraContextDaemon.shared.isInstalled()
+            await sendToClientOrRelay(
+                WSPacket(action: .ultracontextStatus, payload: [
+                    "installed": installed ? "true" : "false",
+                    "status": status
+                ], id: packet.id),
+                to: clientId
+            )
         default:
             await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Unknown action: \(packet.action.rawValue)"]),
@@ -565,16 +603,28 @@ class DaemonManager: ObservableObject {
         }
         let aiContext = packet.payload?["aiContext"]
         let initialMessage = packet.payload?["message"]
+        let wsIdStr = packet.payload?["workspaceId"]
+        let permissionMode: AgentPermissionConfig.PermissionMode = {
+            if let raw = packet.payload?["permissionMode"],
+               let mode = AgentPermissionConfig.PermissionMode(rawValue: raw) {
+                return mode
+            }
+            if let profile = profileService.profile {
+                return profile.permissionMode(for: .claude)
+            }
+            return .dangerous
+        }()
         let sid = UUID().uuidString
         let workspaceName = path.components(separatedBy: "/").last ?? "workspace"
 
-        log("claudeCreate: path=\(path), sid=\(sid), hasMessage=\(initialMessage != nil)")
+        log("claudeCreate: path=\(path), sid=\(sid), hasMessage=\(initialMessage != nil), permissionMode=\(permissionMode.rawValue)")
 
         do {
             let _ = try await terminalManager.createClaudeSession(
                 id: sid,
                 workspacePath: path,
                 aiContext: aiContext,
+                permissionMode: permissionMode,
                 onOutput: { [weak self] output in
                     Task {
                         await self?.sendToClientOrRelay(
@@ -591,7 +641,8 @@ class DaemonManager: ObservableObject {
                         )
                         PushNotificationService.shared.notifyTaskComplete(
                             workspace: workspaceName,
-                            summary: message
+                            summary: message,
+                            workspaceId: wsIdStr
                         )
                     }
                 },
@@ -604,6 +655,11 @@ class DaemonManager: ObservableObject {
                                 "questions": questionsJson
                             ]),
                             to: clientId
+                        )
+                        PushNotificationService.shared.notifyAgentQuestion(
+                            workspace: workspaceName,
+                            question: questionsJson,
+                            workspaceId: wsIdStr
                         )
                     }
                 }
@@ -1383,15 +1439,15 @@ class DaemonManager: ObservableObject {
             let bitrate: Int
 
             if isLocalConnection && !isRelay {
-                // LAN — higher quality H.264
-                fps = 20
+                // LAN — 30fps, full resolution, high bitrate
+                fps = 30
                 scale = 1.0
-                bitrate = 4_000_000 // 4 Mbps — LAN can handle it
+                bitrate = 6_000_000 // 6 Mbps — smooth 30fps on LAN
             } else {
-                // Relay / 4G — optimized H.264
-                fps = 15
+                // Relay / 4G — 20fps, reduced resolution, adaptive bitrate
+                fps = 20
                 scale = 0.75
-                bitrate = 1_500_000 // 1.5 Mbps — works on 4G
+                bitrate = 2_000_000 // 2 Mbps baseline, adaptive adjusts
             }
 
             // Setup H.264 encoder
@@ -1401,40 +1457,43 @@ class DaemonManager: ObservableObject {
             encoder.configure(width: captureWidth, height: captureHeight, fps: fps, bitrate: bitrate)
             self.h264Encoder = encoder
 
-            // H.264 output → send to clients (LAN WebSocket + relay)
+            // Encoded frames → send to clients (LAN WebSocket + relay)
             let relay = self.relayClient
             let wsServer = self.wsServer
-            let targetClientId = clientId
             var sendInFlight = false
-            encoder.onEncodedFrame = { encodedData in
-                // Prefix with "H264" so iOS knows it's H.264
+            encoder.onEncodedFrame = { [weak encoder] encodedData in
+                // Prefix with "H264" (kept for compatibility — iOS checks this prefix)
                 var prefixedData = Data("H264".utf8)
                 prefixedData.append(encodedData)
 
-                guard !sendInFlight else { return } // backpressure
-
                 if isRelay {
+                    guard !sendInFlight else {
+                        encoder?.reportFrameDropped()
+                        return
+                    }
                     sendInFlight = true
                     Task {
                         await relay.sendBinary(prefixedData) {
                             sendInFlight = false
+                            encoder?.reportFrameDelivered()
                         }
                     }
                 } else {
-                    // LAN — send via WebSocket server
+                    // LAN — send via WebSocket server (no backpressure needed)
+                    encoder?.reportFrameDelivered()
                     Task {
                         await wsServer?.broadcastBinary(prefixedData)
                     }
                 }
             }
 
-            // Feed pixel buffers directly to H.264 encoder (no CGImage conversion needed)
+            // Feed pixel buffers directly to encoder (no CGImage conversion needed)
             screenCapture.onFrame = nil
             screenCapture.onPixelBuffer = { [weak encoder] pixelBuffer in
                 encoder?.encode(pixelBuffer)
             }
 
-            log("streamStart: H.264 \(isRelay ? "relay" : "LAN") (\(fps)fps, \(captureWidth)x\(captureHeight), \(bitrate/1000)kbps)")
+            log("streamStart: \(isRelay ? "relay" : "LAN") (\(fps)fps, \(captureWidth)x\(captureHeight), \(bitrate/1000)kbps)")
 
             let ownerApp = window.owningApplication?.applicationName ?? ""
             let isSimulator = ownerApp == "Simulator"
@@ -1626,9 +1685,22 @@ class DaemonManager: ObservableObject {
         let command = packet.payload?["command"]
         let aiContext = packet.payload?["aiContext"]
         let initialMessage = packet.payload?["message"]
+        let wsIdStr = packet.payload?["workspaceId"]
+        let permissionMode: AgentPermissionConfig.PermissionMode = {
+            if let raw = packet.payload?["permissionMode"],
+               let mode = AgentPermissionConfig.PermissionMode(rawValue: raw) {
+                return mode
+            }
+            // Fallback to profile permissions
+            if let profile = profileService.profile {
+                return profile.permissionMode(for: engineType)
+            }
+            return .dangerous
+        }()
         let sid = UUID().uuidString
+        let workspaceName = path.components(separatedBy: "/").last ?? "workspace"
 
-        log("engineCreate: type=\(engineType.displayName), path=\(path), sid=\(sid)")
+        log("engineCreate: type=\(engineType.displayName), path=\(path), sid=\(sid), permissionMode=\(permissionMode.rawValue)")
 
         // For Claude, use the existing rich session
         if engineType == .claude {
@@ -1637,6 +1709,7 @@ class DaemonManager: ObservableObject {
                     id: sid,
                     workspacePath: path,
                     aiContext: aiContext,
+                    permissionMode: permissionMode,
                     onOutput: { [weak self] output in
                         Task {
                             await self?.sendToClientOrRelay(
@@ -1651,6 +1724,14 @@ class DaemonManager: ObservableObject {
                                 WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": "claude"]),
                                 to: clientId
                             )
+                            PushNotificationService.shared.notifyTaskComplete(
+                                workspace: workspaceName,
+                                summary: String(message.prefix(200)),
+                                workspaceId: wsIdStr
+                            )
+                            if let taskId = await self?.sessionTaskMap[sid] {
+                                await self?.agentTaskService.updateStatus(taskId, status: .completed)
+                            }
                         }
                     },
                     onAskUser: { [weak self] questionsJson, _ in
@@ -1659,6 +1740,14 @@ class DaemonManager: ObservableObject {
                                 WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": "claude"]),
                                 to: clientId
                             )
+                            PushNotificationService.shared.notifyAgentQuestion(
+                                workspace: workspaceName,
+                                question: questionsJson,
+                                workspaceId: wsIdStr
+                            )
+                            if let taskId = await self?.sessionTaskMap[sid] {
+                                await self?.agentTaskService.updateStatus(taskId, status: .waiting)
+                            }
                         }
                     }
                 )
@@ -1686,6 +1775,16 @@ class DaemonManager: ObservableObject {
                 if let msg = initialMessage, !msg.isEmpty {
                     let imagesJson = packet.payload?["images"]
                     await terminalManager.sendClaudeMessage(msg, images: imagesJson, to: sid)
+
+                    // Create persistent task
+                    if let wsIdStr = packet.payload?["workspaceId"], let wsId = UUID(uuidString: wsIdStr) {
+                        if let task = await agentTaskService.createTask(
+                            workspaceId: wsId, tabId: packet.payload?["tabId"] ?? sid,
+                            description: String(msg.prefix(200)), sessionId: sid, engineType: "claude"
+                        ) {
+                            sessionTaskMap[sid] = task.id
+                        }
+                    }
                 }
             } catch {
                 log("engineCreate error: \(error)")
@@ -1701,6 +1800,7 @@ class DaemonManager: ObservableObject {
                 workspacePath: path,
                 command: command,
                 apiKey: apiKey,
+                permissionMode: permissionMode,
                 onOutput: { [weak self] output in
                     Task {
                         await self?.sendToClientOrRelay(
@@ -1726,6 +1826,16 @@ class DaemonManager: ObservableObject {
 
             if let msg = initialMessage, !msg.isEmpty {
                 await terminalManager.sendEngineMessage(msg, to: sid)
+
+                // Create persistent task for generic engines
+                if let wsIdStr = packet.payload?["workspaceId"], let wsId = UUID(uuidString: wsIdStr) {
+                    if let task = await agentTaskService.createTask(
+                        workspaceId: wsId, tabId: packet.payload?["tabId"] ?? sid,
+                        description: String(msg.prefix(200)), sessionId: sid, engineType: engineTypeRaw
+                    ) {
+                        sessionTaskMap[sid] = task.id
+                    }
+                }
             }
         } catch {
             log("engineCreate error: \(error)")
@@ -1754,6 +1864,11 @@ class DaemonManager: ObservableObject {
             await terminalManager.respondToClaudeQuestion(answer, sessionId: sessionId)
         } else {
             await terminalManager.respondToEngineQuestion(answer, sessionId: sessionId)
+        }
+
+        // Update task status back to running
+        if let taskId = sessionTaskMap[sessionId] {
+            await agentTaskService.updateStatus(taskId, status: .running)
         }
     }
 
