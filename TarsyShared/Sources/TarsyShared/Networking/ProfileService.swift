@@ -76,16 +76,20 @@ public class ProfileService: ObservableObject {
         }
     }
 
+    private struct SubscriptionUpdate: Encodable {
+        let is_pro: Bool
+        let subscription_status: String
+        let subscription_end_date: String?
+    }
+
     public func updateSubscription(isPro: Bool, status: String, endDate: Date?) async {
         guard let profileId = profile?.id else { return }
         do {
-            var update: [String: String] = [
-                "is_pro": isPro ? "true" : "false",
-                "subscription_status": status
-            ]
-            if let end = endDate {
-                update["subscription_end_date"] = ISO8601DateFormatter().string(from: end)
-            }
+            let update = SubscriptionUpdate(
+                is_pro: isPro,
+                subscription_status: status,
+                subscription_end_date: endDate.map { ISO8601DateFormatter().string(from: $0) }
+            )
             try await supabase
                 .from("profiles")
                 .update(update)
@@ -99,12 +103,50 @@ public class ProfileService: ObservableObject {
         }
     }
 
+    // MARK: - Email notifications
+
+    public func sendBillingEmail(type: String, endDate: Date? = nil) async {
+        guard let profile = profile, !profile.email.isEmpty else { return }
+
+        for attempt in 1...2 {
+            do {
+                let session = try await supabase.auth.session
+                var body: [String: String] = [
+                    "email_type": type,
+                    "email": profile.email,
+                    "display_name": profile.displayName ?? ""
+                ]
+                if let end = endDate {
+                    body["subscription_end_date"] = ISO8601DateFormatter().string(from: end)
+                }
+                let url = TarsyConfig.supabaseURL.appendingPathComponent("functions/v1/send-email")
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+                let (_, response) = try await URLSession.shared.data(for: request)
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                if (200...299).contains(statusCode) {
+                    print("[ProfileService] Billing email '\(type)' sent OK (attempt \(attempt))")
+                    return
+                }
+                print("[ProfileService] Billing email '\(type)' failed with status \(statusCode) (attempt \(attempt))")
+            } catch {
+                print("[ProfileService] Billing email '\(type)' error: \(error) (attempt \(attempt))")
+            }
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+            }
+        }
+    }
+
     public func markOnboarded() async {
         guard let profileId = profile?.id else { return }
         do {
             try await supabase
                 .from("profiles")
-                .update(["onboarded": "true"])
+                .update(["onboarded": true])
                 .eq("id", value: profileId.uuidString)
                 .execute()
             profile?.onboarded = true

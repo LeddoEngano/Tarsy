@@ -206,7 +206,20 @@ public class ConnectionManager: ObservableObject {
                 case .ready:
                     lanConnected = true
                     timeoutTask.cancel()
+                    // If relay already connected while we were waiting, tear it down
+                    if self?.relayTask != nil {
+                        print("[WS] LAN ready — cancelling relay in favor of LAN")
+                        self?.relayTask?.cancel(with: .goingAway, reason: nil)
+                        self?.relayTask = nil
+                        self?.relaySession = nil
+                        self?.pingTimer?.invalidate()
+                        self?.pingTimer = nil
+                    }
                     print("[WS] LAN connected to \(host):\(port)")
+                    self?.isConnected = true
+                    self?.isReconnecting = false
+                    self?.reconnectAttempts = 0
+                    self?.errorMessage = nil
                     self?.connectionMode = .lan
                     if let token = self?.authToken {
                         self?.send(WSPacket(action: .auth, payload: ["token": token]))
@@ -216,9 +229,12 @@ public class ConnectionManager: ObservableObject {
                 case .failed:
                     lanConnected = false
                     timeoutTask.cancel()
-                    print("[WS] LAN failed, switching to relay...")
-                    self?.connection = nil
-                    self?.performRelayConnect()
+                    // Only fall back to relay if relay isn't already connected
+                    if self?.isConnected != true {
+                        print("[WS] LAN failed, switching to relay...")
+                        self?.connection = nil
+                        self?.performRelayConnect()
+                    }
                 case .waiting:
                     break
                 default:
@@ -262,9 +278,8 @@ public class ConnectionManager: ObservableObject {
     // MARK: - Relay Transport
 
     private func sendViaRelay(_ data: Data) {
-        guard let relayTask else { return }
-        let message = URLSessionWebSocketTask.Message.string(String(data: data, encoding: .utf8)!)
-        relayTask.send(message) { error in
+        guard let relayTask, let str = String(data: data, encoding: .utf8) else { return }
+        relayTask.send(.string(str)) { error in
             if let error {
                 print("[WS] Relay send error: \(error)")
             }
@@ -276,7 +291,7 @@ public class ConnectionManager: ObservableObject {
 
         let baseURL = TarsyConfig.relayURL
 
-        guard let url = URL(string: "\(baseURL)?token=\(token)&role=client") else {
+        guard let url = URL(string: baseURL) else {
             errorMessage = "Invalid relay URL"
             return
         }
@@ -288,6 +303,15 @@ public class ConnectionManager: ObservableObject {
         task.maximumMessageSize = 4 * 1024 * 1024 // 4MB
         self.relayTask = task
         task.resume()
+
+        // Send auth as first message (token not in URL for security)
+        let auth: [String: String] = ["action": "auth", "token": token, "role": "client"]
+        if let data = try? JSONSerialization.data(withJSONObject: auth),
+           let str = String(data: data, encoding: .utf8) {
+            task.send(.string(str)) { error in
+                if let error { print("[WS] Auth send error: \(error)") }
+            }
+        }
 
         connectionMode = .relay
         receiveRelayLoop()
@@ -428,6 +452,7 @@ public class ConnectionManager: ObservableObject {
     }
 
     private func startPing() {
+        pingTimer?.invalidate()
         pingTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.lastPingTime = Date()

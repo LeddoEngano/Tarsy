@@ -34,16 +34,14 @@ public class UltraContextClient: ObservableObject {
     private let baseURL: String
     private let apiKey: String
 
-    public init(baseURL: String = "https://api.ultracontext.ai", apiKey: String = "") {
+    public init(baseURL: String = "https://api.ultracontext.ai", apiKey: String? = nil) {
         self.baseURL = baseURL
-        self.apiKey = apiKey
+        self.apiKey = apiKey ?? TarsyConfig.ultraContextAPIKey
     }
 
-    // Load from UserDefaults config
+    /// Create a client using the bundled API key from TarsyConfig
     public static func configured() -> UltraContextClient {
-        let url = UserDefaults.standard.string(forKey: "ultracontext_url") ?? "https://api.ultracontext.ai"
-        let key = UserDefaults.standard.string(forKey: "ultracontext_api_key") ?? ""
-        return UltraContextClient(baseURL: url, apiKey: key)
+        UltraContextClient()
     }
 
     public var isConfigured: Bool { !apiKey.isEmpty }
