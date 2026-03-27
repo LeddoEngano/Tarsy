@@ -175,7 +175,23 @@ struct WorkspaceSessionPicker: View {
                 messageCount: full.messages.count
             )
             pendingSession = enriched
-            showAgentPicker = true
+            if detectedAgents.count <= 1 {
+                let engine = detectedAgents.first ?? .claude
+                let finalSession = UltraContextSession(
+                    id: enriched.id,
+                    messages: enriched.messages,
+                    version: enriched.version,
+                    createdAt: enriched.createdAt,
+                    title: enriched.title,
+                    hasImage: enriched.hasImage,
+                    projectPath: enriched.projectPath,
+                    engineType: engine.rawValue,
+                    messageCount: enriched.messageCount
+                )
+                onSelect(finalSession, engine)
+            } else {
+                showAgentPicker = true
+            }
         } catch {
             print("[SessionPicker] Load error: \(error)")
         }

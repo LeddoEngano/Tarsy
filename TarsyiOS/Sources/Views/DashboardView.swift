@@ -15,6 +15,7 @@ struct DashboardView: View {
     @State private var showPaywall = false
     @State private var showQuickDispatch = false
     @State private var showActiveSessions = false
+    @State private var showAIWizard = false
     @State private var deepLinkWorkspace: Workspace?
     @State private var isDeepLinkActive = false
 
@@ -28,13 +29,17 @@ struct DashboardView: View {
                             .font(.system(size: 24, weight: .bold, design: .monospaced))
                             .foregroundColor(TarsyTheme.accentAmber)
 
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(machineService.isOnline ? TarsyTheme.statusRunning : TarsyTheme.statusError)
-                                .frame(width: 6, height: 6)
-                            Text(machineService.isOnline ? "mac online" : "mac offline")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(TarsyTheme.textSecondary)
+                        if machineService.machines.count > 1 {
+                            machinePicker
+                        } else {
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(machineService.isOnline ? TarsyTheme.statusRunning : TarsyTheme.statusError)
+                                    .frame(width: 6, height: 6)
+                                Text(machineService.isOnline ? "mac online" : "mac offline")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(TarsyTheme.textSecondary)
+                            }
                         }
                     }
 
@@ -46,6 +51,16 @@ struct DashboardView: View {
                                 Image(systemName: "bolt.fill")
                                     .foregroundColor(TarsyTheme.accentAmber)
                             }
+                        }
+                        Button(action: {
+                            if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
+                                showAIWizard = true
+                            } else {
+                                showPaywall = true
+                            }
+                        }) {
+                            Image(systemName: "wand.and.stars")
+                                .foregroundColor(TarsyTheme.accentAmber)
                         }
                         Button(action: {
                             if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
@@ -103,7 +118,7 @@ struct DashboardView: View {
                                 .font(TarsyTheme.monoFontSmall)
                                 .foregroundColor(TarsyTheme.textSecondary)
                         }
-                    } else if workspaceService.workspaces.isEmpty {
+                    } else if filteredWorkspaces.isEmpty {
                         emptyState
                     } else {
                         workspaceList
@@ -132,16 +147,14 @@ struct DashboardView: View {
         .sheet(isPresented: $showActiveSessions) {
             ActiveSessionsView()
         }
+        .sheet(isPresented: $showAIWizard) {
+            AIProjectWizardView()
+        }
         .task {
             await machineService.fetchMachine()
             await workspaceService.fetchWorkspaces()
             await taskService.loadActiveTasks()
             await taskService.cleanupOldTasks()
-        }
-        .refreshable {
-            await machineService.fetchMachine()
-            await workspaceService.fetchWorkspaces()
-            await taskService.loadActiveTasks()
         }
         .onChange(of: deepLinkRouter.pendingWorkspaceId) { _, wsId in
             guard let wsId else { return }
@@ -252,10 +265,51 @@ struct DashboardView: View {
         .cornerRadius(8)
     }
 
+    private var filteredWorkspaces: [Workspace] {
+        guard machineService.machines.count > 1,
+              let selectedId = machineService.selectedMachineId else {
+            return workspaceService.workspaces
+        }
+        return workspaceService.workspaces.filter { $0.machineId == selectedId }
+    }
+
+    private var machinePicker: some View {
+        Menu {
+            ForEach(machineService.machines) { m in
+                Button {
+                    machineService.selectMachine(m.id)
+                } label: {
+                    HStack {
+                        Text(m.name)
+                        if m.status == .online {
+                            Image(systemName: "circle.fill")
+                        }
+                        if m.id == machineService.selectedMachineId {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(machineService.isOnline ? TarsyTheme.statusRunning : TarsyTheme.statusError)
+                    .frame(width: 6, height: 6)
+                Text(machineService.selectedMachine?.name ?? "select mac")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textSecondary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8))
+                    .foregroundColor(TarsyTheme.textSecondary)
+            }
+        }
+    }
+
     private var workspaceList: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
-                ForEach(workspaceService.workspaces) { workspace in
+                ForEach(filteredWorkspaces) { workspace in
                     NavigationLink(destination: WorkspaceView(workspace: workspace)) {
                         WorkspaceCard(workspace: workspace)
                     }
@@ -275,6 +329,11 @@ struct DashboardView: View {
                 }
             }
             .padding(16)
+        }
+        .refreshable {
+            await machineService.fetchMachine()
+            await workspaceService.fetchWorkspaces()
+            await taskService.loadActiveTasks()
         }
     }
 }

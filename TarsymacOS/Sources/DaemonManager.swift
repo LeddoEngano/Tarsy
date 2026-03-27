@@ -375,6 +375,14 @@ class DaemonManager: ObservableObject {
             await handleSudoRequest(clientId: clientId, packet: packet)
         case .sudoResponse:
             SudoPasswordManager.shared.handlePasswordResponse(packet: packet)
+        // Repo Analysis
+        case .repoAnalyze:
+            await handleRepoAnalyze(clientId: clientId, packet: packet)
+        // AI Project Wizard
+        case .wizardStart:
+            await handleWizardStart(clientId: clientId, packet: packet)
+        case .wizardExecute:
+            await handleWizardExecute(clientId: clientId, packet: packet)
         // UltraContext
         case .ultracontextStatus:
             await sendToClientOrRelay(
@@ -1377,6 +1385,7 @@ class DaemonManager: ObservableObject {
         let stack = packet.payload?["stack"] ?? "web"
         let streamUrl = packet.payload?["streamUrl"]
         let quality = packet.payload?["quality"]
+        let isOpenClaw = packet.payload?["workspaceType"] == "openclaw"
 
         // Handle quality change for existing stream (H.264: force keyframe on quality change)
         if quality != nil, screenCapture.isCapturing {
@@ -1385,40 +1394,26 @@ class DaemonManager: ObservableObject {
             return
         }
 
-        log("streamStart: looking for window with stack=\(stack), streamUrl=\(streamUrl ?? "nil")")
+        log("streamStart: stack=\(stack), openClaw=\(isOpenClaw), streamUrl=\(streamUrl ?? "nil")")
 
-        // If a streamUrl is provided, open the browser to that URL first
-        if let urlString = streamUrl, !urlString.isEmpty {
-            await openBrowserToUrl(urlString)
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+        // H.264 hardware encoding for ALL connections (LAN + relay)
+        let ipPayload = packet.payload?["ip"] ?? ""
+        let isLocalConnection = !ipPayload.isEmpty && !ipPayload.hasPrefix("100.")
+        let isRelay = clientId == "relay"
+
+        let fps: Int
+        let scale: CGFloat
+        let bitrate: Int
+
+        if isLocalConnection && !isRelay {
+            fps = 30
+            scale = 1.0
+            bitrate = 6_000_000
+        } else {
+            fps = 20
+            scale = 0.75
+            bitrate = 2_000_000
         }
-
-        // Find the right window for this stack
-        var window = await screenCapture.findWindow(forStack: stack)
-
-        // If no window found, open the default app for this stack and retry
-        if window == nil {
-            log("streamStart: no window found, opening app for stack \(stack)")
-            if let urlString = streamUrl, !urlString.isEmpty {
-                await openBrowserToUrl(urlString)
-            } else {
-                await openAppForStack(stack)
-            }
-            // Wait for app to launch
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
-            window = await screenCapture.findWindow(forStack: stack)
-        }
-
-        guard let window else {
-            log("streamStart: still no window found after opening app")
-            await sendToClientOrRelay(
-                WSPacket(action: .error, payload: ["message": "No window found for stack: \(stack). Could not open app automatically."], id: packet.id),
-                to: clientId
-            )
-            return
-        }
-
-        log("streamStart: found window '\(window.title ?? "?")' from \(window.owningApplication?.applicationName ?? "?")")
 
         do {
             // Start MJPEG server if not running
@@ -1428,70 +1423,92 @@ class DaemonManager: ObservableObject {
                 log("streamStart: MJPEG server started on port 8643")
             }
 
-            // H.264 hardware encoding for ALL connections (LAN + relay)
-            let ipPayload = packet.payload?["ip"] ?? ""
-            let isLocalConnection = !ipPayload.isEmpty && !ipPayload.hasPrefix("100.")
-            let isRelay = clientId == "relay"
+            // OpenClaw: capture entire display
+            if isOpenClaw {
+                await screenCapture.requestPermission()
 
-            let fps: Int
-            let scale: CGFloat
-            let bitrate: Int
+                // Get display dimensions for encoder
+                let displayWidth = Int(CGFloat(NSScreen.main?.frame.width ?? 1920) * scale)
+                let displayHeight = Int(CGFloat(NSScreen.main?.frame.height ?? 1080) * scale)
 
-            if isLocalConnection && !isRelay {
-                // LAN — 30fps, full resolution, high bitrate
-                fps = 30
-                scale = 1.0
-                bitrate = 6_000_000 // 6 Mbps — smooth 30fps on LAN
-            } else {
-                // Relay / 4G — 20fps, reduced resolution, adaptive bitrate
-                fps = 20
-                scale = 0.75
-                bitrate = 2_000_000 // 2 Mbps baseline, adaptive adjusts
+                let encoder = H264Encoder()
+                encoder.configure(width: displayWidth, height: displayHeight, fps: fps, bitrate: bitrate)
+                self.h264Encoder = encoder
+
+                setupEncoderFrameRelay(encoder: encoder, isRelay: isRelay, clientId: clientId)
+
+                screenCapture.onFrame = nil
+                screenCapture.onPixelBuffer = { [weak encoder] pixelBuffer in
+                    encoder?.encode(pixelBuffer)
+                }
+
+                log("streamStart: OpenClaw full-display (\(fps)fps, \(displayWidth)x\(displayHeight), \(bitrate/1000)kbps)")
+
+                try await screenCapture.startDisplayCapture(fps: fps, scale: scale)
+
+                // For full-display, remote input targets the entire screen
+                let mainScreen = NSScreen.main
+                remoteInput.setTargetWindow(
+                    frame: mainScreen?.frame ?? CGRect(x: 0, y: 0, width: 1920, height: 1080),
+                    windowId: 0,
+                    pid: 0,
+                    isSimulator: false,
+                    appName: "Desktop"
+                )
+
+                await sendToClientOrRelay(
+                    WSPacket(action: .streamStart, payload: [
+                        "window": "Full Desktop",
+                        "width": "\(Int(mainScreen?.frame.width ?? 1920))",
+                        "height": "\(Int(mainScreen?.frame.height ?? 1080))",
+                        "codec": "h264",
+                        "fullscreen": "true"
+                    ], id: packet.id),
+                    to: clientId
+                )
+                log("streamStart: OpenClaw full-display capture started")
+                return
             }
 
-            // Setup H.264 encoder
+            // Standard workspace: window capture
+            // If a streamUrl is provided, open the browser to that URL first
+            if let urlString = streamUrl, !urlString.isEmpty {
+                await openBrowserToUrl(urlString)
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+
+            var window = await screenCapture.findWindow(forStack: stack)
+
+            if window == nil {
+                log("streamStart: no window found, opening app for stack \(stack)")
+                if let urlString = streamUrl, !urlString.isEmpty {
+                    await openBrowserToUrl(urlString)
+                } else {
+                    await openAppForStack(stack)
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                window = await screenCapture.findWindow(forStack: stack)
+            }
+
+            guard let window else {
+                log("streamStart: still no window found after opening app")
+                await sendToClientOrRelay(
+                    WSPacket(action: .error, payload: ["message": "No window found for stack: \(stack). Could not open app automatically."], id: packet.id),
+                    to: clientId
+                )
+                return
+            }
+
+            log("streamStart: found window '\(window.title ?? "?")' from \(window.owningApplication?.applicationName ?? "?")")
+
             let captureWidth = Int(window.frame.width * scale)
-            let captureHeight = Int((window.frame.height) * scale)
+            let captureHeight = Int(window.frame.height * scale)
             let encoder = H264Encoder()
             encoder.configure(width: captureWidth, height: captureHeight, fps: fps, bitrate: bitrate)
             self.h264Encoder = encoder
 
-            // Encoded frames → send to clients (LAN WebSocket + relay)
-            let relay = self.relayClient
-            let wsServer = self.wsServer
-            let sendInFlight = OSAllocatedUnfairLock(initialState: false)
-            encoder.onEncodedFrame = { [weak encoder] encodedData in
-                // Prefix with "H264" (kept for compatibility — iOS checks this prefix)
-                var prefixedData = Data("H264".utf8)
-                prefixedData.append(encodedData)
+            setupEncoderFrameRelay(encoder: encoder, isRelay: isRelay, clientId: clientId)
 
-                if isRelay {
-                    let alreadyInFlight = sendInFlight.withLock { val -> Bool in
-                        if val { return true }
-                        val = true
-                        return false
-                    }
-                    guard !alreadyInFlight else {
-                        encoder?.reportFrameDropped()
-                        return
-                    }
-                    Task { [weak encoder] in
-                        let enc = encoder
-                        await relay.sendBinary(prefixedData) {
-                            sendInFlight.withLock { $0 = false }
-                            enc?.reportFrameDelivered()
-                        }
-                    }
-                } else {
-                    // LAN — send via WebSocket server (no backpressure needed)
-                    encoder?.reportFrameDelivered()
-                    Task {
-                        await wsServer?.broadcastBinary(prefixedData)
-                    }
-                }
-            }
-
-            // Feed pixel buffers directly to encoder (no CGImage conversion needed)
             screenCapture.onFrame = nil
             screenCapture.onPixelBuffer = { [weak encoder] pixelBuffer in
                 encoder?.encode(pixelBuffer)
@@ -1530,6 +1547,41 @@ class DaemonManager: ObservableObject {
                 WSPacket(action: .error, payload: ["message": "Stream failed: \(error.localizedDescription)"], id: packet.id),
                 to: clientId
             )
+        }
+    }
+
+    /// Shared helper to wire H.264 encoder frame delivery to relay/LAN
+    private func setupEncoderFrameRelay(encoder: H264Encoder, isRelay: Bool, clientId: String) {
+        let relay = self.relayClient
+        let wsServer = self.wsServer
+        let sendInFlight = OSAllocatedUnfairLock(initialState: false)
+        encoder.onEncodedFrame = { [weak encoder] encodedData in
+            var prefixedData = Data("H264".utf8)
+            prefixedData.append(encodedData)
+
+            if isRelay {
+                let alreadyInFlight = sendInFlight.withLock { val -> Bool in
+                    if val { return true }
+                    val = true
+                    return false
+                }
+                guard !alreadyInFlight else {
+                    encoder?.reportFrameDropped()
+                    return
+                }
+                Task { [weak encoder] in
+                    let enc = encoder
+                    await relay.sendBinary(prefixedData) {
+                        sendInFlight.withLock { $0 = false }
+                        enc?.reportFrameDelivered()
+                    }
+                }
+            } else {
+                encoder?.reportFrameDelivered()
+                Task {
+                    await wsServer?.broadcastBinary(prefixedData)
+                }
+            }
         }
     }
 
@@ -1604,8 +1656,9 @@ class DaemonManager: ObservableObject {
     private func registerMachine() async {
         let hostname = Host.current().localizedName ?? ProcessInfo.processInfo.hostName
         let localIp = getLocalIP()
+        let hwUuid = getHardwareUUID()
 
-        log("registerMachine: tailscaleIP=\(tailscaleIP ?? "nil"), localIP=\(localIp ?? "nil")")
+        log("registerMachine: tailscaleIP=\(tailscaleIP ?? "nil"), localIP=\(localIp ?? "nil"), hwUuid=\(hwUuid ?? "nil")")
 
         guard tailscaleIP != nil || localIp != nil else {
             log("registerMachine: skipped — no IPs available")
@@ -1617,6 +1670,7 @@ class DaemonManager: ObservableObject {
             let session = try await supabase.auth.session
             log("registerMachine: got session for user \(session.user.id)")
 
+            // Fetch all machines for this user
             let existing: [Machine] = try await supabase
                 .from("machines")
                 .select()
@@ -1633,8 +1687,13 @@ class DaemonManager: ObservableObject {
             ]
             if let ip = tailscaleIP { updateData["tailscale_ip"] = ip }
             if let lip = localIp { updateData["local_ip"] = lip }
+            if let hw = hwUuid { updateData["hardware_uuid"] = hw }
 
-            if let machine = existing.first {
+            // Match by hardware_uuid first (unique per Mac), then fall back to first machine
+            let matched = existing.first(where: { $0.hardwareUuid == hwUuid && hwUuid != nil })
+                ?? (existing.count == 1 ? existing.first : nil)
+
+            if let machine = matched {
                 machineId = machine.id
                 try await supabase
                     .from("machines")
@@ -1660,6 +1719,16 @@ class DaemonManager: ObservableObject {
             log("registerMachine: FAILED — \(error)")
             lastError = "Register failed: \(error.localizedDescription)"
         }
+    }
+
+    /// Returns the Mac's unique hardware UUID from IOKit
+    private func getHardwareUUID() -> String? {
+        let platformExpert = IOServiceGetMatchingService(kIOMasterPortDefault, IOServiceMatching("IOPlatformExpertDevice"))
+        guard platformExpert != 0 else { return nil }
+        defer { IOObjectRelease(platformExpert) }
+
+        let uuidCF = IORegistryEntryCreateCFProperty(platformExpert, kIOPlatformUUIDKey as CFString, kCFAllocatorDefault, 0)
+        return uuidCF?.takeRetainedValue() as? String
     }
 
     private func updateMachineStatus(_ status: String) async {
@@ -1900,6 +1969,356 @@ class DaemonManager: ObservableObject {
             WSPacket(action: .engineClose, payload: ["sessionId": sessionId], id: packet.id),
             to: clientId
         )
+    }
+
+    // MARK: - Repo Analysis
+
+    private func handleRepoAnalyze(clientId: String, packet: WSPacket) async {
+        guard let path = packet.payload?["path"] else {
+            log("repoAnalyze: missing path")
+            return
+        }
+
+        let analyzer = RepoAnalyzer()
+        let analysis = analyzer.analyze(at: path)
+
+        if let json = try? analysis.encode() {
+            await sendToClientOrRelay(
+                WSPacket(action: .repoAnalysis, payload: ["analysis": json], id: packet.id),
+                to: clientId
+            )
+        }
+        log("repoAnalyze: \(path) → lang=\(analysis.language ?? "?"), fw=\(analysis.framework ?? "?"), cmd=\(analysis.suggestedCommand ?? "?")")
+    }
+
+    // MARK: - AI Project Wizard
+
+    private func handleWizardStart(clientId: String, packet: WSPacket) async {
+        guard let idea = packet.payload?["idea"],
+              let systemPrompt = packet.payload?["systemPrompt"],
+              let engineTypeRaw = packet.payload?["engineType"],
+              let engineType = AIEngineType(rawValue: engineTypeRaw) else {
+            log("wizardStart: missing required fields")
+            return
+        }
+
+        log("wizardStart: engine=\(engineType.displayName), idea=\(idea.prefix(80))")
+
+        // Detect gh CLI availability and notify iOS
+        let ghAvailable = detectGhCLI()
+        await sendToClientOrRelay(
+            WSPacket(action: .wizardGhDetected, payload: ["available": ghAvailable ? "true" : "false"]),
+            to: clientId
+        )
+
+        // Create a temporary session to get AI analysis
+        let sid = "wizard-\(UUID().uuidString.prefix(8))"
+        var fullResponse = ""
+
+        let permissionMode: AgentPermissionConfig.PermissionMode = {
+            if let profile = profileService.profile {
+                return profile.permissionMode(for: engineType)
+            }
+            return .dangerous
+        }()
+
+        if engineType == .claude {
+            do {
+                let _ = try await terminalManager.createClaudeSession(
+                    id: sid,
+                    workspacePath: NSHomeDirectory(),
+                    aiContext: systemPrompt,
+                    permissionMode: permissionMode,
+                    onOutput: { output in
+                        fullResponse += output
+                    },
+                    onComplete: { [weak self] _ in
+                        Task {
+                            await self?.sendToClientOrRelay(
+                                WSPacket(action: .wizardResponse, payload: ["response": fullResponse], id: packet.id),
+                                to: clientId
+                            )
+                            await self?.terminalManager.closeClaudeSession(sid)
+                        }
+                    },
+                    onAskUser: { [weak self] _, _ in
+                        // If agent asks a question during wizard, just send what we have
+                        Task {
+                            await self?.sendToClientOrRelay(
+                                WSPacket(action: .wizardResponse, payload: ["response": fullResponse], id: packet.id),
+                                to: clientId
+                            )
+                            await self?.terminalManager.closeClaudeSession(sid)
+                        }
+                    }
+                )
+
+                await terminalManager.sendClaudeMessage(idea, images: nil, to: sid)
+            } catch {
+                log("wizardStart error: \(error)")
+                await sendToClientOrRelay(
+                    WSPacket(action: .wizardResponse, payload: ["response": "", "error": error.localizedDescription], id: packet.id),
+                    to: clientId
+                )
+            }
+        } else {
+            // Generic engine
+            do {
+                let _ = try await terminalManager.createEngineSession(
+                    id: sid,
+                    engineType: engineType,
+                    workspacePath: NSHomeDirectory(),
+                    permissionMode: permissionMode,
+                    onOutput: { output in
+                        fullResponse += output
+                    },
+                    onComplete: { [weak self] _ in
+                        Task {
+                            await self?.sendToClientOrRelay(
+                                WSPacket(action: .wizardResponse, payload: ["response": fullResponse], id: packet.id),
+                                to: clientId
+                            )
+                            await self?.terminalManager.closeEngineSession(sid)
+                        }
+                    }
+                )
+
+                await terminalManager.sendEngineMessage(idea, to: sid)
+            } catch {
+                log("wizardStart error: \(error)")
+                await sendToClientOrRelay(
+                    WSPacket(action: .wizardResponse, payload: ["response": "", "error": error.localizedDescription], id: packet.id),
+                    to: clientId
+                )
+            }
+        }
+    }
+
+    private func handleWizardExecute(clientId: String, packet: WSPacket) async {
+        guard let configJson = packet.payload?["config"],
+              let engineTypeRaw = packet.payload?["engineType"],
+              let machineIdStr = packet.payload?["machineId"] else {
+            log("wizardExecute: missing required fields")
+            await sendToClientOrRelay(
+                WSPacket(action: .wizardResult, payload: ["success": "false", "error": "missing required fields"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        let createGitHub = packet.payload?["createGitHub"] == "true"
+        let idea = packet.payload?["idea"] ?? ""
+
+        do {
+            let config = try ProjectWizardConfig.decode(from: configJson)
+            let expandedPath = (config.suggestedPath as NSString).expandingTildeInPath
+
+            log("wizardExecute: creating project '\(config.projectName)' at \(expandedPath)")
+
+            // 1. Create directory
+            try FileManager.default.createDirectory(atPath: expandedPath, withIntermediateDirectories: true)
+
+            // 2. git init
+            let gitInit = await runShellCommand("git init", at: expandedPath)
+            log("wizardExecute: git init: \(gitInit.success ? "ok" : gitInit.output)")
+
+            // 3. GitHub repo (optional)
+            if createGitHub && detectGhCLI() {
+                let ghCreate = await runShellCommand("gh repo create \(config.projectName) --private --source=. --remote=origin", at: expandedPath)
+                log("wizardExecute: gh repo create: \(ghCreate.success ? "ok" : ghCreate.output)")
+            }
+
+            // 4. Create workspace in Supabase
+            guard let session = try? await supabase.auth.session else {
+                throw NSError(domain: "Tarsy", code: 1, userInfo: [NSLocalizedDescriptionKey: "No auth session"])
+            }
+
+            let workspace: Workspace = try await supabase
+                .from("workspaces")
+                .insert([
+                    "user_id": session.user.id.uuidString,
+                    "machine_id": machineIdStr,
+                    "name": config.projectName,
+                    "local_path": config.suggestedPath,
+                    "stack": config.stack,
+                    "ai_context": config.initialPrompt.isEmpty ? nil : config.initialPrompt
+                ] as [String: String?])
+                .select()
+                .single()
+                .execute()
+                .value
+
+            log("wizardExecute: workspace created: \(workspace.id)")
+
+            // 5. Dispatch agent with initial prompt
+            let scaffoldPrompt = config.initialPrompt.isEmpty
+                ? "Create a \(config.framework) project with \(config.language). Project: \(config.projectDescription). Dependencies: \(config.dependencies.joined(separator: ", ")). Set up the project structure, install dependencies, and create initial files."
+                : config.initialPrompt
+
+            let engineType = AIEngineType(rawValue: engineTypeRaw) ?? .claude
+            let sid = UUID().uuidString
+            let workspaceName = config.projectName
+
+            let permissionMode: AgentPermissionConfig.PermissionMode = {
+                if let profile = profileService.profile {
+                    return profile.permissionMode(for: engineType)
+                }
+                return .dangerous
+            }()
+
+            if engineType == .claude {
+                let _ = try await terminalManager.createClaudeSession(
+                    id: sid,
+                    workspacePath: expandedPath,
+                    aiContext: config.initialPrompt.isEmpty ? nil : config.initialPrompt,
+                    permissionMode: permissionMode,
+                    onOutput: { [weak self] output in
+                        Task {
+                            await self?.sendToClientOrRelay(
+                                WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": "claude"]),
+                                to: clientId
+                            )
+                        }
+                    },
+                    onComplete: { [weak self] message in
+                        Task {
+                            await self?.sendToClientOrRelay(
+                                WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": "claude"]),
+                                to: clientId
+                            )
+                            PushNotificationService.shared.notifyTaskComplete(
+                                workspace: workspaceName,
+                                summary: String(message.prefix(200)),
+                                workspaceId: workspace.id.uuidString
+                            )
+                            if let taskId = await self?.sessionTaskMap[sid] {
+                                await self?.agentTaskService.updateStatus(taskId, status: .completed)
+                            }
+                        }
+                    },
+                    onAskUser: { [weak self] questionsJson, _ in
+                        Task {
+                            await self?.sendToClientOrRelay(
+                                WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": "claude"]),
+                                to: clientId
+                            )
+                            PushNotificationService.shared.notifyAgentQuestion(
+                                workspace: workspaceName,
+                                question: questionsJson,
+                                workspaceId: workspace.id.uuidString
+                            )
+                            if let taskId = await self?.sessionTaskMap[sid] {
+                                await self?.agentTaskService.updateStatus(taskId, status: .waiting)
+                            }
+                        }
+                    }
+                )
+
+                await terminalManager.setClaudeStatusHandler(sessionId: sid) { [weak self] model, inputTokens, outputTokens in
+                    Task {
+                        await self?.sendToClientOrRelay(
+                            WSPacket(action: .engineStatus, payload: [
+                                "sessionId": sid, "model": model,
+                                "inputTokens": "\(inputTokens)", "outputTokens": "\(outputTokens)"
+                            ]),
+                            to: clientId
+                        )
+                    }
+                }
+
+                // Send the scaffold prompt
+                await terminalManager.sendClaudeMessage(scaffoldPrompt, images: nil, to: sid)
+
+                // Create persistent task
+                if let task = await agentTaskService.createTask(
+                    workspaceId: workspace.id, tabId: "wizard-\(sid.prefix(8))",
+                    description: String(scaffoldPrompt.prefix(200)), sessionId: sid, engineType: "claude"
+                ) {
+                    sessionTaskMap[sid] = task.id
+                }
+            } else {
+                let _ = try await terminalManager.createEngineSession(
+                    id: sid,
+                    engineType: engineType,
+                    workspacePath: expandedPath,
+                    permissionMode: permissionMode,
+                    onOutput: { [weak self] output in
+                        Task {
+                            await self?.sendToClientOrRelay(
+                                WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": engineTypeRaw]),
+                                to: clientId
+                            )
+                        }
+                    },
+                    onComplete: { [weak self] message in
+                        Task {
+                            await self?.sendToClientOrRelay(
+                                WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": engineTypeRaw]),
+                                to: clientId
+                            )
+                        }
+                    }
+                )
+
+                await terminalManager.sendEngineMessage(scaffoldPrompt, to: sid)
+
+                if let task = await agentTaskService.createTask(
+                    workspaceId: workspace.id, tabId: "wizard-\(sid.prefix(8))",
+                    description: String(scaffoldPrompt.prefix(200)), sessionId: sid, engineType: engineTypeRaw
+                ) {
+                    sessionTaskMap[sid] = task.id
+                }
+            }
+
+            // Send the engine session info so iOS can track it
+            await sendToClientOrRelay(
+                WSPacket(action: .engineCreate, payload: [
+                    "sessionId": sid,
+                    "engineType": engineTypeRaw,
+                    "workspaceId": workspace.id.uuidString
+                ]),
+                to: clientId
+            )
+
+            // Notify iOS of success
+            await sendToClientOrRelay(
+                WSPacket(action: .wizardResult, payload: ["success": "true", "workspaceId": workspace.id.uuidString], id: packet.id),
+                to: clientId
+            )
+
+        } catch {
+            log("wizardExecute error: \(error)")
+            await sendToClientOrRelay(
+                WSPacket(action: .wizardResult, payload: ["success": "false", "error": error.localizedDescription], id: packet.id),
+                to: clientId
+            )
+        }
+    }
+
+    private func detectGhCLI() -> Bool {
+        let paths = ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "\(NSHomeDirectory())/.local/bin/gh"]
+        return paths.contains { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private func runShellCommand(_ command: String, at directory: String) async -> (success: Bool, output: String) {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-c", command]
+        process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        process.standardOutput = pipe
+        process.standardError = pipe
+        process.environment = ProcessInfo.processInfo.environment
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            return (process.terminationStatus == 0, output)
+        } catch {
+            return (false, error.localizedDescription)
+        }
     }
 
     // MARK: - Git Safety Net

@@ -14,6 +14,19 @@ private extension View {
                 .cornerRadius(20)
         }
     }
+
+    func cornerRadius(_ radius: CGFloat, corners: UIRectCorner) -> some View {
+        clipShape(RoundedCornerShape(radius: radius, corners: corners))
+    }
+}
+
+private struct RoundedCornerShape: Shape {
+    var radius: CGFloat
+    var corners: UIRectCorner
+
+    func path(in rect: CGRect) -> Path {
+        Path(UIBezierPath(roundedRect: rect, byRoundingCorners: corners, cornerRadii: CGSize(width: radius, height: radius)).cgPath)
+    }
 }
 
 struct WorkspaceView: View {
@@ -106,82 +119,13 @@ struct WorkspaceView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Stream area — collapses when keyboard is up
-                if keyboardHeight == 0 {
-                    if workspace.stack == .web || workspace.stack == .fullstack {
-                        if viewMode == .browser {
-                            WebBrowserView(
-                                workspace: workspace,
-                                onScreenshot: { image in
-                                    let data = image.jpegData(compressionQuality: 0.8)
-                                    attachments.append(Attachment(
-                                        name: "screenshot",
-                                        type: .image,
-                                        thumbnail: image,
-                                        data: data
-                                    ))
-                                },
-                                activeSessionId: activeSessionIdBinding,
-                                activeEngineType: currentTab.engineType ?? .claude,
-                                onSessionCreated: handleSessionCreated,
-                                todoManager: todoManager,
-                                interactiveQuestions: $interactiveQuestions,
-                                interactiveOptions: $interactiveOptions,
-                                onInteractiveChoice: { sendInteractiveChoice($0) },
-                                onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) },
-                                onVoiceMessage: { persistVoiceMessage($0) },
-                                isActive: $isStreamActive
-                            )
-                                .frame(maxWidth: .infinity)
-                                .frame(height: UIScreen.main.bounds.height * 0.35)
-                                .clipped()
-                        } else {
-                            streamPlayerContent
-                        }
-                    } else {
-                        streamPlayerContent
-                    }
-
-                    // Tabs bar
-                    tabBar
-
-                    Divider().background(TarsyTheme.backgroundTertiary)
+                if workspace.isFullScreen {
+                    // OpenClaw: stream-first layout
+                    openClawLayout
+                } else {
+                    // Standard workspace layout
+                    standardLayout
                 }
-
-                // Chat area + floating question card
-                ZStack(alignment: .bottom) {
-                    chatArea
-
-                    if let questions = interactiveQuestions {
-                        PaginatedQuestionCard(
-                            questions: questions,
-                            onSubmitAll: { answers in
-                                submitMultiQuestionAnswers(answers)
-                            },
-                            onDismiss: {
-                                withAnimation {
-                                    interactiveQuestions = nil
-                                }
-                            }
-                        )
-                        .padding(.horizontal, 12)
-                        .padding(.bottom, 8)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
-                        .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
-                    }
-                }
-
-                // View mode switch (web/fullstack only) — fade out when input is focused
-                if workspace.stack == .web || workspace.stack == .fullstack {
-                    viewModeSwitch
-                        .opacity(isInputFocused ? 0 : 1)
-                        .animation(isInputFocused ? .easeOut(duration: 0.12) : .easeIn(duration: 0.4), value: isInputFocused)
-                        .allowsHitTesting(!isInputFocused)
-                }
-
-                // Input bar
-                inputBar
-                    .padding(.bottom, isInputFocused ? max(keyboardHeight - 34, 0) : 0)
             }
             .ignoresSafeArea(.keyboard)
             .onTapGesture { isInputFocused = false }
@@ -357,30 +301,49 @@ struct WorkspaceView: View {
                     )
                 }
 
-                Menu {
+                if detectedAgents.count <= 1 {
                     Menu {
-                        ForEach(detectedAgents, id: \.self) { engine in
-                            Button(action: { addEngineTab(engine) }) {
-                                Label(engine.displayName, systemImage: engine.iconName)
-                            }
+                        Button(action: { addEngineTab(detectedAgents.first ?? .claude) }) {
+                            Label("New chat", systemImage: "plus.bubble")
+                        }
+
+                        Button(action: { showSessionPicker = true }) {
+                            Label("Continue session", systemImage: "clock.arrow.circlepath")
                         }
                     } label: {
-                        Label("New chat", systemImage: "plus.bubble")
+                        Image(systemName: "plus")
+                            .font(.caption)
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
                     }
+                } else {
+                    Menu {
+                        Menu {
+                            ForEach(detectedAgents, id: \.self) { engine in
+                                Button(action: { addEngineTab(engine) }) {
+                                    Label(engine.displayName, systemImage: engine.iconName)
+                                }
+                            }
+                        } label: {
+                            Label("New chat", systemImage: "plus.bubble")
+                        }
 
-                    Button(action: { showSessionPicker = true }) {
-                        Label("Continue session", systemImage: "clock.arrow.circlepath")
+                        Button(action: { showSessionPicker = true }) {
+                            Label("Continue session", systemImage: "clock.arrow.circlepath")
+                        }
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.caption)
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
                     }
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.caption)
-                        .foregroundColor(TarsyTheme.textSecondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
                 }
             }
             .padding(.horizontal, 8)
         }
+        .fixedSize(horizontal: false, vertical: true)
         .background(TarsyTheme.backgroundSecondary)
     }
 
@@ -568,6 +531,199 @@ struct WorkspaceView: View {
         enum AttachmentType {
             case image
             case file
+        }
+    }
+
+    // MARK: - OpenClaw Layout (stream-first, chat as overlay)
+
+    @State private var showOpenClawChat = false
+
+    private var openClawLayout: some View {
+        ZStack(alignment: .bottom) {
+            // Full-screen stream
+            StreamPlayerView(
+                viewModel: streamViewModel,
+                workspace: workspace,
+                isActive: $isStreamActive,
+                onScreenshot: { image in
+                    let data = image.jpegData(compressionQuality: 0.8)
+                    attachments.append(Attachment(name: "screenshot", type: .image, thumbnail: image, data: data))
+                },
+                activeSessionId: activeSessionIdBinding,
+                activeEngineType: currentTab.engineType ?? .claude,
+                onSessionCreated: handleSessionCreated,
+                todoManager: todoManager,
+                interactiveQuestions: $interactiveQuestions,
+                interactiveOptions: $interactiveOptions,
+                onInteractiveChoice: { sendInteractiveChoice($0) },
+                onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) },
+                onVoiceMessage: { persistVoiceMessage($0) }
+            )
+            .ignoresSafeArea()
+
+            // Floating chat toggle button
+            if !showOpenClawChat {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button {
+                            withAnimation(.spring(response: 0.3)) { showOpenClawChat = true }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "bubble.left.fill")
+                                    .font(.system(size: 14))
+                                if isAgentThinking {
+                                    ProgressView()
+                                        .controlSize(.mini)
+                                        .tint(TarsyTheme.backgroundPrimary)
+                                }
+                            }
+                            .foregroundColor(TarsyTheme.backgroundPrimary)
+                            .padding(14)
+                            .background(TarsyTheme.accentAmber)
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.4), radius: 8, y: 4)
+                        }
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 16)
+                    }
+                }
+            }
+
+            // Collapsible chat sheet
+            if showOpenClawChat {
+                VStack(spacing: 0) {
+                    // Handle bar + close
+                    HStack {
+                        Capsule()
+                            .fill(TarsyTheme.textSecondary.opacity(0.3))
+                            .frame(width: 36, height: 4)
+
+                        Spacer()
+
+                        Button {
+                            withAnimation(.spring(response: 0.3)) { showOpenClawChat = false }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(TarsyTheme.textSecondary)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 10)
+                    .padding(.bottom, 4)
+
+                    tabBar
+
+                    Divider().background(TarsyTheme.backgroundTertiary)
+
+                    chatArea
+
+                    inputBar
+                }
+                .frame(height: UIScreen.main.bounds.height * 0.55)
+                .background(TarsyTheme.backgroundPrimary.opacity(0.95))
+                .cornerRadius(20, corners: [.topLeft, .topRight])
+                .shadow(color: .black.opacity(0.4), radius: 16, y: -4)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
+            // Floating question card (above chat)
+            if let questions = interactiveQuestions, !showOpenClawChat {
+                PaginatedQuestionCard(
+                    questions: questions,
+                    onSubmitAll: { answers in submitMultiQuestionAnswers(answers) },
+                    onDismiss: { withAnimation { interactiveQuestions = nil } }
+                )
+                .padding(.horizontal, 12)
+                .padding(.bottom, 80)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
+            }
+        }
+    }
+
+    // MARK: - Standard Layout
+
+    private var standardLayout: some View {
+        VStack(spacing: 0) {
+            // Stream area — collapses when keyboard is up
+            if keyboardHeight == 0 {
+                if workspace.stack == .web || workspace.stack == .fullstack {
+                    if viewMode == .browser {
+                        WebBrowserView(
+                            workspace: workspace,
+                            onScreenshot: { image in
+                                let data = image.jpegData(compressionQuality: 0.8)
+                                attachments.append(Attachment(
+                                    name: "screenshot",
+                                    type: .image,
+                                    thumbnail: image,
+                                    data: data
+                                ))
+                            },
+                            activeSessionId: activeSessionIdBinding,
+                            activeEngineType: currentTab.engineType ?? .claude,
+                            onSessionCreated: handleSessionCreated,
+                            todoManager: todoManager,
+                            interactiveQuestions: $interactiveQuestions,
+                            interactiveOptions: $interactiveOptions,
+                            onInteractiveChoice: { sendInteractiveChoice($0) },
+                            onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) },
+                            onVoiceMessage: { persistVoiceMessage($0) },
+                            isActive: $isStreamActive
+                        )
+                            .frame(maxWidth: .infinity)
+                            .frame(height: UIScreen.main.bounds.height * 0.35)
+                            .clipped()
+                    } else {
+                        streamPlayerContent
+                    }
+                } else {
+                    streamPlayerContent
+                }
+
+                // Tabs bar
+                tabBar
+
+                Divider().background(TarsyTheme.backgroundTertiary)
+            }
+
+            // Chat area + floating question card
+            ZStack(alignment: .bottom) {
+                chatArea
+
+                if let questions = interactiveQuestions {
+                    PaginatedQuestionCard(
+                        questions: questions,
+                        onSubmitAll: { answers in
+                            submitMultiQuestionAnswers(answers)
+                        },
+                        onDismiss: {
+                            withAnimation {
+                                interactiveQuestions = nil
+                            }
+                        }
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
+                }
+            }
+
+            // View mode switch (web/fullstack only) — fade out when input is focused
+            if workspace.stack == .web || workspace.stack == .fullstack {
+                viewModeSwitch
+                    .opacity(isInputFocused ? 0 : 1)
+                    .animation(isInputFocused ? .easeOut(duration: 0.12) : .easeIn(duration: 0.4), value: isInputFocused)
+                    .allowsHitTesting(!isInputFocused)
+            }
+
+            // Input bar
+            inputBar
+                .padding(.bottom, isInputFocused ? max(keyboardHeight - 34, 0) : 0)
         }
     }
 
@@ -1130,6 +1286,8 @@ struct WorkspaceView: View {
                     } else {
                         updateBackgroundTabState(sessionId: eSid) { $0.isThinking = false; $0.activity = nil }
                     }
+                    // End Live Activity
+                    LiveActivityManager.shared.endActivity(workspaceId: workspace.id.uuidString)
                 case .engineCreate:
                     if let sessionId = packet.payload?["sessionId"] {
                         tabs[selectedTabIndex].sessionId = sessionId
@@ -1137,6 +1295,13 @@ struct WorkspaceView: View {
                         for i in todoManager.items.indices where todoManager.items[i].sessionId == "pending" {
                             todoManager.items[i].sessionId = sessionId
                         }
+                        // Start Live Activity
+                        let engine = currentTab.engineType ?? .claude
+                        LiveActivityManager.shared.startActivity(
+                            workspaceId: workspace.id.uuidString,
+                            workspaceName: workspace.name,
+                            engineType: engine
+                        )
                     }
                 case .engineAskUser:
                     handleEngineAskUser(packet)
@@ -1214,9 +1379,17 @@ struct WorkspaceView: View {
                 if !toolName.isEmpty {
                     todoManager.updateTool(sessionId: sessionId, tool: toolName)
                 }
+                // Update Live Activity with current tool
+                if let tool = AgentToolType.parse(from: clean) {
+                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool)
+                }
             } else {
                 agentActivity = nil
                 chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
+                // Parse tool from raw output too
+                if let tool = AgentToolType.parse(from: output) {
+                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool)
+                }
             }
         }
     }
@@ -1225,6 +1398,8 @@ struct WorkspaceView: View {
         isAgentThinking = false
         let sessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
         todoManager.markQuestion(sessionId: sessionId)
+        // Update Live Activity to waiting
+        LiveActivityManager.shared.updateStatus(workspaceId: workspace.id.uuidString, status: "waiting")
         if let questionsJson = packet.payload?["questions"],
            let questionsData = questionsJson.data(using: .utf8),
            let questions = try? JSONDecoder().decode([InteractiveQuestion].self, from: questionsData) {

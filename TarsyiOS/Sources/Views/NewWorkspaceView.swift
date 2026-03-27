@@ -19,6 +19,7 @@ struct NewWorkspaceView: View {
     @State private var repoUrl = ""
     @State private var localPath = ""
     @State private var stack: Workspace.WorkspaceStack = .web
+    @State private var workspaceType: Workspace.WorkspaceType = .standard
     @State private var devServerCommand = ""
     @State private var isCreating = false
     @State private var error: String?
@@ -28,6 +29,9 @@ struct NewWorkspaceView: View {
     @State private var isScanning = false
     @State private var showRepoList = true
     @State private var searchText = ""
+    @State private var isAnalyzing = false
+    @State private var detectedLanguage: String?
+    @State private var detectedFramework: String?
 
     private var filteredRepos: [ScannedRepo] {
         if searchText.isEmpty { return scannedRepos }
@@ -237,8 +241,82 @@ struct NewWorkspaceView: View {
                 }
             }
 
+            fieldSection("workspace type") {
+                HStack(spacing: 8) {
+                    Button(action: { workspaceType = .standard }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "macwindow")
+                                .font(.system(size: 10))
+                            Text("standard")
+                                .font(TarsyTheme.monoFontSmall)
+                        }
+                        .foregroundColor(workspaceType == .standard ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(workspaceType == .standard ? TarsyTheme.accentAmber : TarsyTheme.backgroundSecondary)
+                        .cornerRadius(8)
+                    }
+                    Button(action: { workspaceType = .openClaw }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "display")
+                                .font(.system(size: 10))
+                            Text("openclaw")
+                                .font(TarsyTheme.monoFontSmall)
+                        }
+                        .foregroundColor(workspaceType == .openClaw ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(workspaceType == .openClaw ? TarsyTheme.accentAmber : TarsyTheme.backgroundSecondary)
+                        .cornerRadius(8)
+                    }
+                }
+
+                if workspaceType == .openClaw {
+                    Text("streams the full desktop instead of a single window. designed for watching OpenClaw work.")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                }
+            }
+
             fieldSection("dev server command (optional)") {
-                tarsyTextField("npm run dev", text: $devServerCommand)
+                VStack(alignment: .leading, spacing: 4) {
+                    tarsyTextField("npm run dev", text: $devServerCommand)
+                    if isAnalyzing {
+                        HStack(spacing: 4) {
+                            ProgressView().controlSize(.mini).tint(TarsyTheme.accentAmber)
+                            Text("analyzing repo...")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(TarsyTheme.textSecondary)
+                        }
+                    } else if !devServerCommand.isEmpty && (detectedLanguage != nil || detectedFramework != nil) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 9))
+                                .foregroundColor(TarsyTheme.accentMoss)
+                            Text("auto-detected")
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(TarsyTheme.accentMoss)
+                            if let lang = detectedLanguage {
+                                Text(lang)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(TarsyTheme.accentAmber)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(TarsyTheme.accentAmber.opacity(0.15))
+                                    .cornerRadius(3)
+                            }
+                            if let fw = detectedFramework {
+                                Text(fw)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(TarsyTheme.accentAmber)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(TarsyTheme.accentAmber.opacity(0.15))
+                                    .cornerRadius(3)
+                            }
+                        }
+                    }
+                }
             }
 
             if let error {
@@ -311,6 +389,56 @@ struct NewWorkspaceView: View {
             stack = ws
         }
         withAnimation { showRepoList = false }
+        analyzeRepo(path: repo.path)
+    }
+
+    private func analyzeRepo(path: String) {
+        isAnalyzing = true
+        connectionManager.send(WSPacket(action: .repoAnalyze, payload: ["path": path]))
+
+        connectionManager.addListener("repo_analysis") { packet in
+            guard packet.action == .repoAnalysis,
+                  let json = packet.payload?["analysis"],
+                  let data = json.data(using: .utf8) else { return }
+
+            Task { @MainActor in
+                self.connectionManager.removeListener("repo_analysis")
+                self.isAnalyzing = false
+
+                struct Analysis: Codable {
+                    let language: String?
+                    let framework: String?
+                    let stack: String?
+                    let suggestedCommand: String?
+                }
+
+                guard let analysis = try? JSONDecoder().decode(Analysis.self, from: data) else { return }
+
+                // Auto-fill dev server command if empty
+                if self.devServerCommand.isEmpty, let cmd = analysis.suggestedCommand {
+                    self.devServerCommand = cmd
+                }
+
+                // Update stack if detected
+                if let s = analysis.stack, let ws = Workspace.WorkspaceStack(rawValue: s) {
+                    self.stack = ws
+                }
+
+                self.detectedLanguage = analysis.language
+                self.detectedFramework = analysis.framework
+            }
+        }
+
+        // Timeout
+        Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            await MainActor.run {
+                if isAnalyzing {
+                    isAnalyzing = false
+                    connectionManager.removeListener("repo_analysis")
+                }
+            }
+        }
     }
 
     private func createWorkspace() async {
@@ -331,6 +459,7 @@ struct NewWorkspaceView: View {
                 repoUrl: repoUrl.isEmpty ? nil : repoUrl,
                 localPath: localPath.isEmpty ? "~/Projects/\(name.lowercased())" : localPath,
                 stack: stack.rawValue,
+                workspaceType: workspaceType.rawValue,
                 devServerCommand: devServerCommand.isEmpty ? nil : devServerCommand,
                 streamUrl: nil,
                 aiContext: nil
