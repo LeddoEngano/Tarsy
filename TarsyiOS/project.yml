@@ -48,6 +48,7 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLSchemes:
               - com.tarsy.ios
+        NSSupportsLiveActivities: true
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     entitlements:

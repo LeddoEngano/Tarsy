@@ -52,6 +52,8 @@
 	<string>Tarsy needs access to your photos to send images to the AI agent.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Tarsy uses speech recognition to convert your voice into text commands.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
