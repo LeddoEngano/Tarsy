@@ -62,22 +62,30 @@ actor UltraContextSync {
 
     // MARK: - Engine lifecycle
 
+    /// Stores engine info for lazy context creation (only on first real message)
+    private var pendingEngines: [String: (engineType: String, workspacePath: String)] = [:]
+
     func engineStarted(sessionId: String, engineType: String, workspacePath: String) async {
+        // Don't create context yet — wait for the first real message
+        pendingEngines[sessionId] = (engineType, workspacePath)
+    }
+
+    /// Ensures a context exists for this session, creating lazily if needed
+    private func ensureContext(sessionId: String) async -> String? {
+        if let ctxId = contextMap[sessionId] { return ctxId }
+        guard let info = pendingEngines.removeValue(forKey: sessionId) else { return nil }
         do {
-            let ctxId = try await createContext(projectPath: workspacePath, engineType: engineType)
+            let ctxId = try await createContext(projectPath: info.workspacePath, engineType: info.engineType)
             contextMap[sessionId] = ctxId
-            try await appendMessage(
-                contextId: ctxId,
-                role: "user",
-                content: "[engine:\(engineType)] Started in \(workspacePath)"
-            )
+            return ctxId
         } catch {
             print("[UltraContext] Create context error: \(error)")
+            return nil
         }
     }
 
     func userMessage(sessionId: String, content: String) async {
-        guard let ctxId = contextMap[sessionId] else { return }
+        guard let ctxId = await ensureContext(sessionId: sessionId) else { return }
         do {
             try await appendMessage(contextId: ctxId, role: "user", content: String(content.prefix(8000)))
         } catch {
@@ -86,7 +94,8 @@ actor UltraContextSync {
     }
 
     func agentOutput(sessionId: String, content: String) async {
-        guard let ctxId = contextMap[sessionId], !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard let ctxId = await ensureContext(sessionId: sessionId) else { return }
         do {
             try await appendMessage(contextId: ctxId, role: "assistant", content: String(content.prefix(8000)))
         } catch {
@@ -106,5 +115,6 @@ actor UltraContextSync {
 
     func engineClosed(sessionId: String) {
         contextMap.removeValue(forKey: sessionId)
+        pendingEngines.removeValue(forKey: sessionId)
     }
 }
