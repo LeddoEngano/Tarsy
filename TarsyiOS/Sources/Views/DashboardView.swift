@@ -127,6 +127,11 @@ struct DashboardView: View {
                 }
             }
             .navigationBarHidden(true)
+            .navigationDestination(isPresented: $isDeepLinkActive) {
+                if let ws = deepLinkWorkspace {
+                    WorkspaceView(workspace: ws)
+                }
+            }
         }
         .sheet(isPresented: $showNewWorkspace) {
             NewWorkspaceView()
@@ -153,11 +158,6 @@ struct DashboardView: View {
             await machineService.fetchMachine()
             await workspaceService.fetchWorkspaces()
             await taskService.loadActiveTasks()
-        }
-        .navigationDestination(isPresented: $isDeepLinkActive) {
-            if let ws = deepLinkWorkspace {
-                WorkspaceView(workspace: ws)
-            }
         }
         .onChange(of: deepLinkRouter.pendingWorkspaceId) { _, wsId in
             guard let wsId else { return }
