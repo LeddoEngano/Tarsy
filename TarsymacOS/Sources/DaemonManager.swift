@@ -72,8 +72,9 @@ class DaemonManager: ObservableObject {
         detectedAgents = AgentDetector.detectInstalledAgents()
         log("Detected agents: \(detectedAgents.map(\.rawValue))")
 
-        // 8. UltraContext — syncs engine sessions via Supabase proxy
-        log("UltraContext sync ready")
+        // 8. UltraContext — watch Claude Code session files + sync via proxy
+        Task { await SessionFileWatcher.shared.start() }
+        log("UltraContext session watcher started")
 
         isRunning = true
     }

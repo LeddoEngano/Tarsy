@@ -7,8 +7,10 @@ struct ActiveSessionsView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
     @EnvironmentObject var workspaceService: WorkspaceService
     @State private var selectedSession: UltraContextSession?
+    @State private var loadedSession: UltraContextSession?
     @State private var showContinueConfirm = false
     @State private var sessionToContinue: UltraContextSession?
+    @State private var isLoadingDetail = false
 
     var body: some View {
         NavigationStack {
@@ -44,7 +46,7 @@ struct ActiveSessionsView: View {
         .task {
             await client.loadSessions()
         }
-        .sheet(item: $selectedSession) { session in
+        .sheet(item: $loadedSession) { session in
             SessionDetailView(session: session) { sessionToContinue in
                 self.sessionToContinue = sessionToContinue
                 showContinueConfirm = true
@@ -86,9 +88,9 @@ struct ActiveSessionsView: View {
             LazyVStack(spacing: 10) {
                 ForEach(client.sessions) { session in
                     Button {
-                        selectedSession = session
+                        Task { await loadDetail(session) }
                     } label: {
-                        SessionCard(session: session)
+                        SessionCard(session: session, isLoading: isLoadingDetail && selectedSession?.id == session.id)
                     }
                 }
             }
@@ -97,6 +99,20 @@ struct ActiveSessionsView: View {
         .refreshable {
             await client.loadSessions()
         }
+    }
+
+    private func loadDetail(_ session: UltraContextSession) async {
+        selectedSession = session
+        isLoadingDetail = true
+        do {
+            let full = try await client.getContext(id: session.id)
+            loadedSession = full
+        } catch {
+            // Fallback to session without messages
+            loadedSession = session
+            print("[ActiveSessions] Load detail error: \(error)")
+        }
+        isLoadingDetail = false
     }
 
     private func continueSession(_ session: UltraContextSession, in workspace: Workspace) {
@@ -110,7 +126,7 @@ struct ActiveSessionsView: View {
         connectionManager.send(WSPacket(
             action: .engineCreate,
             payload: [
-                "workspacePath": workspace.localPath,
+                "workspacePath": workspace.localPath ?? "",
                 "workspaceId": workspace.id.uuidString,
                 "engineType": "claude",
                 "message": String(message.prefix(4000))
@@ -125,6 +141,7 @@ struct ActiveSessionsView: View {
 
 private struct SessionCard: View {
     let session: UltraContextSession
+    var isLoading: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -141,22 +158,19 @@ private struct SessionCard: View {
                     .foregroundColor(TarsyTheme.textPrimary)
 
                 HStack(spacing: 8) {
-                    Text("\(session.messages.count) messages")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textSecondary)
+                    if let created = session.createdAt {
+                        Text(formatDate(created))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                    }
 
-                    if let version = session.version {
-                        Text("v\(version)")
-                            .font(.system(size: 9, design: .monospaced))
+                    if session.messages.count > 0 {
+                        Text("\(session.messages.count) messages")
+                            .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(TarsyTheme.accentMoss)
-                            .padding(.horizontal, 4)
-                            .padding(.vertical, 1)
-                            .background(TarsyTheme.accentMoss.opacity(0.15))
-                            .cornerRadius(3)
                     }
                 }
 
-                // Preview of last message
                 if let last = session.messages.last {
                     Text(last.content.prefix(80).description + (last.content.count > 80 ? "..." : ""))
                         .font(.system(size: 10, design: .monospaced))
@@ -167,9 +181,15 @@ private struct SessionCard: View {
 
             Spacer()
 
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12))
-                .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
+            if isLoading {
+                ProgressView()
+                    .scaleEffect(0.7)
+                    .tint(TarsyTheme.accentAmber)
+            } else {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12))
+                    .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
+            }
         }
         .padding(12)
         .background(TarsyTheme.backgroundSecondary)
@@ -178,6 +198,18 @@ private struct SessionCard: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(TarsyTheme.backgroundTertiary, lineWidth: 1)
         )
+    }
+
+    private func formatDate(_ dateStr: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = formatter.date(from: dateStr) else {
+            // Try without fractional seconds
+            formatter.formatOptions = [.withInternetDateTime]
+            guard let date = formatter.date(from: dateStr) else { return dateStr.prefix(10).description }
+            return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
+        }
+        return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
     }
 }
 
@@ -194,30 +226,42 @@ private struct SessionDetailView: View {
                 TarsyTheme.backgroundPrimary.ignoresSafeArea()
 
                 VStack(spacing: 0) {
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 8) {
-                            ForEach(Array(session.messages.enumerated()), id: \.offset) { _, message in
-                                HStack(alignment: .top, spacing: 8) {
-                                    Image(systemName: message.role == "user" ? "person.fill" : "brain")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(message.role == "user" ? TarsyTheme.accentAmber : TarsyTheme.accentMoss)
-                                        .frame(width: 20)
-                                        .padding(.top, 2)
-
-                                    Text(message.content)
-                                        .font(.system(size: 12, design: .monospaced))
-                                        .foregroundColor(TarsyTheme.textPrimary)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .padding(10)
-                                .background(message.role == "user" ? TarsyTheme.backgroundSecondary : TarsyTheme.backgroundTertiary.opacity(0.5))
-                                .cornerRadius(8)
-                            }
+                    if session.messages.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "doc.text")
+                                .font(.system(size: 36))
+                                .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
+                            Text("no messages yet")
+                                .font(TarsyTheme.monoFontSmall)
+                                .foregroundColor(TarsyTheme.textSecondary)
                         }
-                        .padding(12)
+                        .frame(maxHeight: .infinity)
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 8) {
+                                ForEach(Array(session.messages.enumerated()), id: \.offset) { _, message in
+                                    HStack(alignment: .top, spacing: 8) {
+                                        Image(systemName: message.role == "user" ? "person.fill" : "brain")
+                                            .font(.system(size: 10))
+                                            .foregroundColor(message.role == "user" ? TarsyTheme.accentAmber : TarsyTheme.accentMoss)
+                                            .frame(width: 20)
+                                            .padding(.top, 2)
+
+                                        Text(message.content)
+                                            .font(.system(size: 12, design: .monospaced))
+                                            .foregroundColor(TarsyTheme.textPrimary)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .padding(10)
+                                    .background(message.role == "user" ? TarsyTheme.backgroundSecondary : TarsyTheme.backgroundTertiary.opacity(0.5))
+                                    .cornerRadius(8)
+                                }
+                            }
+                            .padding(12)
+                        }
                     }
 
-                    if let onContinue {
+                    if let onContinue, !session.messages.isEmpty {
                         Button {
                             onContinue(session)
                             dismiss()

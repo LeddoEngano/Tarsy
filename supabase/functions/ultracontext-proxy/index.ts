@@ -110,8 +110,19 @@ serve(async (req) => {
       const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/${payload.id}`, {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
       });
-      const data = await res.text();
-      return new Response(data, { status: res.status, headers: { "Content-Type": "application/json" } });
+      const raw = await res.json();
+      // Transform: API returns {"data":[messages],"version":0}
+      // Client expects {"id":"...","messages":[...],"version":0}
+      const messages = (raw?.data ?? []).map((msg: any) => ({
+        role: msg.role,
+        content: msg.content,
+        index: msg.index,
+      }));
+      return new Response(JSON.stringify({
+        id: payload.id,
+        messages,
+        version: raw?.version ?? 0,
+      }), { status: res.status, headers: { "Content-Type": "application/json" } });
     }
 
     // MESSAGE
