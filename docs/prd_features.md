@@ -16,12 +16,12 @@ O Tarsy hoje opera no modo "conductor" — o user acompanha 1 agent em real-time
 - **Worktrees:** NÃO agora (merge no iPhone é UX ruim, complexidade alta para mobile)
 - **Task decomposition automática:** FUTURO (user define o que cada agent faz por enquanto)
 - **Review de resultado:** via chat (sem diff viewer mobile dedicado)
-- **Continuar sessão Mac→iPhone:** via UltraContext open-source
-- **UltraContext:** usar o código open-source, não o serviço hosted
+- **Continuar sessão Mac→iPhone:** via UltraContext (hosted free tier, futuro substituir por solução própria)
+- **UltraContext:** usando hosted free tier (500 MB, unlimited calls) — self-host não vale a pena agora (sem docs para backend)
 
 ---
 
-## Camada 1: Push Notifications ✅ IMPLEMENTADO
+## Camada 1: Push Notifications ✅ COMPLETO
 
 **Prioridade:** Máxima — habilita o modo orchestrator
 
@@ -34,18 +34,17 @@ O Tarsy hoje opera no modo "conductor" — o user acompanha 1 agent em real-time
 - iOS: `AppDelegate` com `didRegisterForRemoteNotificationsWithDeviceToken`, upsert token no Supabase
 - iOS: entitlements com `aps-environment`, Push Notifications capability no `project.yml`
 - iOS: `UNUserNotificationCenterDelegate` para mostrar banners em foreground
-- macOS: `notifyAgentQuestion()` adicionado ao `PushNotificationService`
-- macOS: `DaemonManager` chama push nos 3 eventos (question, complete, error) para ambos handlers (legacy claude + engine)
-- Supabase: Edge Function `send-push` deployada (gera JWT APNs, envia HTTP/2)
+- iOS: `didReceive response:` handler para deep link — extrai `workspace_id` do payload e navega via `DeepLinkRouter`
+- macOS: `PushNotificationService` aceita `workspaceId` em todos os métodos e passa no payload
+- macOS: `DaemonManager` chama push nos 3 eventos (question, complete, error) com `workspaceId`
+- Supabase: Edge Function `send-push` inclui `workspace_id` no payload APNs
+- Supabase: migration `008_push_notifications_workspace_id` adiciona coluna `workspace_id`
 - Supabase: tabela `push_tokens` já existia na migration 001
 - APNs Key (p8) criada, secrets configurados, Database Webhook ativo
 
-### Pendente
-- [ ] **Deep link:** tap na notificação abre workspace/tab correto — falta `didReceive response:` no AppDelegate, metadata no payload da notificação, e routing na navigation
-
 ---
 
-## Camada 2: Tasks Persistentes ✅ IMPLEMENTADO
+## Camada 2: Tasks Persistentes ✅ COMPLETO
 
 **Prioridade:** Alta — dá visibilidade ao user do que está rodando
 
@@ -54,13 +53,10 @@ O Tarsy hoje opera no modo "conductor" — o user acompanha 1 agent em real-time
 ### O que foi implementado
 - Supabase: migration `005_agent_tasks` com tabela, RLS, indexes, trigger updated_at
 - TarsyShared: `AgentTask` model + `AgentTaskService` (CRUD, cleanup)
-- macOS: `DaemonManager` cria tasks no `engineCreate` e atualiza status em `onComplete`/`onAskUser`
+- macOS: `DaemonManager` cria tasks no `engineCreate` para Claude E engines genéricos (Gemini, Codex, Aider)
+- macOS: `DaemonManager` atualiza status em `onComplete`/`onAskUser` e volta para `running` quando user responde
 - iOS: `DashboardView` mostra seção "active tasks" com status visual (running/waiting/completed/error)
-
-### Pendente
-- [ ] Tap na task → navegar para o chat/workspace correspondente
-- [ ] Atualizar task status para `running` quando user responde pergunta
-- [ ] Criar task também para engines genéricos (Gemini, Codex, Aider), não só Claude
+- iOS: tap na task navega para o workspace correspondente via `NavigationLink`
 
 ---
 
@@ -77,13 +73,14 @@ O Tarsy hoje opera no modo "conductor" — o user acompanha 1 agent em real-time
 
 ---
 
-## Camada 4: Continuar sessão Mac → iPhone (UltraContext) ✅ IMPLEMENTADO
+## Camada 4: Continuar sessão Mac → iPhone (UltraContext) ✅ COMPLETO
 
 **Prioridade:** Média-alta — feature diferenciadora
 
-### UltraContext — open-source
+### UltraContext — hosted (free tier)
 - **Repo:** [github.com/ultracontext/ultracontext](https://github.com/ultracontext/ultracontext) (Apache 2.0)
 - **Stack:** JS/TS + Python SDKs, daemon Node.js ≥ 22
+- **Plano:** Free tier (500 MB, unlimited calls). Futuro: substituir por solução própria.
 
 ### O que foi implementado
 - TarsyShared: `UltraContextClient` — REST client com models (`UltraContextSession`, `UltraContextMessage`), CRUD operations, configurable base URL + API key
@@ -92,11 +89,8 @@ O Tarsy hoje opera no modo "conductor" — o user acompanha 1 agent em real-time
 - macOS: WSAction `ultracontext:status` para iOS consultar status do daemon
 - iOS: `ActiveSessionsView` — lista sessões capturadas, card com preview, detail view com mensagens
 - iOS: Botão "sessions" no header do Dashboard
-
-### Pendente
-- [ ] **Configuração de API key do UltraContext** — adicionar campo nas settings (AppSettingsView)
-- [ ] **Continuar sessão** — botão "continue" no detail view que cria tab e conecta ao agent no Mac
-- [ ] **User precisa instalar UltraContext** — `npm install -g ultracontext` no Mac (step manual)
+- iOS: `AppSettingsView` — campo de API key do UltraContext (SecureField, salva em UserDefaults)
+- iOS: `SessionDetailView` — botão "continue session" que cria tab Claude com contexto da sessão
 
 ---
 
@@ -111,7 +105,7 @@ O Tarsy hoje opera no modo "conductor" — o user acompanha 1 agent em real-time
 - iOS: `WorkspaceView` recebe packet `agents:detected`, parseia lista e armazena em `detectedAgents`
 - iOS: seletor de nova tab (menu "+") filtra `ForEach(detectedAgents)` — mostra apenas engines instaladas no Mac
 
-### Não implementado (nice-to-have)
+### Nice-to-have (futuro)
 - Sugerir instalação para engines não detectadas (mostrar link/instrução)
 
 ---
@@ -125,7 +119,7 @@ O Tarsy hoje opera no modo "conductor" — o user acompanha 1 agent em real-time
 - macOS: `ClaudeCodeSession` usa `permissionMode` — `--dangerously-skip-permissions` só quando `.dangerous`
 - macOS: `GenericCLIEngine` usa `permissionMode` — Codex `full-auto`/`suggest`, Aider auto/safe
 - macOS: `TerminalSessionManager` passa `permissionMode` nos creates
-- macOS: `DaemonManager` lê `permissionMode` do payload do packet
+- macOS: `DaemonManager` lê `permissionMode` do payload, com fallback para profile do Supabase
 - iOS: `PermissionOnboardingView` — tela de first-time setup (auto vs safe)
 - iOS: `AppSettingsView` — toggle de permissão por agent
 - iOS: `ContentView` — mostra onboarding na primeira vez via `fullScreenCover`
@@ -133,7 +127,7 @@ O Tarsy hoje opera no modo "conductor" — o user acompanha 1 agent em real-time
 
 ---
 
-## Camada 7: Profiles ✅ IMPLEMENTADO
+## Camada 7: Profiles ✅ COMPLETO
 
 **Prioridade:** Alta — infraestrutura essencial
 
@@ -148,6 +142,10 @@ O Tarsy hoje opera no modo "conductor" — o user acompanha 1 agent em real-time
 - iOS: profile carregado automaticamente após autenticação
 - iOS: `AgentPermissionConfig` sincroniza com `profiles.agent_permissions` via ProfileService
 - iOS: `voice_language` sincroniza com profiles via `profileService.updateVoiceLanguage()` no AppSettingsView
+- iOS: `SubscriptionManager` sincroniza com profiles via `syncWithProfile()` (chamado após `refreshStatus` e `handle(transactionResult:)`)
+- iOS: `DashboardView` mostra avatar + nome/email do user abaixo do header
+- iOS: `AppSettingsView` — seção "Profile" com avatar, nome editável, e email
+- macOS: `DaemonManager` carrega profile no boot via `ProfileService`, usa como fallback para permissões
 
 ### Schema
 ```sql
@@ -165,11 +163,6 @@ profiles (
   created_at, updated_at
 )
 ```
-
-### Pendente
-- [ ] **Sincronizar `SubscriptionManager` com profiles** — método `updateSubscription()` existe no ProfileService mas nunca é chamado pelo SubscriptionManager quando StoreKit confirma Pro
-- [ ] **Usar `displayName`/`avatarUrl` na UI** — helpers existem no model (`nameOrEmail`) mas não são usados na dashboard header nem settings
-- [ ] **macOS: carregar profile** — para puxar preferências do user (permissions, etc)
 
 ---
 
@@ -228,51 +221,43 @@ profiles (
 
 ---
 
-## Ordem de implementação (atualizada)
+## Ordem de implementação (final)
 
-| # | Feature | Status | Próximo passo |
-|---|---|---|---|
-| 1 | Push Notifications | ✅ Operacional | Deep link (tap → workspace) |
-| 2 | Auto-detectar agents | ✅ Completo | — |
-| 3 | Permission mode per agent | ✅ Completo | — |
-| 4 | Tasks persistentes | ✅ Implementado | Navegação tap→workspace, engines genéricos |
-| 5 | Profiles | ✅ Implementado | Sync subscription, displayName na UI, macOS profile |
-| 6 | Chat pagination | ✅ Completo | — |
-| 7 | Estado por tab | ✅ Completo | — |
-| 8 | Todo premature completion | ✅ Completo | — |
-| 9 | Quick dispatch | ✅ Completo | — |
-| 10 | UltraContext | ✅ Implementado | Config API key, botão "continue session" |
+| # | Feature | Status |
+|---|---|---|
+| 1 | Push Notifications | ✅ Completo |
+| 2 | Auto-detectar agents | ✅ Completo |
+| 3 | Permission mode per agent | ✅ Completo |
+| 4 | Tasks persistentes | ✅ Completo |
+| 5 | Profiles | ✅ Completo |
+| 6 | Chat pagination | ✅ Completo |
+| 7 | Estado por tab | ✅ Completo |
+| 8 | Todo premature completion | ✅ Completo |
+| 9 | Quick dispatch | ✅ Completo |
+| 10 | UltraContext | ✅ Completo |
 
 ---
 
-## Steps manuais pendentes
+## Steps manuais — todos concluídos ✅
 
-### Infraestrutura
-- [ ] Instalar UltraContext no Mac: `npm install -g ultracontext`
-
-### Já concluídos ✅
 - [x] Apple Developer Portal: APNs Key (p8), Key ID + Team ID
 - [x] Supabase secrets: APNS_KEY_ID, APNS_TEAM_ID, APNS_PRIVATE_KEY, APNS_BUNDLE_ID
 - [x] Supabase Database Webhook: insert em `push_notifications` → Edge Function `send-push`
 - [x] Sign In with Apple: capability habilitada, Service ID, return URLs no Supabase
 - [x] Sign In with GitHub (OAuth): GitHub OAuth App criado, Client ID + Secret no Supabase Auth
 - [x] Supabase Auth Providers: Apple e GitHub OAuth configurados no Dashboard
+- [x] Instalar UltraContext no Mac: `npm install -g ultracontext`
+- [x] Deploy migration 008 (workspace_id em push_notifications)
+- [x] Deploy Edge Function `send-push` atualizada
 
 ---
 
-## Resumo de pendências de código
+## Nice-to-have (futuro)
 
-| Pendência | Camada | Esforço |
-|-----------|--------|---------|
-| Deep link: tap notificação → workspace | Push (1) | Médio |
-| Tap task → navegar para workspace | Tasks (2) | Baixo |
-| Task status → running ao responder | Tasks (2) | Baixo |
-| Tasks para engines genéricos | Tasks (2) | Baixo |
-| SubscriptionManager → profiles sync | Profiles (7) | Baixo |
-| displayName/avatarUrl na UI | Profiles (7) | Baixo |
-| macOS carregar profile | Profiles (7) | Médio |
-| UltraContext API key nas settings | UltraContext (4) | Baixo |
-| UltraContext "continue session" | UltraContext (4) | Médio |
+- Sugerir instalação para engines não detectadas (link/instrução no seletor)
+- Substituir UltraContext hosted por solução própria de continuidade de sessão
+- Worktrees isoladas para agents (merge no iPhone, code review mobile)
+- Task decomposition automática (user não precisa definir o que cada agent faz)
 
 ---
 
