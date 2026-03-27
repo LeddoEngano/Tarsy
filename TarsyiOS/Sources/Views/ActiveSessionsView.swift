@@ -141,7 +141,7 @@ struct ActiveSessionsView: View {
     private func matchWorkspace(for session: UltraContextSession?) -> Workspace? {
         guard let path = session?.projectPath else { return nil }
         return workspaceService.workspaces.first { ws in
-            guard let wsPath = ws.localPath else { return false }
+            let wsPath = ws.localPath
             return wsPath == path || path.hasPrefix(wsPath) || wsPath.hasPrefix(path)
         }
     }
@@ -160,7 +160,7 @@ struct ActiveSessionsView: View {
         connectionManager.send(WSPacket(
             action: .engineCreate,
             payload: [
-                "workspacePath": workspace.localPath ?? "",
+                "workspacePath": workspace.localPath,
                 "workspaceId": workspace.id.uuidString,
                 "engineType": session.engineType ?? "claude",
                 "message": String(message.prefix(4000))
