@@ -37,5 +37,7 @@
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
 	<string>Tarsy needs to control your browser to manage tabs and navigate pages.</string>
+	<key>UltraContextAPIKey</key>
+	<string>$(ULTRACONTEXT_API_KEY)</string>
 </dict>
 </plist>

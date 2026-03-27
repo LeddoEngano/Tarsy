@@ -29,7 +29,7 @@ actor WorkspaceOrchestrator {
         if let url = repoUrl, !url.isEmpty {
             let contents = (try? fm.contentsOfDirectory(atPath: expandedPath)) ?? []
             if contents.isEmpty || contents == [".DS_Store"] {
-                try await runShell("git clone \(url) \(expandedPath)")
+                try await runProcess("/usr/bin/git", arguments: ["clone", url, expandedPath])
             }
         }
 
@@ -38,7 +38,11 @@ actor WorkspaceOrchestrator {
         let devCommand = detectDevCommand(at: expandedPath, stack: stack)
 
         if let installCmd = detectInstallCommand(at: expandedPath, stack: stack) {
-            try await runShell("cd \(expandedPath) && \(installCmd)")
+            let parts = installCmd.components(separatedBy: " ").filter { !$0.isEmpty }
+            guard let executable = parts.first else { return SetupResult(sessionId: "", detectedStack: stack, detectedDevCommand: devCommand) }
+            let execPath = resolveExecutable(executable)
+            let args = Array(parts.dropFirst())
+            try await runProcess(execPath, arguments: args, workingDirectory: expandedPath)
         }
 
         // Create terminal session
@@ -144,13 +148,17 @@ actor WorkspaceOrchestrator {
         return "npm"
     }
 
-    // MARK: - Shell
+    // MARK: - Process Execution (safe — no shell interpolation)
 
-    private func runShell(_ command: String) async throws {
+    private func runProcess(_ executablePath: String, arguments: [String], workingDirectory: String? = nil) async throws {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-c", command]
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
         process.environment = ProcessInfo.processInfo.environment
+
+        if let dir = workingDirectory {
+            process.currentDirectoryURL = URL(fileURLWithPath: dir)
+        }
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -162,8 +170,22 @@ actor WorkspaceOrchestrator {
         if process.terminationStatus != 0 {
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw WorkspaceError.commandFailed(command, output)
+            let description = ([executablePath] + arguments).joined(separator: " ")
+            throw WorkspaceError.commandFailed(description, output)
         }
+    }
+
+    private func resolveExecutable(_ name: String) -> String {
+        let searchPaths = [
+            "/opt/homebrew/bin/\(name)",
+            "/usr/local/bin/\(name)",
+            "\(NSHomeDirectory())/.local/bin/\(name)",
+            "/usr/bin/\(name)"
+        ]
+        for path in searchPaths {
+            if FileManager.default.fileExists(atPath: path) { return path }
+        }
+        return "/opt/homebrew/bin/\(name)"
     }
 
     enum WorkspaceError: LocalizedError {

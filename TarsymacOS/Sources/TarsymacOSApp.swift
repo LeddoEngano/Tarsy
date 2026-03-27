@@ -5,6 +5,12 @@ import TarsyShared
 struct TarsymacOSApp: App {
     @StateObject private var authManager = AuthManager()
     @StateObject private var daemonManager = DaemonManager()
+
+    init() {
+        // Ignore SIGPIPE globally so writing to a closed pipe (e.g., terminated
+        // AI engine process) doesn't crash the entire app.
+        signal(SIGPIPE, SIG_IGN)
+    }
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     var body: some Scene {

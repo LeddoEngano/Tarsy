@@ -92,8 +92,8 @@ actor GenericCLIEngine: AIEngine {
     }
 
     func sendMessage(_ message: String) {
-        guard let pipe = stdinPipe else {
-            print("[GenericCLI] Cannot send — no stdin pipe")
+        guard isRunning, let pipe = stdinPipe else {
+            print("[GenericCLI] Cannot send — process not running")
             return
         }
 
@@ -110,10 +110,11 @@ actor GenericCLIEngine: AIEngine {
     }
 
     func terminate() {
+        isRunning = false
+        stdinPipe?.fileHandleForWriting.closeFile()
         process?.terminate()
         process = nil
         stdinPipe = nil
-        isRunning = false
     }
 
     // MARK: - Private

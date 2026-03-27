@@ -36,7 +36,7 @@ actor RelayClient {
     private func performConnect(token: String) {
         let baseURL = TarsyConfig.relayURL
 
-        guard let url = URL(string: "\(baseURL)?token=\(token)&role=machine") else {
+        guard let url = URL(string: baseURL) else {
             print("[Relay] Invalid URL")
             return
         }
@@ -46,11 +46,21 @@ actor RelayClient {
         // Cancel any existing connection
         webSocket?.cancel(with: .goingAway, reason: nil)
 
-        session = URLSession(configuration: .default)
-        let ws = session!.webSocketTask(with: url)
+        let newSession = URLSession(configuration: .default)
+        session = newSession
+        let ws = newSession.webSocketTask(with: url)
         ws.maximumMessageSize = 4 * 1024 * 1024 // 4MB
         self.webSocket = ws
         ws.resume()
+
+        // Send auth as first message (token not in URL)
+        let auth: [String: String] = ["action": "auth", "token": token, "role": "machine"]
+        if let data = try? JSONSerialization.data(withJSONObject: auth),
+           let str = String(data: data, encoding: .utf8) {
+            ws.send(.string(str)) { error in
+                if let error { print("[Relay] Auth send error: \(error)") }
+            }
+        }
 
         print("[Relay] Connecting as machine...")
 
@@ -70,7 +80,8 @@ actor RelayClient {
         guard let ws = webSocket else { return }
         do {
             let data = try packet.encode()
-            let message = URLSessionWebSocketTask.Message.string(String(data: data, encoding: .utf8)!)
+            guard let str = String(data: data, encoding: .utf8) else { return }
+            let message = URLSessionWebSocketTask.Message.string(str)
             ws.send(message) { error in
                 if let error {
                     print("[Relay] Send error: \(error)")

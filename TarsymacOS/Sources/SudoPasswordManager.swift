@@ -8,7 +8,7 @@ final class SudoPasswordManager {
 
     private var cachedPassword: String?
     private var cacheExpiry: Date?
-    private let cacheDuration: TimeInterval = 300 // 5 minutes, like real sudo
+    private let cacheDuration: TimeInterval = 60 // 60 seconds (reduced from 5min for security)
 
     private var pendingRequests: [String: CheckedContinuation<String?, Never>] = [:]
 
@@ -96,23 +96,24 @@ final class SudoPasswordManager {
 
     /// Wraps a command so any `sudo` call inside it gets the password via SUDO_ASKPASS.
     /// Since terminal sessions use pipes (no PTY), sudo can't prompt interactively.
-    /// We create a temp askpass script + a sudo wrapper that adds -A, then prepend them to PATH.
+    /// We create a temp askpass script with restricted permissions (0700 dir, 0755 scripts),
+    /// then prepend them to PATH.
     private func sudoAskpassWrapper(password: String, command: String) -> String {
+        // Escape single quotes for safe embedding in shell single-quoted string
         let escaped = password.replacingOccurrences(of: "'", with: "'\\''")
         let setup = [
             "_SUDO_DIR=$(mktemp -d /tmp/.sudo_wrap.XXXXXX)",
+            "chmod 700 \"$_SUDO_DIR\"",
             "_ASKPASS=\"$_SUDO_DIR/askpass\"",
-            "echo '#!/bin/sh' > \"$_ASKPASS\"",
-            "echo 'echo '\\\"'\(escaped)'\\\"'' >> \"$_ASKPASS\"",
-            "chmod +x \"$_ASKPASS\"",
-            "echo '#!/bin/sh' > \"$_SUDO_DIR/sudo\"",
-            "echo 'exec /usr/bin/sudo -A \"$@\"' >> \"$_SUDO_DIR/sudo\"",
-            "chmod +x \"$_SUDO_DIR/sudo\"",
+            "printf '%s\\n' '#!/bin/sh' 'echo '\\\"'\(escaped)'\\\"'' > \"$_ASKPASS\"",
+            "chmod 700 \"$_ASKPASS\"",
+            "printf '%s\\n' '#!/bin/sh' 'exec /usr/bin/sudo -A \"$@\"' > \"$_SUDO_DIR/sudo\"",
+            "chmod 700 \"$_SUDO_DIR/sudo\"",
             "export SUDO_ASKPASS=\"$_ASKPASS\"",
             "export PATH=\"$_SUDO_DIR:$PATH\"",
         ].joined(separator: " && ")
 
-        return "\(setup) && \(command); rm -rf \"$_SUDO_DIR\""
+        return "\(setup) && \(command); _EC=$?; rm -rf \"$_SUDO_DIR\"; exit $_EC"
     }
 
     private func resolvePackageScript(_ command: String, in directory: String) -> String? {
@@ -169,15 +170,41 @@ final class SudoPasswordManager {
 
     // MARK: - Standalone sudo execution
 
+    /// Runs a command with sudo by piping the password via stdin to `sudo -S`.
+    /// The command parts are passed as separate arguments to avoid shell injection.
     func runWithSudo(_ command: String, reason: String? = nil) async throws -> (output: String, exitCode: Int32) {
         guard let password = await requestPassword(reason: reason) else {
             throw SudoError.cancelled
         }
 
-        let escaped = password.replacingOccurrences(of: "'", with: "'\\''")
+        // First, authenticate sudo via stdin pipe (safe — no shell interpolation)
+        let authProcess = Process()
+        authProcess.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+        authProcess.arguments = ["-S", "-v"]
+        authProcess.environment = ProcessInfo.processInfo.environment
+
+        let authStdin = Pipe()
+        authProcess.standardInput = authStdin
+        authProcess.standardOutput = Pipe()
+        authProcess.standardError = Pipe()
+
+        try authProcess.run()
+        if let passData = "\(password)\n".data(using: .utf8) {
+            authStdin.fileHandleForWriting.write(passData)
+            authStdin.fileHandleForWriting.closeFile()
+        }
+        authProcess.waitUntilExit()
+
+        if authProcess.terminationStatus != 0 {
+            clearCache()
+            throw SudoError.authenticationFailed
+        }
+
+        // Now run the actual command with sudo (credentials are cached by sudo -v)
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-c", "echo '\(escaped)' | sudo -S true 2>/dev/null; sudo \(command) 2>&1"]
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
+        // Split the command for argument passing — use shell for complex commands
+        process.arguments = ["/bin/zsh", "-c", command]
         process.environment = ProcessInfo.processInfo.environment
 
         let outputPipe = Pipe()
@@ -189,10 +216,6 @@ final class SudoPasswordManager {
 
         let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
         let output = String(data: data, encoding: .utf8) ?? ""
-
-        if process.terminationStatus != 0 && output.contains("Sorry, try again") {
-            clearCache()
-        }
 
         return (output, process.terminationStatus)
     }

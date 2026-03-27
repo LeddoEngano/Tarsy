@@ -1,4 +1,5 @@
 import Foundation
+import TarsyShared
 
 class UltraContextDaemon {
     static let shared = UltraContextDaemon()
@@ -41,6 +42,10 @@ class UltraContextDaemon {
 
         var env = ProcessInfo.processInfo.environment
         env["HOME"] = realHome()
+        let apiKey = TarsyConfig.ultraContextAPIKey
+        if !apiKey.isEmpty {
+            env["ULTRACONTEXT_API_KEY"] = apiKey
+        }
         proc.environment = env
 
         proc.terminationHandler = { [weak self] _ in

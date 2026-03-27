@@ -19,6 +19,7 @@ actor ClaudeCodeSession: AIEngine {
     private var pendingAskUser = false // Track if last turn ended with AskUserQuestion
     private var cumulativeInputTokens: Int = 0
     private var cumulativeOutputTokens: Int = 0
+    private var lineBuffer: String = "" // Accumulates partial JSON lines between reads
 
     init(id: String, workspacePath: String, aiContext: String? = nil, permissionMode: AgentPermissionConfig.PermissionMode = .dangerous) {
         self.id = id
@@ -88,21 +89,19 @@ actor ClaudeCodeSession: AIEngine {
         proc.standardOutput = stdout
         proc.standardError = stderr
 
-        // Process stream-json output line by line
+        // Process stream-json output line by line with buffering.
+        // Pipe reads can split a JSON line across multiple calls, so we
+        // accumulate partial data and only process complete lines (\n-terminated).
         stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            for line in text.components(separatedBy: "\n") {
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { continue }
-                Task { await self?.handleStreamEvent(trimmed) }
-            }
+            Task { await self?.appendAndProcessLines(text) }
         }
 
         stderr.fileHandleForReading.readabilityHandler = { _ in }
 
         proc.terminationHandler = { [weak self] _ in
-            Task { await self?.handleExit() }
+            Task { await self?.flushLineBuffer(); await self?.handleExit() }
         }
 
         try proc.run()
@@ -120,8 +119,8 @@ actor ClaudeCodeSession: AIEngine {
     }
 
     func sendMessage(_ message: String, imagesJson: String?) {
-        guard let pipe = stdinPipe else {
-            print("[ClaudeCode] Cannot send — no stdin pipe")
+        guard isRunning, let pipe = stdinPipe else {
+            print("[ClaudeCode] Cannot send — process not running")
             return
         }
 
@@ -189,10 +188,34 @@ actor ClaudeCodeSession: AIEngine {
     }
 
     func terminate() {
+        isRunning = false
+        lineBuffer = ""
+        stdinPipe?.fileHandleForWriting.closeFile()
         process?.terminate()
         process = nil
         stdinPipe = nil
-        isRunning = false
+    }
+
+    // MARK: - Line Buffering
+
+    /// Appends raw text to the line buffer and processes any complete lines.
+    private func appendAndProcessLines(_ text: String) {
+        lineBuffer += text
+        while let newlineIndex = lineBuffer.firstIndex(of: "\n") {
+            let line = String(lineBuffer[lineBuffer.startIndex..<newlineIndex])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            lineBuffer = String(lineBuffer[lineBuffer.index(after: newlineIndex)...])
+            guard !line.isEmpty else { continue }
+            handleStreamEvent(line)
+        }
+    }
+
+    /// Flush any remaining partial line in the buffer (called on process exit).
+    private func flushLineBuffer() {
+        let remaining = lineBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        lineBuffer = ""
+        guard !remaining.isEmpty else { return }
+        handleStreamEvent(remaining)
     }
 
     // MARK: - Stream Event Handling
