@@ -5,11 +5,13 @@ struct ContentView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var connectionManager: ConnectionManager
     @EnvironmentObject var machineService: MachineService
+    @EnvironmentObject var profileService: ProfileService
 
     @State private var showSudoAlert = false
     @State private var sudoPassword = ""
     @State private var sudoReason = ""
     @State private var sudoRequestId = ""
+    @State private var showPermissionOnboarding = !AgentPermissionConfig.hasBeenConfigured
 
     var body: some View {
         ZStack {
@@ -26,15 +28,39 @@ struct ContentView: View {
                 }
             }
         }
+        .fullScreenCover(isPresented: $showPermissionOnboarding) {
+            PermissionOnboardingView {
+                showPermissionOnboarding = false
+            }
+        }
         .preferredColorScheme(.dark)
         .onChange(of: authManager.isAuthenticated) { _, isAuth in
-            if isAuth && !connectionManager.isConnected {
-                Task { await autoConnect() }
+            if isAuth {
+                Task {
+                    await AppDelegate.savePushTokenIfNeeded()
+                    await profileService.loadProfile()
+                    if let profile = profileService.profile, profile.onboarded {
+                        showPermissionOnboarding = false
+                    }
+                    if !connectionManager.isConnected {
+                        await autoConnect()
+                    }
+                }
             }
         }
         .onChange(of: authManager.isLoading) { _, isLoading in
-            if !isLoading && authManager.isAuthenticated && !connectionManager.isConnected {
-                Task { await autoConnect() }
+            if !isLoading && authManager.isAuthenticated {
+                Task {
+                    if profileService.profile == nil {
+                        await profileService.loadProfile()
+                    }
+                    if let profile = profileService.profile, profile.onboarded {
+                        showPermissionOnboarding = false
+                    }
+                    if !connectionManager.isConnected {
+                        await autoConnect()
+                    }
+                }
             }
         }
         .onAppear {

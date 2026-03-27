@@ -4,19 +4,25 @@ import VideoToolbox
 import UIKit
 import CoreMedia
 
-/// Hardware-accelerated H.264 decoder using AVSampleBufferDisplayLayer.
-/// Receives Annex B NAL units from the relay and displays them with minimal latency.
+/// Hardware-accelerated video decoder supporting both HEVC (H.265) and H.264.
+/// Receives Annex B NAL units from the relay and displays them via AVSampleBufferDisplayLayer.
+/// Auto-detects codec from the NAL unit types in the first keyframe.
 class H264Decoder: ObservableObject {
     @Published var displayLayer: AVSampleBufferDisplayLayer?
     @Published var fps: Int = 0
 
     private var formatDescription: CMVideoFormatDescription?
+    private var vps: Data? // HEVC only
     private var sps: Data?
     private var pps: Data?
+    private var isHEVC = false
+    private var codecDetected = true // Default to H.264, switch to HEVC if VPS detected
     private var frameCount = 0
     private var fpsTimer: Timer?
     private let startCode = Data([0x00, 0x00, 0x00, 0x01])
-    private let processingQueue = DispatchQueue(label: "h264.decoding", qos: .userInteractive)
+    private let processingQueue = DispatchQueue(label: "video.decoding", qos: .userInteractive)
+    private var totalFramesReceived = 0
+    private var totalFramesDecoded = 0
 
     init() {
         setupDisplayLayer()
@@ -43,22 +49,22 @@ class H264Decoder: ObservableObject {
         fpsTimer = nil
         displayLayer?.flushAndRemoveImage()
         formatDescription = nil
+        vps = nil
         sps = nil
         pps = nil
         fps = 0
         frameCount = 0
+        isHEVC = false
+        codecDetected = false
+        totalFramesReceived = 0
+        totalFramesDecoded = 0
     }
 
-    /// Receive encoded H.264 data from relay.
-    /// Format: [1 byte type] [Annex B NAL units with 0x00000001 start codes]
     func receiveFrame(_ data: Data) {
         processingQueue.async { [weak self] in
             self?.decodeFrame(data)
         }
     }
-
-    private var totalFramesReceived = 0
-    private var totalFramesDecoded = 0
 
     private func decodeFrame(_ data: Data) {
         guard data.count > 1 else { return }
@@ -66,87 +72,79 @@ class H264Decoder: ObservableObject {
 
         let isKeyframe = data[0] == 0x01
         let nalData = data.dropFirst()
-
-        // Parse NAL units from Annex B format
         let nalUnits = parseNALUnits(nalData)
 
-        if totalFramesReceived <= 3 || totalFramesReceived % 60 == 0 {
-            print("[H264Dec] Frame #\(totalFramesReceived) size=\(data.count) keyframe=\(isKeyframe) nalUnits=\(nalUnits.count) types=\(nalUnits.map { $0.isEmpty ? 0 : Int($0[0] & 0x1F) }) hasSPS=\(sps != nil) hasPPS=\(pps != nil) hasFmt=\(formatDescription != nil) decoded=\(totalFramesDecoded)")
+        if totalFramesReceived <= 3 || totalFramesReceived % 120 == 0 {
+            let codec = codecDetected ? (isHEVC ? "HEVC" : "H264") : "detecting"
+            print("[Decoder] Frame #\(totalFramesReceived) \(codec) size=\(data.count) key=\(isKeyframe) nals=\(nalUnits.count) decoded=\(totalFramesDecoded)")
         }
 
         for nal in nalUnits {
             guard !nal.isEmpty else { continue }
-            let nalType = nal[0] & 0x1F
 
-            switch nalType {
-            case 7: // SPS
-                if sps != nal {
-                    sps = nal
-                    formatDescription = nil
-                    print("[H264Dec] Got SPS (\(nal.count) bytes)")
-                }
-            case 8: // PPS
-                if pps != nal {
-                    pps = nal
-                    formatDescription = nil
-                    print("[H264Dec] Got PPS (\(nal.count) bytes)")
-                }
-            case 5: // IDR (keyframe)
-                ensureFormatDescription()
-                if let sampleBuffer = createSampleBuffer(from: nal, isKeyframe: true) {
-                    enqueue(sampleBuffer)
-                    totalFramesDecoded += 1
-                } else {
-                    print("[H264Dec] Failed to create IDR sample buffer (fmt=\(formatDescription != nil))")
-                }
-            case 1: // Non-IDR (delta frame)
-                if formatDescription != nil {
-                    if let sampleBuffer = createSampleBuffer(from: nal, isKeyframe: false) {
-                        enqueue(sampleBuffer)
-                        totalFramesDecoded += 1
-                    }
-                }
-            default:
-                break
-            }
-        }
-    }
-
-    private func parseNALUnits(_ data: Data) -> [Data] {
-        var units: [Data] = []
-        var searchStart = data.startIndex
-
-        // Find all start codes and extract NAL units between them
-        while searchStart < data.endIndex {
-            guard let startRange = data.range(of: startCode, in: searchStart..<data.endIndex) else {
-                break
+            // Auto-detect codec from first NAL unit type
+            if !codecDetected {
+                detectCodec(from: nal)
             }
 
-            let nalStart = startRange.upperBound
-
-            // Find next start code or end of data
-            let nextStart: Data.Index
-            if let nextRange = data.range(of: startCode, in: nalStart..<data.endIndex) {
-                nextStart = nextRange.lowerBound
+            if isHEVC {
+                handleHEVCNal(nal)
             } else {
-                nextStart = data.endIndex
+                handleH264Nal(nal)
             }
-
-            if nalStart < nextStart {
-                units.append(Data(data[nalStart..<nextStart]))
-            }
-            searchStart = nalStart
-            if searchStart == nextStart { break } // prevent infinite loop
-            searchStart = nextStart
         }
-
-        return units
     }
 
-    private func ensureFormatDescription() {
+    // MARK: - Codec Detection
+
+    private func detectCodec(from nal: Data) {
+        // Check if this is a HEVC VPS (type 32) — only HEVC has VPS
+        let hevcType = (nal[0] >> 1) & 0x3F
+        if hevcType == 32 {
+            isHEVC = true
+            print("[Decoder] Switched to HEVC codec")
+        }
+    }
+
+    // MARK: - H.264
+
+    private func handleH264Nal(_ nal: Data) {
+        let nalType = nal[0] & 0x1F
+
+        switch nalType {
+        case 7: // SPS
+            if sps != nal {
+                sps = nal
+                formatDescription = nil
+                print("[Decoder] H.264 SPS (\(nal.count) bytes)")
+            }
+        case 8: // PPS
+            if pps != nal {
+                pps = nal
+                formatDescription = nil
+                print("[Decoder] H.264 PPS (\(nal.count) bytes)")
+            }
+        case 5: // IDR
+            ensureH264FormatDescription()
+            if let sb = createSampleBuffer(from: nal, isKeyframe: true) {
+                enqueue(sb)
+                totalFramesDecoded += 1
+            }
+        case 1: // Non-IDR
+            if formatDescription != nil {
+                if let sb = createSampleBuffer(from: nal, isKeyframe: false) {
+                    enqueue(sb)
+                    totalFramesDecoded += 1
+                }
+            }
+        default:
+            break
+        }
+    }
+
+    private func ensureH264FormatDescription() {
         guard formatDescription == nil, let sps, let pps else { return }
 
-        // Must nest withUnsafeBytes to keep pointers alive
         var desc: CMFormatDescription?
         let status = sps.withUnsafeBytes { spsBuffer -> OSStatus in
             pps.withUnsafeBytes { ppsBuffer -> OSStatus in
@@ -167,40 +165,139 @@ class H264Decoder: ObservableObject {
 
         if status == noErr, let desc {
             formatDescription = desc
-            print("[H264Dec] Format description created successfully")
-        } else {
-            print("[H264Dec] Failed to create format description: \(status)")
+            print("[Decoder] H.264 format description created")
         }
+    }
+
+    // MARK: - HEVC
+
+    private func handleHEVCNal(_ nal: Data) {
+        let nalType = (nal[0] >> 1) & 0x3F
+
+        switch nalType {
+        case 32: // VPS
+            if vps != nal {
+                vps = nal
+                formatDescription = nil
+                print("[Decoder] HEVC VPS (\(nal.count) bytes)")
+            }
+        case 33: // SPS
+            if sps != nal {
+                sps = nal
+                formatDescription = nil
+                print("[Decoder] HEVC SPS (\(nal.count) bytes)")
+            }
+        case 34: // PPS
+            if pps != nal {
+                pps = nal
+                formatDescription = nil
+                print("[Decoder] HEVC PPS (\(nal.count) bytes)")
+            }
+        case 19, 20: // IDR_W_RADL, IDR_N_LP
+            ensureHEVCFormatDescription()
+            if let sb = createSampleBuffer(from: nal, isKeyframe: true) {
+                enqueue(sb)
+                totalFramesDecoded += 1
+            }
+        case 0, 1, 2, 3, 4, 5, 6, 7, 8, 9: // Trail (non-IDR)
+            if formatDescription != nil {
+                if let sb = createSampleBuffer(from: nal, isKeyframe: false) {
+                    enqueue(sb)
+                    totalFramesDecoded += 1
+                }
+            }
+        default:
+            break // SEI and other NAL types — skip
+        }
+    }
+
+    private func ensureHEVCFormatDescription() {
+        guard formatDescription == nil, let vps, let sps, let pps else { return }
+
+        var desc: CMFormatDescription?
+        let status = vps.withUnsafeBytes { vpsBuffer -> OSStatus in
+            sps.withUnsafeBytes { spsBuffer -> OSStatus in
+                pps.withUnsafeBytes { ppsBuffer -> OSStatus in
+                    let vpsPtr = vpsBuffer.baseAddress!.assumingMemoryBound(to: UInt8.self)
+                    let spsPtr = spsBuffer.baseAddress!.assumingMemoryBound(to: UInt8.self)
+                    let ppsPtr = ppsBuffer.baseAddress!.assumingMemoryBound(to: UInt8.self)
+                    var pointers: [UnsafePointer<UInt8>] = [vpsPtr, spsPtr, ppsPtr]
+                    var sizes: [Int] = [vps.count, sps.count, pps.count]
+                    return CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+                        allocator: kCFAllocatorDefault,
+                        parameterSetCount: 3,
+                        parameterSetPointers: &pointers,
+                        parameterSetSizes: &sizes,
+                        nalUnitHeaderLength: 4,
+                        extensions: nil,
+                        formatDescriptionOut: &desc
+                    )
+                }
+            }
+        }
+
+        if status == noErr, let desc {
+            formatDescription = desc
+            print("[Decoder] HEVC format description created")
+        } else {
+            print("[Decoder] Failed to create HEVC format description: \(status)")
+        }
+    }
+
+    // MARK: - Common
+
+    private func parseNALUnits(_ data: Data) -> [Data] {
+        var units: [Data] = []
+        var searchStart = data.startIndex
+
+        while searchStart < data.endIndex {
+            guard let startRange = data.range(of: startCode, in: searchStart..<data.endIndex) else {
+                break
+            }
+
+            let nalStart = startRange.upperBound
+            let nextStart: Data.Index
+            if let nextRange = data.range(of: startCode, in: nalStart..<data.endIndex) {
+                nextStart = nextRange.lowerBound
+            } else {
+                nextStart = data.endIndex
+            }
+
+            if nalStart < nextStart {
+                units.append(Data(data[nalStart..<nextStart]))
+            }
+            searchStart = nalStart
+            if searchStart == nextStart { break }
+            searchStart = nextStart
+        }
+
+        return units
     }
 
     private func createSampleBuffer(from nalUnit: Data, isKeyframe: Bool) -> CMSampleBuffer? {
         guard let formatDescription else { return nil }
 
-        // Convert to AVCC format: 4-byte length prefix instead of start code
+        // Convert to AVCC/HVCC format: 4-byte length prefix
         let nalLength = UInt32(nalUnit.count).bigEndian
         var avccData = Data()
         avccData.reserveCapacity(4 + nalUnit.count)
         withUnsafeBytes(of: nalLength) { avccData.append(contentsOf: $0) }
         avccData.append(nalUnit)
 
-        // Create CMBlockBuffer
         var blockBuffer: CMBlockBuffer?
         let dataLength = avccData.count
 
-        var status = avccData.withUnsafeMutableBytes { rawBuffer -> OSStatus in
-            guard let baseAddress = rawBuffer.baseAddress else { return -1 }
-            return CMBlockBufferCreateWithMemoryBlock(
-                allocator: kCFAllocatorDefault,
-                memoryBlock: nil,
-                blockLength: dataLength,
-                blockAllocator: kCFAllocatorDefault,
-                customBlockSource: nil,
-                offsetToData: 0,
-                dataLength: dataLength,
-                flags: 0,
-                blockBufferOut: &blockBuffer
-            )
-        }
+        var status = CMBlockBufferCreateWithMemoryBlock(
+            allocator: kCFAllocatorDefault,
+            memoryBlock: nil,
+            blockLength: dataLength,
+            blockAllocator: kCFAllocatorDefault,
+            customBlockSource: nil,
+            offsetToData: 0,
+            dataLength: dataLength,
+            flags: 0,
+            blockBufferOut: &blockBuffer
+        )
 
         guard status == noErr, let blockBuffer else { return nil }
 
@@ -216,11 +313,10 @@ class H264Decoder: ObservableObject {
 
         guard status == noErr else { return nil }
 
-        // Create CMSampleBuffer
         var sampleBuffer: CMSampleBuffer?
         var sampleSize = dataLength
         var timing = CMSampleTimingInfo(
-            duration: CMTime(value: 1, timescale: 12),
+            duration: CMTime(value: 1, timescale: 20),
             presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()),
             decodeTimeStamp: .invalid
         )
@@ -239,7 +335,6 @@ class H264Decoder: ObservableObject {
 
         guard status == noErr, let sampleBuffer else { return nil }
 
-        // Mark as display-immediately
         if let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true) as? [NSMutableDictionary],
            let dict = attachments.first {
             dict[kCMSampleAttachmentKey_DisplayImmediately] = true
@@ -254,10 +349,10 @@ class H264Decoder: ObservableObject {
     private func enqueue(_ sampleBuffer: CMSampleBuffer) {
         guard let layer = displayLayer else { return }
 
-        // Check if layer needs flush (error state)
         if layer.status == .failed {
             layer.flush()
             formatDescription = nil
+            vps = nil
             sps = nil
             pps = nil
             return

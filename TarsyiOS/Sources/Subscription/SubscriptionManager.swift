@@ -14,6 +14,7 @@ class SubscriptionManager: ObservableObject {
     @Published var product: Product?
     @Published var expirationDate: Date?
 
+    var profileService: ProfileService?
     private var transactionListener: Task<Void, Never>?
 
     private init() {}
@@ -60,6 +61,7 @@ class SubscriptionManager: ObservableObject {
         isPro = foundActive
         isLoading = false
         print("[Subscription] Pro: \(isPro), expires: \(expirationDate?.description ?? "n/a")")
+        await syncWithProfile()
     }
 
     func purchase() async -> Bool {
@@ -124,5 +126,18 @@ class SubscriptionManager: ObservableObject {
         }
 
         await transaction.finish()
+        await syncWithProfile()
+    }
+
+    private func syncWithProfile() async {
+        let status: String
+        if isPro {
+            status = "active"
+        } else if expirationDate != nil {
+            status = "cancelled"
+        } else {
+            status = "inactive"
+        }
+        await profileService?.updateSubscription(isPro: isPro, status: status, endDate: expirationDate)
     }
 }
