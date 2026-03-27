@@ -130,12 +130,8 @@ class TarsyProxySchemeHandler: NSObject, WKURLSchemeHandler {
             return
         }
 
-        do {
-            task.didReceive(response)
-            task.didReceive(bodyData)
-            task.didFinish()
-        } catch {
-            // Task may have been stopped
-        }
+        task.didReceive(response)
+        task.didReceive(bodyData)
+        task.didFinish()
     }
 }

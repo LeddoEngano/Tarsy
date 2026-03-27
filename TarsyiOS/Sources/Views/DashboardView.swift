@@ -16,23 +16,11 @@ struct DashboardView: View {
     @State private var showQuickDispatch = false
     @State private var showActiveSessions = false
     @State private var deepLinkWorkspace: Workspace?
+    @State private var isDeepLinkActive = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Hidden navigation link for deep linking
-                NavigationLink(
-                    destination: Group {
-                        if let ws = deepLinkWorkspace {
-                            WorkspaceView(workspace: ws)
-                        }
-                    },
-                    isActive: Binding(
-                        get: { deepLinkWorkspace != nil },
-                        set: { if !$0 { deepLinkWorkspace = nil } }
-                    )
-                ) { EmptyView() }
-                .hidden()
                 // Custom header
                 HStack {
                     HStack(spacing: 8) {
@@ -166,10 +154,16 @@ struct DashboardView: View {
             await workspaceService.fetchWorkspaces()
             await taskService.loadActiveTasks()
         }
+        .navigationDestination(isPresented: $isDeepLinkActive) {
+            if let ws = deepLinkWorkspace {
+                WorkspaceView(workspace: ws)
+            }
+        }
         .onChange(of: deepLinkRouter.pendingWorkspaceId) { _, wsId in
             guard let wsId else { return }
             if let workspace = workspaceService.workspaces.first(where: { $0.id == wsId }) {
                 deepLinkWorkspace = workspace
+                isDeepLinkActive = true
             }
             deepLinkRouter.pendingWorkspaceId = nil
         }

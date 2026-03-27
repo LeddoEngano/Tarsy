@@ -110,7 +110,7 @@ struct ActiveSessionsView: View {
         connectionManager.send(WSPacket(
             action: .engineCreate,
             payload: [
-                "workspacePath": workspace.localPath ?? "",
+                "workspacePath": workspace.localPath,
                 "workspaceId": workspace.id.uuidString,
                 "engineType": "claude",
                 "message": String(message.prefix(4000))
