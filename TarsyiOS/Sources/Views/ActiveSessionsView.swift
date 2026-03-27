@@ -15,9 +15,7 @@ struct ActiveSessionsView: View {
             ZStack {
                 TarsyTheme.backgroundPrimary.ignoresSafeArea()
 
-                if !client.isConfigured {
-                    notConfiguredView
-                } else if client.isLoading {
+                if client.isLoading {
                     VStack(spacing: 12) {
                         ProgressView()
                             .tint(TarsyTheme.accentAmber)
@@ -62,24 +60,6 @@ struct ActiveSessionsView: View {
             }
         } message: {
             Text("This will start a new agent tab with context from this session.")
-        }
-    }
-
-    private var notConfiguredView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "link.badge.plus")
-                .font(.system(size: 48))
-                .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
-
-            Text("UltraContext not configured")
-                .font(TarsyTheme.monoFont)
-                .foregroundColor(TarsyTheme.textSecondary)
-
-            Text("Install UltraContext on your Mac and add your API key in settings to see active AI sessions.")
-                .font(TarsyTheme.monoFontSmall)
-                .foregroundColor(TarsyTheme.textSecondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
         }
     }
 

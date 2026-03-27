@@ -15,7 +15,7 @@ struct AppSettingsView: View {
     @State private var permissionConfig = AgentPermissionConfig.load()
     @State private var displayNameInput = ""
     @State private var isEditingName = false
-    @State private var ultraContextApiKey = UserDefaults.standard.string(forKey: "ultracontext_api_key") ?? ""
+
 
     var body: some View {
         NavigationStack {
@@ -227,49 +227,6 @@ struct AppSettingsView: View {
                             voiceLanguageRow
                         }
                         .cornerRadius(10)
-
-                        // UltraContext
-                        sectionHeader("UltraContext")
-
-                        VStack(spacing: 1) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "brain.head.profile")
-                                    .font(.system(size: 16))
-                                    .foregroundColor(TarsyTheme.accentAmber)
-                                    .frame(width: 28)
-
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("API Key")
-                                        .font(TarsyTheme.monoFontSmall)
-                                        .foregroundColor(TarsyTheme.textPrimary)
-
-                                    SecureField("uc_live_...", text: $ultraContextApiKey)
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundColor(TarsyTheme.textPrimary)
-                                        .textFieldStyle(.plain)
-                                        .onChange(of: ultraContextApiKey) { _, newValue in
-                                            UserDefaults.standard.set(newValue, forKey: "ultracontext_api_key")
-                                        }
-                                }
-
-                                Spacer()
-
-                                if !ultraContextApiKey.isEmpty {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(TarsyTheme.accentMoss)
-                                }
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 12)
-                            .background(TarsyTheme.backgroundSecondary)
-                        }
-                        .cornerRadius(10)
-
-                        Text("Get your API key at ultracontext.ai. Required to view and continue AI sessions from your Mac.")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(TarsyTheme.textSecondary)
-                            .padding(.horizontal, 4)
 
                         // About Section
                         sectionHeader("About")

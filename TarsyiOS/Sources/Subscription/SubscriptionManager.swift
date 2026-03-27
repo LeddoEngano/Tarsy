@@ -79,6 +79,8 @@ class SubscriptionManager: ObservableObject {
                 await transaction.finish()
                 isPro = true
                 expirationDate = transaction.expirationDate
+                await syncWithProfile()
+                await profileService?.sendBillingEmail(type: "subscription_active")
                 return true
 
             case .userCancelled:
@@ -115,6 +117,8 @@ class SubscriptionManager: ObservableObject {
     private func handle(transactionResult result: VerificationResult<Transaction>) async {
         guard let transaction = try? result.payloadValue else { return }
 
+        let wasPro = isPro
+
         if transaction.productID == Self.proProductId {
             if transaction.revocationDate != nil {
                 isPro = false
@@ -127,6 +131,13 @@ class SubscriptionManager: ObservableObject {
 
         await transaction.finish()
         await syncWithProfile()
+
+        // Send billing emails on state transitions
+        if !wasPro && isPro {
+            await profileService?.sendBillingEmail(type: "subscription_renewed")
+        } else if wasPro && !isPro {
+            await profileService?.sendBillingEmail(type: "subscription_cancelled", endDate: expirationDate)
+        }
     }
 
     private func syncWithProfile() async {

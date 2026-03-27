@@ -39,9 +39,13 @@ class TarsyProxySchemeHandler: NSObject, WKURLSchemeHandler {
         }
 
         // Convert tarsy-http://localhost:3000/path → http://localhost:3000/path
-        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)!
-        components.scheme = "http"
-        let realUrlString = components.url?.absoluteString ?? url.absoluteString.replacingOccurrences(of: "tarsy-http://", with: "http://")
+        let realUrlString: String
+        if var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.scheme = "http"
+            realUrlString = components.url?.absoluteString ?? url.absoluteString.replacingOccurrences(of: "tarsy-http://", with: "http://")
+        } else {
+            realUrlString = url.absoluteString.replacingOccurrences(of: "tarsy-http://", with: "http://")
+        }
 
         let requestId = UUID().uuidString
         pendingTasks[requestId] = urlSchemeTask
@@ -113,13 +117,18 @@ class TarsyProxySchemeHandler: NSObject, WKURLSchemeHandler {
         }
 
         // Create response — use the original task URL to keep context
-        let responseUrl = task.request.url ?? URL(string: "tarsy-http://proxy")!
-        let response = HTTPURLResponse(
+        // swiftlint:disable:next force_unwrapping — static URL literal, guaranteed valid
+        let fallbackUrl = URL(string: "tarsy-http://proxy")!
+        let responseUrl = task.request.url ?? fallbackUrl
+        guard let response = HTTPURLResponse(
             url: responseUrl,
             statusCode: statusCode,
             httpVersion: "HTTP/1.1",
             headerFields: responseHeaders
-        )!
+        ) else {
+            task.didFailWithError(URLError(.badServerResponse))
+            return
+        }
 
         do {
             task.didReceive(response)

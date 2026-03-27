@@ -4,6 +4,9 @@ options:
   deploymentTarget:
     iOS: "17.0"
   xcodeVersion: "16.0"
+configFiles:
+  Debug: ../Secrets.xcconfig
+  Release: ../Secrets.xcconfig
 settings:
   base:
     SWIFT_VERSION: "5.9"
@@ -24,6 +27,7 @@ targets:
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         CFBundleIconName: AppIcon
+        UltraContextAPIKey: $(ULTRACONTEXT_API_KEY)
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities:
           - armv7
@@ -47,7 +51,6 @@ targets:
               - com.tarsy.ios
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
-          NSAllowsArbitraryLoads: true
     entitlements:
       path: TarsyiOS.entitlements
       properties:
