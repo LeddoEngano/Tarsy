@@ -61,7 +61,7 @@ struct ActiveSessionsView: View {
             }
         } message: {
             if let ws = matchWorkspace(for: sessionToContinue) {
-                Text("This will start a new agent tab in \(ws.name ?? "workspace") with context from this session.")
+                Text("This will start a new agent tab in \(ws.name) with context from this session.")
             } else {
                 Text("This will start a new agent tab with context from this session.")
             }
