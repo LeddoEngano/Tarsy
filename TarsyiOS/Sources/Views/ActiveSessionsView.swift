@@ -60,11 +60,8 @@ struct ActiveSessionsView: View {
                 }
             }
         } message: {
-            if let ws = matchWorkspace(for: sessionToContinue) {
-                Text("This will start a new agent tab in \(ws.name) with context from this session.")
-            } else {
-                Text("This will start a new agent tab with context from this session.")
-            }
+            Text(continueMessage)
+        }
         }
     }
 
@@ -131,6 +128,13 @@ struct ActiveSessionsView: View {
             print("[ActiveSessions] Load detail error: \(error)")
         }
         isLoadingDetail = false
+    }
+
+    private var continueMessage: String {
+        if let ws = matchWorkspace(for: sessionToContinue) {
+            return "This will start a new agent tab in \(ws.name) with context from this session."
+        }
+        return "This will start a new agent tab with context from this session."
     }
 
     // MARK: - Workspace matching
