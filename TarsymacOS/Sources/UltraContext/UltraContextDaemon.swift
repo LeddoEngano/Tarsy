@@ -24,8 +24,13 @@ actor UltraContextSync {
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue(TarsyConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
         req.httpBody = body
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            print("[UltraContext] HTTP \(http.statusCode): \(body)")
+        }
         return data
     }
 

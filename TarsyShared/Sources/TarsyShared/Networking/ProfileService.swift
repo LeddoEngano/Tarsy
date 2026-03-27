@@ -143,6 +143,25 @@ public class ProfileService: ObservableObject {
         }
     }
 
+    // MARK: - Delete Account
+
+    public func deleteAccount() async throws {
+        let session = try await supabase.auth.session
+        let url = TarsyConfig.supabaseURL.appendingPathComponent("functions/v1/delete-account")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [:] as [String: String])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if !(200...299).contains(statusCode) {
+            let body = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw NSError(domain: "ProfileService", code: statusCode, userInfo: [NSLocalizedDescriptionKey: "Failed to delete account: \(body)"])
+        }
+        profile = nil
+    }
+
     public func markOnboarded() async {
         guard let profileId = profile?.id else { return }
         do {

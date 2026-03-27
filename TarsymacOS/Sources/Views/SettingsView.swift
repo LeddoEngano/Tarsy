@@ -6,6 +6,12 @@ struct SettingsView: View {
     @EnvironmentObject var daemonManager: DaemonManager
     @State private var email = ""
     @State private var password = ""
+    @State private var showDeleteConfirmation = false
+    @State private var deleteConfirmText = ""
+    @State private var isDeleting = false
+    @State private var deleteError: String?
+
+    private let profileService = ProfileService()
 
     var body: some View {
         TabView {
@@ -19,6 +25,39 @@ struct SettingsView: View {
 
                     Button("Sign Out") {
                         Task { await authManager.signOut() }
+                    }
+
+                    Divider()
+
+                    // Legal links
+                    HStack(spacing: 16) {
+                        if let termsURL = URL(string: "https://tarsy.app/terms") {
+                            Link("Terms of Use", destination: termsURL)
+                                .font(.system(size: 11, design: .monospaced))
+                        }
+                        if let privacyURL = URL(string: "https://tarsy.app/privacy") {
+                            Link("Privacy Policy", destination: privacyURL)
+                                .font(.system(size: 11, design: .monospaced))
+                        }
+                    }
+
+                    Divider()
+
+                    // Delete account
+                    if isDeleting {
+                        ProgressView("Deleting account...")
+                            .font(.system(size: 11, design: .monospaced))
+                    } else {
+                        Button("Delete Account") {
+                            showDeleteConfirmation = true
+                        }
+                        .foregroundColor(.red)
+                    }
+
+                    if let error = deleteError {
+                        Text(error)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.red)
                     }
                 } else {
                     TextField("Email", text: $email)
@@ -44,9 +83,32 @@ struct SettingsView: View {
                 }
             }
             .padding(24)
-            .frame(width: 350, height: 200)
+            .frame(width: 350, height: 280)
             .tabItem {
                 Label("Account", systemImage: "person")
+            }
+            .alert("Delete Account", isPresented: $showDeleteConfirmation) {
+                TextField("Type DELETE to confirm", text: $deleteConfirmText)
+                Button("Delete", role: .destructive) {
+                    if deleteConfirmText == "DELETE" {
+                        isDeleting = true
+                        deleteError = nil
+                        Task {
+                            do {
+                                try await profileService.deleteAccount()
+                                await authManager.signOut()
+                            } catch {
+                                deleteError = error.localizedDescription
+                            }
+                            isDeleting = false
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    deleteConfirmText = ""
+                }
+            } message: {
+                Text("This will permanently delete your account and all data. This cannot be undone.")
             }
 
             // Connection tab

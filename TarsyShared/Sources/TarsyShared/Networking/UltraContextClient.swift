@@ -74,6 +74,7 @@ public class UltraContextClient: ObservableObject {
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue(TarsyConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
         req.httpBody = body
         let (data, _) = try await URLSession.shared.data(for: req)
         return data

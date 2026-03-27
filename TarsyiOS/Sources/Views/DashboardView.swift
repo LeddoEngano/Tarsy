@@ -11,7 +11,7 @@ struct DashboardView: View {
     @EnvironmentObject var deepLinkRouter: DeepLinkRouter
     @StateObject private var taskService = AgentTaskService()
     @State private var showNewWorkspace = false
-    @State private var showSettings = false
+    @State private var showProfile = false
     @State private var showPaywall = false
     @State private var showQuickDispatch = false
     @State private var showActiveSessions = false
@@ -61,44 +61,28 @@ struct DashboardView: View {
                             Image(systemName: "bubble.left.and.bubble.right")
                                 .foregroundColor(TarsyTheme.textSecondary)
                         }
-                        Button(action: { showSettings = true }) {
-                            Image(systemName: "gearshape")
-                                .foregroundColor(TarsyTheme.textSecondary)
-                        }
-                        Button(action: {
-                            Task { await authManager.signOut() }
-                        }) {
-                            Image(systemName: "rectangle.portrait.and.arrow.right")
-                                .foregroundColor(TarsyTheme.textSecondary)
+                        Button(action: { showProfile = true }) {
+                            if let avatarUrlStr = profileService.profile?.avatarUrl, let url = URL(string: avatarUrlStr) {
+                                AsyncImage(url: url) { image in
+                                    image.resizable().aspectRatio(contentMode: .fill)
+                                } placeholder: {
+                                    Image(systemName: "person.circle.fill")
+                                        .font(.system(size: 22))
+                                        .foregroundColor(TarsyTheme.textSecondary)
+                                }
+                                .frame(width: 26, height: 26)
+                                .clipShape(Circle())
+                            } else {
+                                Image(systemName: "person.circle.fill")
+                                    .font(.system(size: 22))
+                                    .foregroundColor(TarsyTheme.textSecondary)
+                            }
                         }
                     }
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .background(TarsyTheme.backgroundPrimary)
-
-                // User greeting
-                if let profile = profileService.profile {
-                    HStack(spacing: 8) {
-                        if let avatarUrlStr = profile.avatarUrl, let url = URL(string: avatarUrlStr) {
-                            AsyncImage(url: url) { image in
-                                image.resizable()
-                                    .aspectRatio(contentMode: .fill)
-                            } placeholder: {
-                                Image(systemName: "person.circle.fill")
-                                    .foregroundColor(TarsyTheme.textSecondary)
-                            }
-                            .frame(width: 24, height: 24)
-                            .clipShape(Circle())
-                        }
-                        Text(profile.nameOrEmail)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(TarsyTheme.textSecondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 4)
-                }
 
                 // Content
                 ZStack {
@@ -136,8 +120,8 @@ struct DashboardView: View {
         .sheet(isPresented: $showNewWorkspace) {
             NewWorkspaceView()
         }
-        .sheet(isPresented: $showSettings) {
-            AppSettingsView()
+        .sheet(isPresented: $showProfile) {
+            ProfileView()
         }
         .fullScreenCover(isPresented: $showPaywall) {
             PaywallView()
