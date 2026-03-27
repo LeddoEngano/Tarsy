@@ -59,7 +59,7 @@ struct ActiveSessionsView: View {
                 }
                 if !isEditing {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("done") { dismiss() }
+                        Button("back") { dismiss() }
                             .foregroundColor(TarsyTheme.accentAmber)
                     }
                 }
