@@ -40,7 +40,16 @@ package-lock.json
 # Environment
 .env
 .env.local
+**/.env*
 
 # Credentials
 .credentials/
 supabase/.temp/
+
+# Private keys
+**/*.pem
+**/*.p12
+**/*.p8
+
+# App secrets (xcconfig with API keys)
+Secrets.xcconfig
