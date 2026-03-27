@@ -1,18 +1,6 @@
 // Supabase Edge Function: ultracontext-proxy
 // Proxies requests to UltraContext API with server-side API key.
-// The UltraContext API key never leaves the server.
-// User contexts are tagged with user_id for isolation.
-//
-// Required secrets (set via Supabase dashboard):
-//   ULTRACONTEXT_API_KEY - UltraContext API key
-//
 // Deploy with: supabase functions deploy ultracontext-proxy --no-verify-jwt
-//
-// All requests are POST with JSON body containing "action" field:
-//   { "action": "create" }
-//   { "action": "list" }
-//   { "action": "get", "id": "ctx_..." }
-//   { "action": "message", "id": "ctx_...", "role": "user", "content": "..." }
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -28,76 +16,128 @@ async function authenticateUser(req: Request): Promise<{ userId: string } | Resp
   const authHeader = req.headers.get("Authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return new Response(JSON.stringify({ error: "Missing authorization" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
+      status: 401, headers: { "Content-Type": "application/json" },
     });
   }
-
   const token = authHeader.replace("Bearer ", "");
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   const { data: { user }, error } = await supabase.auth.getUser(token);
-
   if (error || !user) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
+      status: 401, headers: { "Content-Type": "application/json" },
     });
   }
-
   return { userId: user.id };
 }
 
-console.log("[ultracontext-proxy] Function loaded, API key present:", !!ULTRACONTEXT_API_KEY);
+// Extract readable text from UltraContext message content.
+// CLI-ingested messages store the raw JSONL event as content object.
+function extractText(content: any): string {
+  if (typeof content === "string") return content;
+  if (content?.raw?.message?.content) {
+    const inner = content.raw.message.content;
+    if (typeof inner === "string") return inner;
+    if (Array.isArray(inner)) {
+      return inner
+        .filter((b: any) => b.type === "text" && b.text)
+        .map((b: any) => b.text)
+        .join("\n") || "[tool use]";
+    }
+  }
+  return "";
+}
 
 serve(async (req) => {
   try {
-    console.log("[ultracontext-proxy] Request received:", req.method, req.url);
-
-    // Auth
     const authResult = await authenticateUser(req);
     if (authResult instanceof Response) return authResult;
     const { userId } = authResult;
 
     const payload = await req.json().catch(() => ({}));
     const action = payload.action as string;
-    console.log("[ultracontext-proxy] Action:", action, "userId:", userId);
 
     // CREATE
     if (action === "create") {
+      const metadata: Record<string, string> = { user_id: userId };
+      if (payload.project_path) metadata.project_path = payload.project_path;
+      if (payload.engine_type) metadata.source = payload.engine_type;
+
       const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${ULTRACONTEXT_API_KEY}`,
-        },
-        body: JSON.stringify({ metadata: { user_id: userId } }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
+        body: JSON.stringify({ metadata }),
       });
       const data = await res.json();
       if (data?.id) contextOwners.set(data.id, userId);
       return new Response(JSON.stringify(data), {
-        status: res.status,
-        headers: { "Content-Type": "application/json" },
+        status: res.status, headers: { "Content-Type": "application/json" },
       });
     }
 
     // LIST
     if (action === "list") {
       const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts`, {
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${ULTRACONTEXT_API_KEY}`,
-        },
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
       });
       const raw = await res.json();
       const all = raw?.data ?? raw ?? [];
+
+      // Filter to user's contexts (by UUID or username match)
       const filtered = all.filter((ctx: any) => {
         if (contextOwners.get(ctx.id) === userId) return true;
         if (ctx.metadata?.user_id === userId) return true;
         return false;
       });
-      return new Response(JSON.stringify({ data: filtered }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
+
+      // Fetch first 2 messages of each context to build title
+      const enriched = await Promise.all(
+        filtered.map(async (ctx: any) => {
+          try {
+            const detailRes = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/${ctx.id}`, {
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
+            });
+            const detail = await detailRes.json();
+            const msgs = detail?.data ?? [];
+            const messageCount = msgs.length;
+
+            // Find first real user message for title
+            let title = "";
+            for (const msg of msgs) {
+              if (msg.role === "user") {
+                const text = extractText(msg.content);
+                if (text && !text.startsWith("[engine:") && !text.startsWith("[session:")) {
+                  title = text.substring(0, 100);
+                  break;
+                }
+              }
+            }
+            if (!title && msgs.length > 0) {
+              title = extractText(msgs[0].content).substring(0, 100);
+            }
+
+            return {
+              id: ctx.id,
+              title: title || "Untitled session",
+              message_count: messageCount,
+              project_path: ctx.metadata?.project_path ?? null,
+              engine_type: ctx.metadata?.source ?? null,
+              created_at: ctx.created_at,
+            };
+          } catch {
+            return {
+              id: ctx.id,
+              title: "Session",
+              message_count: 0,
+              project_path: ctx.metadata?.project_path ?? null,
+              engine_type: ctx.metadata?.source ?? null,
+              created_at: ctx.created_at,
+            };
+          }
+        }),
+      );
+
+      return new Response(JSON.stringify({ data: enriched }), {
+        status: 200, headers: { "Content-Type": "application/json" },
       });
     }
 
@@ -111,11 +151,9 @@ serve(async (req) => {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
       });
       const raw = await res.json();
-      // Transform: API returns {"data":[messages],"version":0}
-      // Client expects {"id":"...","messages":[...],"version":0}
       const messages = (raw?.data ?? []).map((msg: any) => ({
         role: msg.role,
-        content: msg.content,
+        content: extractText(msg.content),
         index: msg.index,
       }));
       return new Response(JSON.stringify({
@@ -127,37 +165,26 @@ serve(async (req) => {
 
     // MESSAGE
     if (action === "message" && payload.id) {
-      console.log("[ultracontext-proxy] Message to context:", payload.id, "role:", payload.role);
       const owner = contextOwners.get(payload.id);
       if (owner && owner !== userId) {
         return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
       }
-      try {
-        const fetchUrl = `${ULTRACONTEXT_BASE_URL}/contexts/${payload.id}`;
-        console.log("[ultracontext-proxy] Fetching:", fetchUrl);
-        const res = await fetch(fetchUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
-          body: JSON.stringify({ role: payload.role, content: payload.content }),
-        });
-        const data = await res.text();
-        console.log("[ultracontext-proxy] UltraContext response:", res.status, data.substring(0, 200));
-        return new Response(data, { status: res.status, headers: { "Content-Type": "application/json" } });
-      } catch (fetchErr) {
-        console.error("[ultracontext-proxy] Fetch error:", fetchErr);
-        return new Response(JSON.stringify({ error: String(fetchErr) }), { status: 502, headers: { "Content-Type": "application/json" } });
-      }
+      const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/${payload.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
+        body: JSON.stringify({ role: payload.role, content: payload.content }),
+      });
+      const data = await res.text();
+      return new Response(data, { status: res.status, headers: { "Content-Type": "application/json" } });
     }
 
     return new Response(JSON.stringify({ error: "Invalid action" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
+      status: 400, headers: { "Content-Type": "application/json" },
     });
   } catch (err) {
     console.error("[ultracontext-proxy] Error:", err);
     return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
+      status: 500, headers: { "Content-Type": "application/json" },
     });
   }
 });

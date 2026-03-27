@@ -55,13 +55,16 @@ struct ActiveSessionsView: View {
         .alert("Continue this session?", isPresented: $showContinueConfirm) {
             Button("Cancel", role: .cancel) {}
             Button("Continue") {
-                if let session = sessionToContinue,
-                   let workspace = workspaceService.workspaces.first {
-                    continueSession(session, in: workspace)
+                if let session = sessionToContinue {
+                    continueSession(session)
                 }
             }
         } message: {
-            Text("This will start a new agent tab with context from this session.")
+            if let ws = matchWorkspace(for: sessionToContinue) {
+                Text("This will start a new agent tab in \(ws.name ?? "workspace") with context from this session.")
+            } else {
+                Text("This will start a new agent tab with context from this session.")
+            }
         }
     }
 
@@ -90,7 +93,11 @@ struct ActiveSessionsView: View {
                     Button {
                         Task { await loadDetail(session) }
                     } label: {
-                        SessionCard(session: session, isLoading: isLoadingDetail && selectedSession?.id == session.id)
+                        SessionCard(
+                            session: session,
+                            workspaceName: matchWorkspace(for: session)?.name,
+                            isLoading: isLoadingDetail && selectedSession?.id == session.id
+                        )
                     }
                 }
             }
@@ -105,17 +112,41 @@ struct ActiveSessionsView: View {
         selectedSession = session
         isLoadingDetail = true
         do {
-            let full = try await client.getContext(id: session.id)
+            var full = try await client.getContext(id: session.id)
+            // Carry over metadata from list response
+            full = UltraContextSession(
+                id: full.id,
+                messages: full.messages,
+                version: full.version,
+                createdAt: session.createdAt ?? full.createdAt,
+                updatedAt: full.updatedAt,
+                title: session.title ?? full.title,
+                projectPath: session.projectPath ?? full.projectPath,
+                engineType: session.engineType ?? full.engineType,
+                messageCount: full.messages.count
+            )
             loadedSession = full
         } catch {
-            // Fallback to session without messages
             loadedSession = session
             print("[ActiveSessions] Load detail error: \(error)")
         }
         isLoadingDetail = false
     }
 
-    private func continueSession(_ session: UltraContextSession, in workspace: Workspace) {
+    // MARK: - Workspace matching
+
+    private func matchWorkspace(for session: UltraContextSession?) -> Workspace? {
+        guard let path = session?.projectPath else { return nil }
+        return workspaceService.workspaces.first { ws in
+            guard let wsPath = ws.localPath else { return false }
+            return wsPath == path || path.hasPrefix(wsPath) || wsPath.hasPrefix(path)
+        }
+    }
+
+    private func continueSession(_ session: UltraContextSession) {
+        let workspace = matchWorkspace(for: session) ?? workspaceService.workspaces.first
+        guard let workspace else { return }
+
         let contextSummary = session.messages
             .suffix(10)
             .map { "[\($0.role)] \($0.content)" }
@@ -128,7 +159,7 @@ struct ActiveSessionsView: View {
             payload: [
                 "workspacePath": workspace.localPath ?? "",
                 "workspaceId": workspace.id.uuidString,
-                "engineType": "claude",
+                "engineType": session.engineType ?? "claude",
                 "message": String(message.prefix(4000))
             ]
         ))
@@ -141,6 +172,7 @@ struct ActiveSessionsView: View {
 
 private struct SessionCard: View {
     let session: UltraContextSession
+    var workspaceName: String?
     var isLoading: Bool = false
 
     var body: some View {
@@ -153,29 +185,30 @@ private struct SessionCard: View {
                 .cornerRadius(8)
 
             VStack(alignment: .leading, spacing: 4) {
-                Text("Session \(session.id.prefix(8))")
+                Text(session.displayTitle)
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
                     .foregroundColor(TarsyTheme.textPrimary)
+                    .lineLimit(2)
 
                 HStack(spacing: 8) {
+                    if let project = workspaceName ?? session.projectName {
+                        Text(project)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(TarsyTheme.accentMoss)
+                            .lineLimit(1)
+                    }
+
+                    if let count = session.messageCount, count > 0 {
+                        Text("\(count) msgs")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                    }
+
                     if let created = session.createdAt {
                         Text(formatDate(created))
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
-
-                    if session.messages.count > 0 {
-                        Text("\(session.messages.count) messages")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(TarsyTheme.accentMoss)
-                    }
-                }
-
-                if let last = session.messages.last {
-                    Text(last.content.prefix(80).description + (last.content.count > 80 ? "..." : ""))
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.7))
-                        .lineLimit(2)
                 }
             }
 
@@ -203,13 +236,14 @@ private struct SessionCard: View {
     private func formatDate(_ dateStr: String) -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: dateStr) else {
-            // Try without fractional seconds
-            formatter.formatOptions = [.withInternetDateTime]
-            guard let date = formatter.date(from: dateStr) else { return dateStr.prefix(10).description }
+        if let date = formatter.date(from: dateStr) {
             return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
         }
-        return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
+        formatter.formatOptions = [.withInternetDateTime]
+        if let date = formatter.date(from: dateStr) {
+            return RelativeDateTimeFormatter().localizedString(for: date, relativeTo: Date())
+        }
+        return ""
     }
 }
 
@@ -282,7 +316,7 @@ private struct SessionDetailView: View {
                     }
                 }
             }
-            .navigationTitle("Session \(session.id.prefix(8))")
+            .navigationTitle(session.displayTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

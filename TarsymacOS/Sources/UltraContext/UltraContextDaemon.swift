@@ -42,8 +42,11 @@ actor UltraContextSync {
         let id: String
     }
 
-    private func createContext() async throws -> String {
-        let data = try await post(["action": "create"])
+    private func createContext(projectPath: String? = nil, engineType: String? = nil) async throws -> String {
+        var payload = ["action": "create"]
+        if let p = projectPath { payload["project_path"] = p }
+        if let e = engineType { payload["engine_type"] = e }
+        let data = try await post(payload)
         let decoded = try JSONDecoder().decode(CreateContextResponse.self, from: data)
         return decoded.id
     }
@@ -61,7 +64,7 @@ actor UltraContextSync {
 
     func engineStarted(sessionId: String, engineType: String, workspacePath: String) async {
         do {
-            let ctxId = try await createContext()
+            let ctxId = try await createContext(projectPath: workspacePath, engineType: engineType)
             contextMap[sessionId] = ctxId
             try await appendMessage(
                 contextId: ctxId,

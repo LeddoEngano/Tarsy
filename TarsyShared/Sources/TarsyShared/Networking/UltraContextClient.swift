@@ -18,19 +18,32 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
     public let version: Int?
     public let createdAt: String?
     public let updatedAt: String?
+    public let title: String?
+    public let projectPath: String?
+    public let engineType: String?
+    public let messageCount: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, messages, version
+        case id, messages, version, title
         case createdAt = "created_at"
         case updatedAt = "updated_at"
+        case projectPath = "project_path"
+        case engineType = "engine_type"
+        case messageCount = "message_count"
     }
 
-    public init(id: String, messages: [UltraContextMessage], version: Int?, createdAt: String?, updatedAt: String?) {
+    public init(id: String, messages: [UltraContextMessage] = [], version: Int? = nil,
+                createdAt: String? = nil, updatedAt: String? = nil, title: String? = nil,
+                projectPath: String? = nil, engineType: String? = nil, messageCount: Int? = nil) {
         self.id = id
         self.messages = messages
         self.version = version
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.title = title
+        self.projectPath = projectPath
+        self.engineType = engineType
+        self.messageCount = messageCount
     }
 
     public init(from decoder: Decoder) throws {
@@ -40,11 +53,26 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
         version = try? container.decode(Int.self, forKey: .version)
         createdAt = try? container.decode(String.self, forKey: .createdAt)
         updatedAt = try? container.decode(String.self, forKey: .updatedAt)
+        title = try? container.decode(String.self, forKey: .title)
+        projectPath = try? container.decode(String.self, forKey: .projectPath)
+        engineType = try? container.decode(String.self, forKey: .engineType)
+        messageCount = try? container.decode(Int.self, forKey: .messageCount)
+    }
+
+    /// Display title: use title field, or fallback to project name, or session ID prefix
+    public var displayTitle: String {
+        if let t = title, !t.isEmpty { return t }
+        if let path = projectPath { return path.components(separatedBy: "/").last ?? path }
+        return "Session \(id.prefix(8))"
+    }
+
+    /// Project name extracted from path
+    public var projectName: String? {
+        projectPath?.components(separatedBy: "/").last
     }
 }
 
 /// Client that talks to UltraContext via Supabase Edge Function proxy.
-/// The API key never leaves the server — only the user's Supabase auth token is used.
 @MainActor
 public class UltraContextClient: ObservableObject {
     @Published public var sessions: [UltraContextSession] = []
@@ -82,14 +110,15 @@ public class UltraContextClient: ObservableObject {
 
     // MARK: - CRUD
 
-    private struct CreateContextResponse: Decodable {
-        let id: String
-    }
+    private struct CreateContextResponse: Decodable { let id: String }
 
-    public func createContext() async throws -> UltraContextSession {
-        let data = try await post(["action": "create"])
+    public func createContext(projectPath: String? = nil, engineType: String? = nil) async throws -> UltraContextSession {
+        var payload = ["action": "create"]
+        if let p = projectPath { payload["project_path"] = p }
+        if let e = engineType { payload["engine_type"] = e }
+        let data = try await post(payload)
         let created = try JSONDecoder().decode(CreateContextResponse.self, from: data)
-        return UltraContextSession(id: created.id, messages: [], version: nil, createdAt: nil, updatedAt: nil)
+        return UltraContextSession(id: created.id, projectPath: projectPath, engineType: engineType)
     }
 
     public func getContext(id: String) async throws -> UltraContextSession {
