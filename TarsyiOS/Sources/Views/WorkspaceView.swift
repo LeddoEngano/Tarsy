@@ -43,7 +43,7 @@ struct WorkspaceView: View {
     @State private var engineModel = ""
     @State private var contextPercent: Double = 0
     @State private var currentBranch = ""
-    @State private var detectedAgents: [AIEngineType] = AIEngineType.allCases.filter { $0 != .custom }
+    @State private var detectedAgents: [AIEngineType] = []
     @State private var viewMode: ViewMode = .browser
     @State private var showSessionPicker = false
     @State private var keyboardHeight: CGFloat = 0
@@ -281,6 +281,10 @@ struct WorkspaceView: View {
         .task {
             await chatService.loadMessages(workspaceId: workspace.id, tabId: currentTab.id)
             setupOutputHandler()
+            // If agentsDetected packet was missed (sent before listener), fallback to claude
+            if detectedAgents.isEmpty {
+                detectedAgents = [.claude]
+            }
             await waitForConnectionAndStartClaude()
         }
         .onDisappear {
