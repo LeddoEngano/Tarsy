@@ -191,7 +191,7 @@ private struct SessionCard: View {
                     .lineLimit(2)
 
                 HStack(spacing: 8) {
-                    if let project = workspaceName ?? session.projectName {
+                    if let project = workspaceName ?? session.projectName as String? {
                         Text(project)
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(TarsyTheme.accentMoss)

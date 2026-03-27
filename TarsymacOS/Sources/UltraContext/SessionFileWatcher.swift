@@ -30,8 +30,8 @@ actor SessionFileWatcher {
         isRunning = true
         print("[SessionWatcher] Watching \(claudeDir)")
 
-        // Initial scan
-        Task { await scanAndSync() }
+        // Initial scan: just mark current file sizes, don't process existing content
+        Task { await markExistingFiles() }
 
         // Poll every 5 seconds for new content
         Task { @MainActor in
@@ -43,6 +43,24 @@ actor SessionFileWatcher {
 
     func stop() {
         isRunning = false
+    }
+
+    // MARK: - Initial mark
+
+    /// On first launch, skip existing content — only watch for new lines going forward
+    private func markExistingFiles() async {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: claudeDir) else { return }
+        let enumerator = fm.enumerator(atPath: claudeDir)
+        while let relativePath = enumerator?.nextObject() as? String {
+            guard relativePath.hasSuffix(".jsonl"), !relativePath.contains("/subagents/") else { continue }
+            let fullPath = claudeDir + "/" + relativePath
+            if let attrs = try? fm.attributesOfItem(atPath: fullPath),
+               let size = attrs[.size] as? Int64 {
+                watchedFiles[fullPath] = size
+            }
+        }
+        print("[SessionWatcher] Marked \(watchedFiles.count) existing files, watching for new content")
     }
 
     // MARK: - Scan
