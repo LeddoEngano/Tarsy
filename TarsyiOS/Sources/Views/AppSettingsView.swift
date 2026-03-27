@@ -6,11 +6,16 @@ struct AppSettingsView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var subscriptionManager: SubscriptionManager
     @EnvironmentObject var connectionManager: ConnectionManager
+    @EnvironmentObject var profileService: ProfileService
     @State private var apiKeys: [APIKeyEntry] = []
     @State private var editingProvider: AIEngineType?
     @State private var keyInput = ""
     @State private var showPaywall = false
     @State private var showMCPStore = false
+    @State private var permissionConfig = AgentPermissionConfig.load()
+    @State private var displayNameInput = ""
+    @State private var isEditingName = false
+    @State private var ultraContextApiKey = UserDefaults.standard.string(forKey: "ultracontext_api_key") ?? ""
 
     var body: some View {
         NavigationStack {
@@ -77,6 +82,69 @@ struct AppSettingsView: View {
                         }
                         .cornerRadius(10)
 
+                        // Profile Section
+                        sectionHeader("Profile")
+
+                        VStack(spacing: 1) {
+                            HStack(spacing: 12) {
+                                if let avatarUrlStr = profileService.profile?.avatarUrl, let url = URL(string: avatarUrlStr) {
+                                    AsyncImage(url: url) { image in
+                                        image.resizable().aspectRatio(contentMode: .fill)
+                                    } placeholder: {
+                                        Image(systemName: "person.circle.fill")
+                                            .foregroundColor(TarsyTheme.textSecondary)
+                                    }
+                                    .frame(width: 32, height: 32)
+                                    .clipShape(Circle())
+                                } else {
+                                    Image(systemName: "person.circle.fill")
+                                        .font(.system(size: 28))
+                                        .foregroundColor(TarsyTheme.textSecondary)
+                                        .frame(width: 32, height: 32)
+                                }
+
+                                if isEditingName {
+                                    TextField("display name", text: $displayNameInput)
+                                        .font(.system(size: 13, design: .monospaced))
+                                        .foregroundColor(TarsyTheme.textPrimary)
+                                        .textFieldStyle(.plain)
+                                        .onSubmit {
+                                            isEditingName = false
+                                            Task {
+                                                await profileService.updateDisplayName(displayNameInput)
+                                            }
+                                        }
+                                } else {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(profileService.profile?.nameOrEmail ?? "")
+                                            .font(.system(size: 13, design: .monospaced))
+                                            .foregroundColor(TarsyTheme.textPrimary)
+                                        if let email = profileService.profile?.email,
+                                           profileService.profile?.displayName != nil {
+                                            Text(email)
+                                                .font(.system(size: 10, design: .monospaced))
+                                                .foregroundColor(TarsyTheme.textSecondary)
+                                        }
+                                    }
+                                }
+
+                                Spacer()
+
+                                Button(action: {
+                                    displayNameInput = profileService.profile?.displayName ?? ""
+                                    isEditingName.toggle()
+                                }) {
+                                    Text(isEditingName ? "done" : "edit")
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(TarsyTheme.accentAmber)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(TarsyTheme.backgroundSecondary)
+                        }
+                        .cornerRadius(10)
+
                         // API Keys Section
                         sectionHeader("AI Provider Keys")
 
@@ -92,6 +160,66 @@ struct AppSettingsView: View {
                             .foregroundColor(TarsyTheme.textSecondary)
                             .padding(.horizontal, 4)
 
+                        // Agent Permissions
+                        sectionHeader("Agent Permissions")
+
+                        VStack(spacing: 1) {
+                            ForEach([AIEngineType.claude, .codex, .gemini, .aider], id: \.self) { engine in
+                                HStack(spacing: 12) {
+                                    Image(systemName: engine.iconName)
+                                        .font(.system(size: 14))
+                                        .foregroundColor(TarsyTheme.accentAmber)
+                                        .frame(width: 28)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(engine.displayName)
+                                            .font(TarsyTheme.monoFontSmall)
+                                            .foregroundColor(TarsyTheme.textPrimary)
+                                        Text(permissionConfig.mode(for: engine) == .dangerous ? "auto mode — runs without asking" : "safe mode — asks before actions")
+                                            .font(.system(size: 9, design: .monospaced))
+                                            .foregroundColor(TarsyTheme.textSecondary)
+                                    }
+
+                                    Spacer()
+
+                                    Button {
+                                        let current = permissionConfig.mode(for: engine)
+                                        let newMode: AgentPermissionConfig.PermissionMode = current == .dangerous ? .safe : .dangerous
+                                        permissionConfig.setMode(newMode, for: engine)
+                                        permissionConfig.save()
+                                        Task {
+                                            let perms = [
+                                                "claude": permissionConfig.claude.rawValue,
+                                                "codex": permissionConfig.codex.rawValue,
+                                                "gemini": permissionConfig.gemini.rawValue,
+                                                "aider": permissionConfig.aider.rawValue
+                                            ]
+                                            await profileService.updateAgentPermissions(perms)
+                                        }
+                                    } label: {
+                                        Text(permissionConfig.mode(for: engine) == .dangerous ? "auto" : "safe")
+                                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                            .foregroundColor(permissionConfig.mode(for: engine) == .dangerous ? TarsyTheme.accentTerracotta : TarsyTheme.accentMoss)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(
+                                                (permissionConfig.mode(for: engine) == .dangerous ? TarsyTheme.accentTerracotta : TarsyTheme.accentMoss).opacity(0.15)
+                                            )
+                                            .cornerRadius(6)
+                                    }
+                                }
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(TarsyTheme.backgroundSecondary)
+                            }
+                        }
+                        .cornerRadius(10)
+
+                        Text("Auto mode lets agents execute without permission prompts. Safe mode requires approval for each action.")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .padding(.horizontal, 4)
+
                         // Voice Language
                         sectionHeader("Voice Input")
 
@@ -99,6 +227,49 @@ struct AppSettingsView: View {
                             voiceLanguageRow
                         }
                         .cornerRadius(10)
+
+                        // UltraContext
+                        sectionHeader("UltraContext")
+
+                        VStack(spacing: 1) {
+                            HStack(spacing: 12) {
+                                Image(systemName: "brain.head.profile")
+                                    .font(.system(size: 16))
+                                    .foregroundColor(TarsyTheme.accentAmber)
+                                    .frame(width: 28)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("API Key")
+                                        .font(TarsyTheme.monoFontSmall)
+                                        .foregroundColor(TarsyTheme.textPrimary)
+
+                                    SecureField("uc_live_...", text: $ultraContextApiKey)
+                                        .font(.system(size: 11, design: .monospaced))
+                                        .foregroundColor(TarsyTheme.textPrimary)
+                                        .textFieldStyle(.plain)
+                                        .onChange(of: ultraContextApiKey) { _, newValue in
+                                            UserDefaults.standard.set(newValue, forKey: "ultracontext_api_key")
+                                        }
+                                }
+
+                                Spacer()
+
+                                if !ultraContextApiKey.isEmpty {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(TarsyTheme.accentMoss)
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(TarsyTheme.backgroundSecondary)
+                        }
+                        .cornerRadius(10)
+
+                        Text("Get your API key at ultracontext.ai. Required to view and continue AI sessions from your Mac.")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .padding(.horizontal, 4)
 
                         // About Section
                         sectionHeader("About")
@@ -247,6 +418,9 @@ struct AppSettingsView: View {
             ForEach(VoiceInputManager.supportedLanguages, id: \.code) { lang in
                 Button(lang.name) {
                     UserDefaults.standard.set(lang.code, forKey: VoiceInputManager.languageKey)
+                    Task {
+                        await profileService.updateVoiceLanguage(lang.code)
+                    }
                 }
             }
             Button("Cancel", role: .cancel) {}

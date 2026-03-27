@@ -43,11 +43,43 @@ struct WorkspaceView: View {
     @State private var engineModel = ""
     @State private var contextPercent: Double = 0
     @State private var currentBranch = ""
+    @State private var detectedAgents: [AIEngineType] = AIEngineType.allCases.filter { $0 != .custom }
     @State private var viewMode: ViewMode = .browser
     @State private var keyboardHeight: CGFloat = 0
+    @State private var keyboardAnimation: Animation = .easeInOut(duration: 0.25)
 
     private enum ViewMode: String {
         case browser, stream
+    }
+
+    // Per-tab state isolation
+    private struct TabState {
+        var isThinking = false
+        var activity: String? = nil
+        var options: [InteractiveOption]? = nil
+        var questions: [InteractiveQuestion]? = nil
+        var engineModel = ""
+        var contextPercent: Double = 0
+    }
+    @State private var tabStates: [String: TabState] = [:]
+
+    /// Returns true if the packet's sessionId matches the currently active tab
+    private func isActiveTabSession(_ packet: WSPacket) -> Bool {
+        let sid = packet.payload?["sessionId"] ?? ""
+        return sid.isEmpty || sid == currentTab.sessionId
+    }
+
+    /// Find tabId for a given sessionId
+    private func tabId(forSession sessionId: String) -> String? {
+        tabs.first(where: { $0.sessionId == sessionId })?.id
+    }
+
+    /// Update stored state for a background tab
+    private func updateBackgroundTabState(sessionId: String, update: (inout TabState) -> Void) {
+        guard let tabId = tabId(forSession: sessionId) else { return }
+        var state = tabStates[tabId] ?? TabState()
+        update(&state)
+        tabStates[tabId] = state
     }
 
     private var currentTab: TerminalTab {
@@ -73,33 +105,47 @@ struct WorkspaceView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Stream area
-                if workspace.stack == .web || workspace.stack == .fullstack {
-                    if viewMode == .browser {
-                        WebBrowserView(workspace: workspace, onScreenshot: { image in
-                            let data = image.jpegData(compressionQuality: 0.8)
-                            attachments.append(Attachment(
-                                name: "screenshot",
-                                type: .image,
-                                thumbnail: image,
-                                data: data
-                            ))
-                        }, isActive: $isStreamActive)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: isInputFocused ? 0 : UIScreen.main.bounds.height * 0.35)
-                            .clipped()
-                            .animation(.easeInOut(duration: 0.25), value: isInputFocused)
+                // Stream area — collapses when keyboard is up
+                if keyboardHeight == 0 {
+                    if workspace.stack == .web || workspace.stack == .fullstack {
+                        if viewMode == .browser {
+                            WebBrowserView(
+                                workspace: workspace,
+                                onScreenshot: { image in
+                                    let data = image.jpegData(compressionQuality: 0.8)
+                                    attachments.append(Attachment(
+                                        name: "screenshot",
+                                        type: .image,
+                                        thumbnail: image,
+                                        data: data
+                                    ))
+                                },
+                                activeSessionId: activeSessionIdBinding,
+                                activeEngineType: currentTab.engineType ?? .claude,
+                                onSessionCreated: handleSessionCreated,
+                                todoManager: todoManager,
+                                interactiveQuestions: $interactiveQuestions,
+                                interactiveOptions: $interactiveOptions,
+                                onInteractiveChoice: { sendInteractiveChoice($0) },
+                                onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) },
+                                onVoiceMessage: { persistVoiceMessage($0) },
+                                isActive: $isStreamActive
+                            )
+                                .frame(maxWidth: .infinity)
+                                .frame(height: UIScreen.main.bounds.height * 0.35)
+                                .clipped()
+                        } else {
+                            streamPlayerContent
+                        }
                     } else {
                         streamPlayerContent
                     }
-                } else {
-                    streamPlayerContent
+
+                    // Tabs bar
+                    tabBar
+
+                    Divider().background(TarsyTheme.backgroundTertiary)
                 }
-
-                // Tabs bar
-                tabBar
-
-                Divider().background(TarsyTheme.backgroundTertiary)
 
                 // Chat area + floating question card
                 ZStack(alignment: .bottom) {
@@ -124,15 +170,17 @@ struct WorkspaceView: View {
                     }
                 }
 
-                // View mode switch (web/fullstack only)
+                // View mode switch (web/fullstack only) — fade out when input is focused
                 if workspace.stack == .web || workspace.stack == .fullstack {
                     viewModeSwitch
+                        .opacity(isInputFocused ? 0 : 1)
+                        .animation(isInputFocused ? .easeOut(duration: 0.12) : .easeIn(duration: 0.4), value: isInputFocused)
+                        .allowsHitTesting(!isInputFocused)
                 }
 
                 // Input bar
                 inputBar
                     .padding(.bottom, isInputFocused ? max(keyboardHeight - 34, 0) : 0)
-                    .animation(.easeInOut(duration: 0.25), value: keyboardHeight)
             }
             .ignoresSafeArea(.keyboard)
             .onTapGesture { isInputFocused = false }
@@ -232,12 +280,29 @@ struct WorkspaceView: View {
             cleanupHandler()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
-            if let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
-                keyboardHeight = frame.height
+            let info = notification.userInfo
+            let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.3
+            let curveRaw = (info?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt) ?? 7
+            let animation: Animation = curveRaw == 7
+                ? .interpolatingSpring(mass: 3, stiffness: 1000, damping: 500, initialVelocity: 0)
+                : .easeOut(duration: duration)
+            keyboardAnimation = animation
+            if let frame = info?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect {
+                withAnimation(animation) {
+                    keyboardHeight = frame.height
+                }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-            keyboardHeight = 0
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { notification in
+            let info = notification.userInfo
+            let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.3
+            let curveRaw = (info?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt) ?? 7
+            let animation: Animation = curveRaw == 7
+                ? .interpolatingSpring(mass: 3, stiffness: 1000, damping: 500, initialVelocity: 0)
+                : .easeOut(duration: duration)
+            withAnimation(animation) {
+                keyboardHeight = 0
+            }
         }
     }
 
@@ -251,7 +316,26 @@ struct WorkspaceView: View {
                         tab: tab,
                         isSelected: selectedTabIndex == index,
                         action: {
+                            // Save current tab state
+                            let currentTab = tabs[selectedTabIndex]
+                            tabStates[currentTab.id] = TabState(
+                                isThinking: isAgentThinking,
+                                activity: agentActivity,
+                                options: interactiveOptions,
+                                questions: interactiveQuestions,
+                                engineModel: engineModel,
+                                contextPercent: contextPercent
+                            )
+                            // Switch tab
                             selectedTabIndex = index
+                            // Restore new tab state
+                            let restored = tabStates[tab.id] ?? TabState()
+                            isAgentThinking = restored.isThinking
+                            agentActivity = restored.activity
+                            interactiveOptions = restored.options
+                            interactiveQuestions = restored.questions
+                            engineModel = restored.engineModel
+                            contextPercent = restored.contextPercent
                             Task {
                                 await chatService.loadMessages(workspaceId: workspace.id, tabId: tab.id)
                             }
@@ -263,17 +347,10 @@ struct WorkspaceView: View {
                 }
 
                 Menu {
-                    Button(action: { addEngineTab(.claude) }) {
-                        Label("Claude Code", systemImage: "brain.head.profile")
-                    }
-                    Button(action: { addEngineTab(.gemini) }) {
-                        Label("Gemini CLI", systemImage: "sparkles")
-                    }
-                    Button(action: { addEngineTab(.codex) }) {
-                        Label("Codex CLI", systemImage: "chevron.left.forwardslash.chevron.right")
-                    }
-                    Button(action: { addEngineTab(.aider) }) {
-                        Label("Aider", systemImage: "wrench.and.screwdriver")
+                    ForEach(detectedAgents, id: \.self) { engine in
+                        Button(action: { addEngineTab(engine) }) {
+                            Label(engine.displayName, systemImage: engine.iconName)
+                        }
                     }
                 } label: {
                     Image(systemName: "plus")
@@ -297,6 +374,24 @@ struct WorkspaceView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
+                    // Load older messages
+                    if chatService.hasMoreMessages {
+                        Button {
+                            Task { await chatService.loadOlderMessages() }
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.up.circle")
+                                    .font(.system(size: 12))
+                                Text("load earlier messages")
+                                    .font(.system(size: 11, design: .monospaced))
+                            }
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                        }
+                        .id("load-more")
+                    }
+
                     ForEach(chatService.messages) { message in
                         MessageBubble(message: message)
                             .id(message.id)
@@ -477,9 +572,8 @@ struct WorkspaceView: View {
             onVoiceMessage: { persistVoiceMessage($0) }
         )
             .frame(maxWidth: .infinity)
-            .frame(height: isInputFocused ? 0 : UIScreen.main.bounds.height * 0.35)
+            .frame(height: UIScreen.main.bounds.height * 0.35)
             .clipped()
-            .animation(.easeInOut(duration: 0.25), value: isInputFocused)
     }
 
     private var viewModeSwitch: some View {
@@ -650,7 +744,7 @@ struct WorkspaceView: View {
             )
             .if_iOS26GlassEffect()
             .overlay(alignment: .bottomTrailing) {
-                if !todoManager.items.isEmpty {
+                if !todoManager.isMinimized && !todoManager.items.isEmpty {
                     VoiceTodoOverlay(todoManager: todoManager)
                         .padding(.trailing, 10)
                         .padding(.bottom, 52)
@@ -958,10 +1052,14 @@ struct WorkspaceView: View {
                 case .claudeOutput:
                     handleEngineOutput(packet)
                 case .claudeComplete:
-                    isAgentThinking = false
-                    agentActivity = nil
-                    await chatService.saveLastAssistantMessage()
                     let sid = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
+                    if isActiveTabSession(packet) {
+                        isAgentThinking = false
+                        agentActivity = nil
+                        await chatService.saveLastAssistantMessage()
+                    } else {
+                        updateBackgroundTabState(sessionId: sid) { $0.isThinking = false; $0.activity = nil }
+                    }
                     todoManager.markCompleted(sessionId: sid)
                 case .claudeCreate:
                     if let sessionId = packet.payload?["sessionId"] {
@@ -977,11 +1075,15 @@ struct WorkspaceView: View {
                 case .engineOutput:
                     handleEngineOutput(packet)
                 case .engineComplete:
-                    isAgentThinking = false
-                    agentActivity = nil
-                    await chatService.saveLastAssistantMessage()
                     let eSid = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
                     todoManager.markCompleted(sessionId: eSid)
+                    if isActiveTabSession(packet) {
+                        isAgentThinking = false
+                        agentActivity = nil
+                        await chatService.saveLastAssistantMessage()
+                    } else {
+                        updateBackgroundTabState(sessionId: eSid) { $0.isThinking = false; $0.activity = nil }
+                    }
                 case .engineCreate:
                     if let sessionId = packet.payload?["sessionId"] {
                         tabs[selectedTabIndex].sessionId = sessionId
@@ -1030,6 +1132,13 @@ struct WorkspaceView: View {
                         Haptics.success()
                     }
 
+                // Agent detection
+                case .agentsDetected:
+                    if let agentsStr = packet.payload?["agents"] {
+                        let types = agentsStr.split(separator: ",").compactMap { AIEngineType(rawValue: String($0)) }
+                        detectedAgents = types
+                    }
+
                 // Branch update
                 case .gitBranchesResult:
                     if let branch = packet.payload?["current"] {
@@ -1048,6 +1157,7 @@ struct WorkspaceView: View {
         // If we get output, the agent is working again (no longer waiting for question)
         let sessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
         todoManager.markResumed(sessionId: sessionId)
+        todoManager.confirmWorking(sessionId: sessionId)
         if let output = packet.payload?["output"] {
             if output.hasPrefix("🔧") {
                 let clean = output.trimmingCharacters(in: .whitespacesAndNewlines)

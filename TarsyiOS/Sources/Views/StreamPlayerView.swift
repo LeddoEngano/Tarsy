@@ -225,6 +225,12 @@ struct StreamPlayerView: View {
     @State private var isDevServerStarting = false
     @State private var isStartingStream = false
     @State private var gearRotation: Double = 0
+    @State private var showMiniUrlBar = false
+    @State private var miniUrlText = ""
+    @FocusState private var isMiniUrlFocused: Bool
+    @State private var detectedPorts: [PortInfo] = []
+    @State private var selectedPort: Int?
+    @State private var showPortPicker = false
 
     var body: some View {
         ZStack {
@@ -254,8 +260,14 @@ struct StreamPlayerView: View {
 
                 // Overlay controls (shared for both H.264 and MJPEG)
                 VStack {
-                    // Top row: FPS + fullscreen (top-right)
+                    // Top row
                     HStack {
+                        // Stop dev server top-left (kills server process only)
+                        if isWebMode && isDevServerRunning {
+                            streamButton("stop.fill", color: TarsyTheme.accentTerracotta) {
+                                stopDevServer()
+                            }
+                        }
                         Spacer()
                         Text("\(viewModel.fps) fps")
                             .font(.system(size: 10, design: .monospaced))
@@ -264,25 +276,100 @@ struct StreamPlayerView: View {
                             .padding(.vertical, 3)
                             .background(TarsyTheme.backgroundPrimary.opacity(0.7))
                             .cornerRadius(4)
-                        streamButton("arrow.up.left.and.arrow.down.right") {
-                            isFullscreen.toggle()
-                        }
                     }
 
                     Spacer()
 
-                    // Bottom row: gear (left) + screenshot (right)
-                    HStack {
-                        if isWebMode {
-                            devServerGear
-                        }
-                        Spacer()
+                    // Bottom controls — matches browser layout
+                    VStack(alignment: .leading, spacing: 8) {
                         streamButton("camera.viewfinder") {
                             saveScreenshot()
+                        }
+
+                        HStack(spacing: 8) {
+                            if isWebMode {
+                                // URL
+                                streamButton("globe") {
+                                    miniUrlText = currentBrowserUrl()
+                                    withAnimation(.easeInOut(duration: 0.25)) { showMiniUrlBar = true }
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isMiniUrlFocused = true }
+                                }
+
+                                // Back
+                                streamButton("chevron.left") {
+                                    connectionManager.send(WSPacket(action: .browserBack, payload: [:]))
+                                }
+
+                                // Forward
+                                streamButton("chevron.right") {
+                                    connectionManager.send(WSPacket(action: .browserForward, payload: [:]))
+                                }
+
+                                // Reload
+                                streamButton("arrow.clockwise") {
+                                    connectionManager.send(WSPacket(action: .browserRefresh, payload: [:]))
+                                }
+                            }
+
+                            Spacer()
+
+                            // Port badge
+                            if isWebMode && detectedPorts.count > 1 {
+                                Button(action: { showPortPicker = true }) {
+                                    Text(":\(String(selectedPort ?? 0))")
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(.white.opacity(0.7))
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 6)
+                                        .background(.ultraThinMaterial)
+                                        .cornerRadius(8)
+                                }
+                            }
+
+                            // Fullscreen
+                            streamButton("arrow.up.left.and.arrow.down.right") {
+                                isFullscreen.toggle()
+                            }
                         }
                     }
                 }
                 .padding(8)
+
+                // Mini URL bar overlay
+                if showMiniUrlBar {
+                    Color.black.opacity(0.3)
+                        .ignoresSafeArea()
+                        .onTapGesture {
+                            withAnimation(.easeInOut(duration: 0.25)) { showMiniUrlBar = false }
+                            isMiniUrlFocused = false
+                        }
+
+                    VStack {
+                        Spacer()
+                        HStack(spacing: 8) {
+                            TextField("", text: $miniUrlText, prompt: Text("enter url...").foregroundColor(.white.opacity(0.3)))
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(.white)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .keyboardType(.URL)
+                                .focused($isMiniUrlFocused)
+                                .onSubmit { navigateMiniUrl() }
+
+                            Button(action: { navigateMiniUrl() }) {
+                                Image(systemName: "arrow.right.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundColor(TarsyTheme.accentAmber)
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(.ultraThinMaterial)
+                        .cornerRadius(10)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
+                    }
+                }
             } else if isActive && viewModel.currentFrame == nil && !viewModel.isH264Mode {
                 VStack(spacing: 12) {
                     ProgressView()
@@ -341,6 +428,14 @@ struct StreamPlayerView: View {
         }
         .onAppear {
             checkDevServerStatus()
+            if isWebMode { detectPorts() }
+        }
+        .confirmationDialog("Select Port", isPresented: $showPortPicker, titleVisibility: .visible) {
+            ForEach(detectedPorts) { port in
+                Button(":\(String(port.port)) — \(port.process)") {
+                    selectStreamPort(port.port)
+                }
+            }
         }
     }
 
@@ -474,6 +569,20 @@ struct StreamPlayerView: View {
         }
     }
 
+    private func stopDevServer() {
+        guard isDevServerRunning else { return }
+        connectionManager.send(WSPacket(action: .devServerStop, payload: ["path": workspace.localPath]))
+
+        connectionManager.addListener("devserver-stop-only") { packet in
+            if packet.action == .devServerStop {
+                DispatchQueue.main.async {
+                    isDevServerRunning = false
+                }
+                connectionManager.removeListener("devserver-stop-only")
+            }
+        }
+    }
+
     private func checkDevServerStatus() {
         guard connectionManager.isConnected else { return }
 
@@ -562,15 +671,59 @@ struct StreamPlayerView: View {
         onScreenshot?(image)
     }
 
+    // MARK: - Browser Navigation (sends commands to macOS)
+
+    private func currentBrowserUrl() -> String {
+        if let streamUrl = workspace.streamUrl, !streamUrl.isEmpty {
+            return streamUrl
+        }
+        let port = selectedPort ?? UserDefaults.standard.integer(forKey: "devport_\(workspace.id)")
+        return port > 0 ? "http://localhost:\(port)" : "http://localhost:3000"
+    }
+
+    private func navigateMiniUrl() {
+        var urlStr = miniUrlText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !urlStr.contains("://") { urlStr = "http://" + urlStr }
+        connectionManager.send(WSPacket(action: .browserOpenUrl, payload: ["url": urlStr]))
+        withAnimation(.easeInOut(duration: 0.25)) { showMiniUrlBar = false }
+        isMiniUrlFocused = false
+    }
+
+    private func detectPorts() {
+        connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.localPath]))
+
+        connectionManager.addListener("stream-ports-\(workspace.id)") { packet in
+            if packet.action == .proxyDetectPortsResult {
+                if let json = packet.payload?["ports"],
+                   let data = json.data(using: .utf8),
+                   let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+                    DispatchQueue.main.async {
+                        detectedPorts = parsed.map { PortInfo(from: $0) }
+                        if selectedPort == nil, let first = detectedPorts.first {
+                            selectedPort = first.port
+                        }
+                    }
+                }
+                connectionManager.removeListener("stream-ports-\(workspace.id)")
+            }
+        }
+    }
+
+    private func selectStreamPort(_ port: Int) {
+        selectedPort = port
+        UserDefaults.standard.set(port, forKey: "devport_\(workspace.id)")
+        connectionManager.send(WSPacket(action: .browserOpenUrl, payload: ["url": "http://localhost:\(port)"]))
+    }
+
     @ViewBuilder
-    private func streamButton(_ icon: String, action: @escaping () -> Void) -> some View {
+    private func streamButton(_ icon: String, color: Color = .white, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 14))
-                .foregroundColor(.white)
-                .frame(width: 30, height: 30)
-                .background(TarsyTheme.backgroundPrimary.opacity(0.7))
-                .cornerRadius(6)
+                .font(.system(size: 11))
+                .foregroundColor(color.opacity(0.9))
+                .frame(width: 28, height: 28)
+                .background(.ultraThinMaterial)
+                .cornerRadius(7)
         }
     }
 }

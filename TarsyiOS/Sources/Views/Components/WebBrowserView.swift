@@ -15,6 +15,17 @@ struct WebBrowserView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
     @EnvironmentObject var machineService: MachineService
 
+    // Engine context for voice commands in fullscreen
+    @Binding var activeSessionId: String?
+    var activeEngineType: AIEngineType = .claude
+    var onSessionCreated: ((String) -> Void)? = nil
+    @ObservedObject var todoManager: VoiceTodoManager
+    @Binding var interactiveQuestions: [InteractiveQuestion]?
+    @Binding var interactiveOptions: [InteractiveOption]?
+    var onInteractiveChoice: ((InteractiveOption) -> Void)?
+    var onMultiQuestionSubmit: (([String: String]) -> Void)?
+    var onVoiceMessage: ((String) -> Void)?
+
     @State private var state: WebBrowserState = .detecting
     @State private var detectedPorts: [PortInfo] = []
     @State private var selectedPort: Int?
@@ -318,7 +329,18 @@ struct WebBrowserView: View {
             connectionManager: connectionManager,
             isRelay: connectionManager.connectionMode == .relay,
             onScreenshot: onScreenshot,
-            onClose: { isFullscreen = false }
+            onClose: { isFullscreen = false },
+            engineSessionId: $activeSessionId,
+            engineType: activeEngineType,
+            workspacePath: workspace.localPath,
+            aiContext: workspace.aiContext ?? "",
+            onSessionCreated: onSessionCreated,
+            todoManager: todoManager,
+            interactiveQuestions: $interactiveQuestions,
+            interactiveOptions: $interactiveOptions,
+            onInteractiveChoice: onInteractiveChoice,
+            onMultiQuestionSubmit: onMultiQuestionSubmit,
+            onVoiceMessage: onVoiceMessage
         )
     }
 
@@ -521,7 +543,6 @@ struct WebBrowserView: View {
     private func stopDevServer() {
         connectionManager.send(WSPacket(action: .devServerStop, payload: ["path": workspace.localPath]))
         isDevServerRunning = false
-        disconnect()
     }
 
     private func selectPort(_ port: Int) {
@@ -569,10 +590,25 @@ struct FullscreenWebBrowser: View {
     var onScreenshot: ((UIImage) -> Void)?
     let onClose: () -> Void
 
+    // Engine context for voice commands
+    @Binding var engineSessionId: String?
+    var engineType: AIEngineType
+    var workspacePath: String
+    var aiContext: String
+    var onSessionCreated: ((String) -> Void)?
+    @ObservedObject var todoManager: VoiceTodoManager
+    @Binding var interactiveQuestions: [InteractiveQuestion]?
+    @Binding var interactiveOptions: [InteractiveOption]?
+    var onInteractiveChoice: ((InteractiveOption) -> Void)?
+    var onMultiQuestionSubmit: (([String: String]) -> Void)?
+    var onVoiceMessage: ((String) -> Void)?
+
     @StateObject private var fullscreenRef = WebViewRef()
+    @StateObject private var voiceInput = VoiceInputManager()
     @State private var isLoading = false
     @State private var showUrlBar = false
     @State private var urlText = ""
+    @State private var isVoiceRecording = false
     @FocusState private var isUrlFocused: Bool
 
     var body: some View {
@@ -682,7 +718,157 @@ struct FullscreenWebBrowser: View {
                 .padding(.bottom, 12)
             }
         }
+        // Floating mic button — bottom-right
+        .overlay(alignment: .bottomTrailing) {
+            micButton
+                .padding(.trailing, 20)
+                .padding(.bottom, 56)
+        }
+        // Voice todo overlay
+        .overlay(alignment: .bottomTrailing) {
+            if !todoManager.items.isEmpty {
+                VoiceTodoOverlay(todoManager: todoManager)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 130)
+                    .allowsHitTesting(true)
+            }
+        }
+        // Interactive questions/options overlay
+        .overlay(alignment: .center) {
+            VStack(spacing: 8) {
+                if let questions = interactiveQuestions {
+                    PaginatedQuestionCard(
+                        questions: questions,
+                        onSubmitAll: { answers in
+                            onMultiQuestionSubmit?(answers)
+                        },
+                        onDismiss: {
+                            withAnimation {
+                                interactiveQuestions = nil
+                            }
+                        }
+                    )
+                    .padding(.horizontal, 40)
+                    .shadow(color: .black.opacity(0.4), radius: 12, y: -2)
+                }
+
+                if let options = interactiveOptions {
+                    InteractiveOptionsView(options: options) { selected in
+                        onInteractiveChoice?(selected)
+                    }
+                    .padding(.horizontal, 40)
+                }
+            }
+            .transition(.opacity.combined(with: .move(edge: .bottom)))
+            .animation(.easeInOut(duration: 0.25), value: interactiveQuestions?.count)
+            .animation(.easeInOut(duration: 0.25), value: interactiveOptions?.count)
+        }
         .statusBarHidden()
+        .onAppear { setupVoiceTodoListener() }
+        .onDisappear { connectionManager.removeListener("voice-todo-browser") }
+    }
+
+    // MARK: - Voice Todo Listener
+
+    private func setupVoiceTodoListener() {
+        connectionManager.addListener("voice-todo-browser") { packet in
+            if packet.action == .engineCreate,
+               let sessionId = packet.payload?["sessionId"] {
+                DispatchQueue.main.async {
+                    for i in todoManager.items.indices where todoManager.items[i].sessionId == "pending" {
+                        todoManager.items[i].sessionId = sessionId
+                    }
+                    engineSessionId = sessionId
+                    onSessionCreated?(sessionId)
+                }
+            }
+        }
+    }
+
+    // MARK: - Mic Button
+
+    private var micButton: some View {
+        ZStack {
+            if isVoiceRecording {
+                Circle()
+                    .stroke(TarsyTheme.accentAmber.opacity(0.4), lineWidth: 3)
+                    .frame(width: 72, height: 72)
+                    .scaleEffect(isVoiceRecording ? 1.3 : 1.0)
+                    .opacity(isVoiceRecording ? 0 : 1)
+                    .animation(.easeOut(duration: 1.0).repeatForever(autoreverses: false), value: isVoiceRecording)
+            }
+
+            Image(systemName: isVoiceRecording ? "mic.fill" : "mic")
+                .font(.system(size: 28, weight: .medium))
+                .foregroundColor(isVoiceRecording ? .white : .white.opacity(0.9))
+                .frame(width: 64, height: 64)
+                .background(
+                    Circle()
+                        .fill(isVoiceRecording ? TarsyTheme.accentAmber : TarsyTheme.accentAmber.opacity(0.8))
+                )
+                .shadow(color: TarsyTheme.accentAmber.opacity(isVoiceRecording ? 0.6 : 0.3), radius: isVoiceRecording ? 12 : 6)
+        }
+        .gesture(
+            LongPressGesture(minimumDuration: 0.15)
+                .onEnded { _ in startVoiceRecording() }
+                .sequenced(before: DragGesture(minimumDistance: 0)
+                    .onEnded { _ in stopVoiceRecording() }
+                )
+        )
+    }
+
+    // MARK: - Voice Recording
+
+    private func startVoiceRecording() {
+        isVoiceRecording = true
+        Haptics.medium()
+        voiceInput.startRecording { _ in }
+    }
+
+    private func stopVoiceRecording() {
+        guard isVoiceRecording else { return }
+        isVoiceRecording = false
+        Haptics.light()
+
+        let transcription = voiceInput.transcription.trimmingCharacters(in: .whitespacesAndNewlines)
+        voiceInput.stopRecording()
+
+        guard !transcription.isEmpty else { return }
+
+        onVoiceMessage?(transcription)
+
+        let voiceDirective = """
+
+
+        [SYSTEM: This is a voice command from a mobile device in fullscreen mode. The user CANNOT type text responses — they can only interact through structured UI buttons. Therefore:
+        1. EXECUTE the request immediately. Do not ask for clarification.
+        2. If you MUST ask something (destructive action, genuine ambiguity), you MUST use the AskUserQuestionTool with clear options. NEVER ask questions as plain text — the user cannot reply to plain text.
+        3. Make reasonable assumptions and proceed. The user will correct you if needed.]
+        """
+        let fullMessage = transcription + voiceDirective
+
+        if let sessionId = engineSessionId {
+            connectionManager.send(WSPacket(
+                action: .engineMessage,
+                payload: [
+                    "sessionId": sessionId,
+                    "message": fullMessage,
+                    "engineType": engineType.rawValue
+                ]
+            ))
+            todoManager.addItem(text: transcription, sessionId: sessionId)
+        } else {
+            connectionManager.send(WSPacket(
+                action: .engineCreate,
+                payload: [
+                    "path": workspacePath,
+                    "engineType": engineType.rawValue,
+                    "message": fullMessage,
+                    "aiContext": aiContext
+                ]
+            ))
+            todoManager.addItem(text: transcription, sessionId: "pending")
+        }
     }
 
     private func navigateToUrl() {

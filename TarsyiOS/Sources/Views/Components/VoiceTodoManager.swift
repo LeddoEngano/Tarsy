@@ -9,6 +9,7 @@ class VoiceTodoManager: ObservableObject {
     private var nextId = 1
     private var minimizeTask: Task<Void, Never>?
     private var cleanupTask: Task<Void, Never>?
+    private var deferredCompletionTasks: [String: Task<Void, Never>] = [:]
 
     struct VoiceTodoItem: Identifiable {
         let id: Int
@@ -16,6 +17,7 @@ class VoiceTodoManager: ObservableObject {
         var sessionId: String
         var status: Status = .working
         var currentTool: String? = nil
+        var resumedAt: Date? = nil
         let createdAt: Date = Date()
 
         enum Status {
@@ -55,6 +57,10 @@ class VoiceTodoManager: ObservableObject {
     func markCompleted(sessionId: String) -> Bool {
         // Primary: exact sessionId match
         if let idx = items.lastIndex(where: { $0.sessionId == sessionId && ($0.status == .working || $0.status == .question) }) {
+            if let resumedAt = items[idx].resumedAt, Date().timeIntervalSince(resumedAt) < 5 {
+                scheduleDeferredCompletion(sessionId: sessionId, itemId: items[idx].id, resumedAt: resumedAt)
+                return true
+            }
             withAnimation(.easeInOut(duration: 0.25)) {
                 items[idx].status = .completed
             }
@@ -62,7 +68,14 @@ class VoiceTodoManager: ObservableObject {
             return true
         }
         // Fallback: oldest active item (catches "pending" mismatch, empty string, etc.)
-        if let idx = items.firstIndex(where: { $0.status == .working || $0.status == .question }) {
+        // Skip items that were just resumed from a question (avoid premature completion)
+        if let idx = items.firstIndex(where: {
+            ($0.status == .working || $0.status == .question)
+        }) {
+            if let resumedAt = items[idx].resumedAt, Date().timeIntervalSince(resumedAt) < 5 {
+                scheduleDeferredCompletion(sessionId: items[idx].sessionId, itemId: items[idx].id, resumedAt: resumedAt)
+                return true
+            }
             withAnimation(.easeInOut(duration: 0.25)) {
                 items[idx].status = .completed
             }
@@ -119,7 +132,31 @@ class VoiceTodoManager: ObservableObject {
         if let idx = items.lastIndex(where: { $0.sessionId == sessionId && $0.status == .question }) {
             withAnimation(.easeInOut(duration: 0.25)) {
                 items[idx].status = .working
+                items[idx].resumedAt = Date()
             }
+        }
+    }
+
+    func confirmWorking(sessionId: String) {
+        deferredCompletionTasks[sessionId]?.cancel()
+        deferredCompletionTasks.removeValue(forKey: sessionId)
+        if let idx = items.lastIndex(where: { $0.sessionId == sessionId && $0.status == .working }) {
+            items[idx].resumedAt = nil
+        }
+    }
+
+    private func scheduleDeferredCompletion(sessionId: String, itemId: Int, resumedAt: Date) {
+        deferredCompletionTasks[sessionId]?.cancel()
+        deferredCompletionTasks[sessionId] = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled else { return }
+            if let idx = items.firstIndex(where: { $0.id == itemId && $0.status == .working && $0.resumedAt == resumedAt }) {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    items[idx].status = .completed
+                }
+                scheduleCleanup()
+            }
+            deferredCompletionTasks.removeValue(forKey: sessionId)
         }
     }
 

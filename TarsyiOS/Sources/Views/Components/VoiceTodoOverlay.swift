@@ -39,17 +39,17 @@ struct VoiceTodoOverlay: View {
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(TarsyTheme.accentMoss)
                 }
-
-                // Count badge
-                if todoManager.workingCount > 1 {
-                    Text("\(todoManager.workingCount)")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
-                        .foregroundColor(.white)
-                        .frame(width: 14, height: 14)
-                        .background(TarsyTheme.accentAmber)
-                        .clipShape(Circle())
-                        .offset(x: 10, y: -10)
-                }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            if todoManager.workingCount > 1 {
+                Text("\(todoManager.workingCount)")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .frame(width: 14, height: 14)
+                    .background(TarsyTheme.accentAmber)
+                    .clipShape(Circle())
+                    .offset(x: 4, y: -4)
             }
         }
         .transition(.scale.combined(with: .opacity))

@@ -7,13 +7,32 @@ struct DashboardView: View {
     @EnvironmentObject var machineService: MachineService
 
     @EnvironmentObject var subscriptionManager: SubscriptionManager
+    @EnvironmentObject var profileService: ProfileService
+    @EnvironmentObject var deepLinkRouter: DeepLinkRouter
+    @StateObject private var taskService = AgentTaskService()
     @State private var showNewWorkspace = false
     @State private var showSettings = false
     @State private var showPaywall = false
+    @State private var showQuickDispatch = false
+    @State private var showActiveSessions = false
+    @State private var deepLinkWorkspace: Workspace?
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                // Hidden navigation link for deep linking
+                NavigationLink(
+                    destination: Group {
+                        if let ws = deepLinkWorkspace {
+                            WorkspaceView(workspace: ws)
+                        }
+                    },
+                    isActive: Binding(
+                        get: { deepLinkWorkspace != nil },
+                        set: { if !$0 { deepLinkWorkspace = nil } }
+                    )
+                ) { EmptyView() }
+                .hidden()
                 // Custom header
                 HStack {
                     HStack(spacing: 8) {
@@ -34,6 +53,12 @@ struct DashboardView: View {
                     Spacer()
 
                     HStack(spacing: 16) {
+                        if !workspaceService.workspaces.isEmpty {
+                            Button(action: { showQuickDispatch = true }) {
+                                Image(systemName: "bolt.fill")
+                                    .foregroundColor(TarsyTheme.accentAmber)
+                            }
+                        }
                         Button(action: {
                             if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
                                 showNewWorkspace = true
@@ -43,6 +68,10 @@ struct DashboardView: View {
                         }) {
                             Image(systemName: "plus")
                                 .foregroundColor(TarsyTheme.accentAmber)
+                        }
+                        Button(action: { showActiveSessions = true }) {
+                            Image(systemName: "bubble.left.and.bubble.right")
+                                .foregroundColor(TarsyTheme.textSecondary)
                         }
                         Button(action: { showSettings = true }) {
                             Image(systemName: "gearshape")
@@ -60,10 +89,39 @@ struct DashboardView: View {
                 .padding(.vertical, 12)
                 .background(TarsyTheme.backgroundPrimary)
 
+                // User greeting
+                if let profile = profileService.profile {
+                    HStack(spacing: 8) {
+                        if let avatarUrlStr = profile.avatarUrl, let url = URL(string: avatarUrlStr) {
+                            AsyncImage(url: url) { image in
+                                image.resizable()
+                                    .aspectRatio(contentMode: .fill)
+                            } placeholder: {
+                                Image(systemName: "person.circle.fill")
+                                    .foregroundColor(TarsyTheme.textSecondary)
+                            }
+                            .frame(width: 24, height: 24)
+                            .clipShape(Circle())
+                        }
+                        Text(profile.nameOrEmail)
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+                }
+
                 // Content
                 ZStack {
                     TarsyTheme.backgroundPrimary
                         .ignoresSafeArea()
+
+                    if !taskService.activeTasks.isEmpty {
+                        activeTasksSection
+                            .padding(.horizontal, 16)
+                            .padding(.top, 12)
+                    }
 
                     if workspaceService.isLoading && workspaceService.workspaces.isEmpty {
                         VStack(spacing: 12) {
@@ -91,13 +149,29 @@ struct DashboardView: View {
         .fullScreenCover(isPresented: $showPaywall) {
             PaywallView()
         }
+        .sheet(isPresented: $showQuickDispatch) {
+            QuickDispatchView(workspaces: workspaceService.workspaces)
+        }
+        .sheet(isPresented: $showActiveSessions) {
+            ActiveSessionsView()
+        }
         .task {
             await machineService.fetchMachine()
             await workspaceService.fetchWorkspaces()
+            await taskService.loadActiveTasks()
+            await taskService.cleanupOldTasks()
         }
         .refreshable {
             await machineService.fetchMachine()
             await workspaceService.fetchWorkspaces()
+            await taskService.loadActiveTasks()
+        }
+        .onChange(of: deepLinkRouter.pendingWorkspaceId) { _, wsId in
+            guard let wsId else { return }
+            if let workspace = workspaceService.workspaces.first(where: { $0.id == wsId }) {
+                deepLinkWorkspace = workspace
+            }
+            deepLinkRouter.pendingWorkspaceId = nil
         }
     }
 
@@ -123,6 +197,81 @@ struct DashboardView: View {
                     )
             }
         }
+    }
+
+    private var activeTasksSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("active tasks")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundColor(TarsyTheme.textSecondary)
+                .textCase(.uppercase)
+
+            ForEach(taskService.activeTasks) { task in
+                if let workspace = workspaceService.workspaces.first(where: { $0.id == task.workspaceId }) {
+                    NavigationLink(destination: WorkspaceView(workspace: workspace)) {
+                        taskRow(task)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    taskRow(task)
+                }
+            }
+        }
+    }
+
+    private func taskRow(_ task: AgentTask) -> some View {
+        HStack(spacing: 10) {
+            Group {
+                switch task.status {
+                case .running:
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .tint(TarsyTheme.accentAmber)
+                case .waiting:
+                    Image(systemName: "questionmark.circle.fill")
+                        .foregroundColor(TarsyTheme.accentAmber)
+                case .completed:
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(TarsyTheme.accentMoss)
+                case .error:
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .foregroundColor(TarsyTheme.accentTerracotta)
+                }
+            }
+            .font(.system(size: 14))
+            .frame(width: 20, height: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(task.description)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .lineLimit(2)
+
+                HStack(spacing: 6) {
+                    if let engine = task.engineType {
+                        Text(engine)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(TarsyTheme.accentAmber)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(TarsyTheme.accentAmber.opacity(0.15))
+                            .cornerRadius(3)
+                    }
+                    Text(task.status.rawValue)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                }
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10))
+                .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
+        }
+        .padding(10)
+        .background(TarsyTheme.backgroundSecondary)
+        .cornerRadius(8)
     }
 
     private var workspaceList: some View {
