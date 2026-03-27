@@ -95,7 +95,8 @@ actor UltraContextSync {
 
     func agentOutput(sessionId: String, content: String) async {
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        guard let ctxId = await ensureContext(sessionId: sessionId) else { return }
+        // Only append if context already exists (created by userMessage) — don't create from output alone
+        guard let ctxId = contextMap[sessionId] else { return }
         do {
             try await appendMessage(contextId: ctxId, role: "assistant", content: String(content.prefix(8000)))
         } catch {
