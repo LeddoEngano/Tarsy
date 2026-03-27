@@ -136,6 +136,17 @@ public enum WSAction: String, Codable, Sendable {
     case agentSettings = "agent:settings"
     case agentSettingsUpdate = "agent:settings_update"
 
+    // Repo Analysis
+    case repoAnalyze = "repo:analyze"
+    case repoAnalysis = "repo:analysis"
+
+    // AI Project Wizard
+    case wizardStart = "wizard:start"
+    case wizardResponse = "wizard:response"
+    case wizardExecute = "wizard:execute"
+    case wizardResult = "wizard:result"
+    case wizardGhDetected = "wizard:gh_detected"
+
     // UltraContext
     case ultracontextStatus = "ultracontext:status"
 
