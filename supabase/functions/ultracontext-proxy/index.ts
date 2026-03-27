@@ -199,20 +199,43 @@ serve(async (req) => {
       return new Response(data, { status: res.status, headers: { "Content-Type": "application/json" } });
     }
 
-    // DELETE — POST ?action=delete, body: { ids: ["ctx_1", "ctx_2"] }
+    // DELETE — uses batch-delete endpoint (1 request) or falls back to per-context delete
     if (action === "delete" && payload.ids) {
       const contextIds = Array.isArray(payload.ids) ? payload.ids : [payload.ids];
 
-      // Delete all contexts in parallel
+      // Try batch-delete first (requires ultracontext/ultracontext#20)
+      const batchRes = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/batch-delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
+        body: JSON.stringify({ ids: contextIds }),
+      });
+
+      if (batchRes.ok) {
+        for (const id of contextIds) contextOwners.delete(id);
+        const data = await batchRes.json();
+        return new Response(JSON.stringify(data), {
+          status: 200, headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Fallback: delete each context individually (no body = delete entire context)
       const results = await Promise.all(
         contextIds.map(async (ctxId: string) => {
           try {
+            const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/${ctxId}`, {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
+            });
+            if (res.ok) {
+              contextOwners.delete(ctxId);
+              return { id: ctxId, deleted: true };
+            }
+            // Final fallback: delete all messages individually
             const getRes = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/${ctxId}`, {
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
             });
             const detail = await getRes.json();
             const msgs = detail?.data ?? [];
-
             if (msgs.length > 0) {
               const msgIds = msgs.map((m: any) => m.id).filter(Boolean);
               if (msgIds.length > 0) {
@@ -224,14 +247,14 @@ serve(async (req) => {
               }
             }
             contextOwners.delete(ctxId);
-            return { id: ctxId, ok: true };
+            return { id: ctxId, deleted: true };
           } catch {
-            return { id: ctxId, ok: false };
+            return { id: ctxId, deleted: false };
           }
         }),
       );
 
-      return new Response(JSON.stringify({ deleted: results }), {
+      return new Response(JSON.stringify({ results }), {
         status: 200, headers: { "Content-Type": "application/json" },
       });
     }
