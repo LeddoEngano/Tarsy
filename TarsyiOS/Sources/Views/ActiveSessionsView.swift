@@ -17,6 +17,11 @@ struct ActiveSessionsView: View {
     @State private var showDeleteConfirm = false
     @State private var isDeleting = false
 
+    // Workspace picker
+    @State private var showWorkspacePicker = false
+    @State private var pendingContinueSession: UltraContextSession?
+    @State private var matchedWorkspaces: [Workspace] = []
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -85,6 +90,25 @@ struct ActiveSessionsView: View {
             }
         } message: {
             Text("This will permanently delete \(selectedIds.count) session\(selectedIds.count == 1 ? "" : "s") and all their messages.")
+        }
+        .confirmationDialog(
+            "Choose workspace",
+            isPresented: $showWorkspacePicker,
+            titleVisibility: .visible
+        ) {
+            ForEach(matchedWorkspaces) { ws in
+                Button(ws.name) {
+                    if let session = pendingContinueSession {
+                        launchInWorkspace(session: session, workspace: ws)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                pendingContinueSession = nil
+                matchedWorkspaces = []
+            }
+        } message: {
+            Text("Multiple workspaces match this session. Which one should continue it?")
         }
     }
 
@@ -230,24 +254,46 @@ struct ActiveSessionsView: View {
         isLoadingDetail = false
     }
 
-    private func matchWorkspace(for session: UltraContextSession?) -> Workspace? {
-        guard let path = session?.projectPath else { return nil }
-        // Try exact match first, then prefix match, then directory name match
-        return workspaceService.workspaces.first { ws in
-            ws.localPath == path
-        } ?? workspaceService.workspaces.first { ws in
-            path.hasPrefix(ws.localPath) || ws.localPath.hasPrefix(path)
-        } ?? workspaceService.workspaces.first { ws in
-            let wsDir = ws.localPath.components(separatedBy: "/").last ?? ""
-            let sessionDir = path.components(separatedBy: "/").last ?? ""
-            return !wsDir.isEmpty && wsDir == sessionDir
+    private func matchWorkspaces(for session: UltraContextSession?) -> [Workspace] {
+        guard let path = session?.projectPath else { return [] }
+        // Collect all workspaces that match by path
+        let exact = workspaceService.workspaces.filter { $0.localPath == path }
+        if !exact.isEmpty { return exact }
+
+        let prefix = workspaceService.workspaces.filter {
+            path.hasPrefix($0.localPath) || $0.localPath.hasPrefix(path)
+        }
+        if !prefix.isEmpty { return prefix }
+
+        let sessionDir = path.components(separatedBy: "/").last ?? ""
+        guard !sessionDir.isEmpty else { return [] }
+        return workspaceService.workspaces.filter {
+            $0.localPath.components(separatedBy: "/").last == sessionDir
         }
     }
 
-    private func continueSession(_ session: UltraContextSession) {
-        let workspace = matchWorkspace(for: session) ?? workspaceService.workspaces.first
-        guard let workspace else { return }
+    /// Single best match for display purposes (card subtitle)
+    private func matchWorkspace(for session: UltraContextSession?) -> Workspace? {
+        matchWorkspaces(for: session).first
+    }
 
+    private func continueSession(_ session: UltraContextSession) {
+        let matches = matchWorkspaces(for: session)
+
+        if matches.count > 1 {
+            // Multiple matches — show picker
+            pendingContinueSession = session
+            matchedWorkspaces = matches
+            showWorkspacePicker = true
+            return
+        }
+
+        let workspace = matches.first ?? workspaceService.workspaces.first
+        guard let workspace else { return }
+        launchInWorkspace(session: session, workspace: workspace)
+    }
+
+    private func launchInWorkspace(session: UltraContextSession, workspace: Workspace) {
         let contextSummary = session.messages
             .suffix(10)
             .map { "[\($0.role)] \($0.content)" }
@@ -265,7 +311,6 @@ struct ActiveSessionsView: View {
             ]
         ))
 
-        // Navigate to the workspace via deep link
         deepLinkRouter.pendingWorkspaceId = workspace.id
         dismiss()
     }
