@@ -102,22 +102,43 @@ serve(async (req) => {
 
             // Find first real user message for title
             let title = "";
+            let hasImage = false;
             for (const msg of msgs) {
               if (msg.role === "user") {
                 const text = extractText(msg.content);
-                if (text && !text.startsWith("[engine:") && !text.startsWith("[session:")) {
-                  title = text.substring(0, 100);
-                  break;
+                if (!text || text.startsWith("[engine:") || text.startsWith("[session:")) continue;
+
+                // Detect image references
+                if (text.match(/\[Image[:\s]|\/var\/folders|\/tmp\/|\.png|\.jpg|\.jpeg|\.heic|\.webp|screenshot/i)) {
+                  hasImage = true;
+                  // Look for actual text after/before the image reference
+                  const cleanText = text
+                    .replace(/\[Image[^\]]*\]/gi, "")
+                    .replace(/\/[\w\/\-._]+\.(png|jpg|jpeg|heic|webp)/gi, "")
+                    .replace(/source:\s*\S+/gi, "")
+                    .trim();
+                  if (cleanText.length > 10) {
+                    title = cleanText.substring(0, 100);
+                  }
+                  continue;
                 }
+
+                title = text.substring(0, 100);
+                break;
               }
             }
-            if (!title && msgs.length > 0) {
-              title = extractText(msgs[0].content).substring(0, 100);
+            if (!title) {
+              if (hasImage) {
+                title = "Screenshot analysis";
+              } else if (msgs.length > 0) {
+                title = extractText(msgs[0].content).substring(0, 100) || "Untitled session";
+              }
             }
 
             return {
               id: ctx.id,
               title: title || "Untitled session",
+              has_image: hasImage,
               message_count: messageCount,
               project_path: ctx.metadata?.project_path ?? null,
               engine_type: ctx.metadata?.source ?? null,

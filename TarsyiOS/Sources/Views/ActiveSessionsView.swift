@@ -117,6 +117,7 @@ struct ActiveSessionsView: View {
                 createdAt: session.createdAt ?? full.createdAt,
                 updatedAt: full.updatedAt,
                 title: session.title ?? full.title,
+                hasImage: session.hasImage,
                 projectPath: session.projectPath ?? full.projectPath,
                 engineType: session.engineType ?? full.engineType,
                 messageCount: full.messages.count
@@ -180,11 +181,11 @@ private struct SessionCard: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "brain.head.profile")
+            Image(systemName: session.hasImage ? "photo" : "brain.head.profile")
                 .font(.system(size: 18))
-                .foregroundColor(TarsyTheme.accentAmber)
+                .foregroundColor(session.hasImage ? TarsyTheme.accentTerracotta : TarsyTheme.accentAmber)
                 .frame(width: 36, height: 36)
-                .background(TarsyTheme.accentAmber.opacity(0.15))
+                .background((session.hasImage ? TarsyTheme.accentTerracotta : TarsyTheme.accentAmber).opacity(0.15))
                 .cornerRadius(8)
 
             VStack(alignment: .leading, spacing: 4) {

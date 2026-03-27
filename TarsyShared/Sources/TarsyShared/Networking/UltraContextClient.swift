@@ -19,12 +19,14 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
     public let createdAt: String?
     public let updatedAt: String?
     public let title: String?
+    public let hasImage: Bool
     public let projectPath: String?
     public let engineType: String?
     public let messageCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, messages, version, title
+        case hasImage = "has_image"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case projectPath = "project_path"
@@ -34,13 +36,15 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
 
     public init(id: String, messages: [UltraContextMessage] = [], version: Int? = nil,
                 createdAt: String? = nil, updatedAt: String? = nil, title: String? = nil,
-                projectPath: String? = nil, engineType: String? = nil, messageCount: Int? = nil) {
+                hasImage: Bool = false, projectPath: String? = nil, engineType: String? = nil,
+                messageCount: Int? = nil) {
         self.id = id
         self.messages = messages
         self.version = version
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.title = title
+        self.hasImage = hasImage
         self.projectPath = projectPath
         self.engineType = engineType
         self.messageCount = messageCount
@@ -54,6 +58,7 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
         createdAt = try? container.decode(String.self, forKey: .createdAt)
         updatedAt = try? container.decode(String.self, forKey: .updatedAt)
         title = try? container.decode(String.self, forKey: .title)
+        hasImage = (try? container.decode(Bool.self, forKey: .hasImage)) ?? false
         projectPath = try? container.decode(String.self, forKey: .projectPath)
         engineType = try? container.decode(String.self, forKey: .engineType)
         messageCount = try? container.decode(Int.self, forKey: .messageCount)
