@@ -6,6 +6,7 @@ struct ActiveSessionsView: View {
     @StateObject private var client = UltraContextClient.configured()
     @EnvironmentObject var connectionManager: ConnectionManager
     @EnvironmentObject var workspaceService: WorkspaceService
+    @EnvironmentObject var deepLinkRouter: DeepLinkRouter
     @State private var selectedSession: UltraContextSession?
     @State private var loadedSession: UltraContextSession?
     @State private var showContinueConfirm = false
@@ -275,6 +276,8 @@ struct ActiveSessionsView: View {
             ]
         ))
 
+        // Navigate to the workspace via deep link
+        deepLinkRouter.pendingWorkspaceId = workspace.id
         dismiss()
     }
 }
