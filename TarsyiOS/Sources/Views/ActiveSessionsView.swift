@@ -57,9 +57,11 @@ struct ActiveSessionsView: View {
                         .foregroundColor(TarsyTheme.accentAmber)
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("done") { dismiss() }
-                        .foregroundColor(TarsyTheme.accentAmber)
+                if !isEditing {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("done") { dismiss() }
+                            .foregroundColor(TarsyTheme.accentAmber)
+                    }
                 }
             }
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
