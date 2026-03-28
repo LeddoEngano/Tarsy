@@ -330,9 +330,10 @@ struct WorkspaceView: View {
                                                 .renderingMode(.template)
                                                 .resizable()
                                                 .aspectRatio(contentMode: .fit)
-                                                .frame(width: 16, height: 16)
+                                                .frame(width: 12, height: 12)
                                         } else {
                                             Image(systemName: engine.iconName)
+                                                .font(.system(size: 12))
                                         }
                                     }
                                 }
