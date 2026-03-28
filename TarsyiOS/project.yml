@@ -70,7 +70,9 @@ targets:
     type: app-extension
     platform: iOS
     sources:
-      - TarsyWidgetExtension
+      - path: TarsyWidgetExtension
+        excludes:
+          - Info.plist
       - path: Sources/LiveActivity/TarsyActivityAttributes.swift
         buildPhase: sources
     info:
@@ -89,9 +91,6 @@ targets:
         CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_STYLE: "Automatic"
         SWIFT_VERSION: "5.9"
-        GENERATE_INFOPLIST_FILE: YES
-        MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
 schemes:
   TarsyiOS:
     build:
