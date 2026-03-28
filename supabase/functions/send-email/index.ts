@@ -257,15 +257,10 @@ serve(async (req) => {
     const body = await req.json();
 
     // Webhook trigger (profiles INSERT → welcome email)
-    // Webhooks use the service role key — verify it matches
+    // Webhooks MUST use the service role key — no user JWT fallback
     if (body.type === "INSERT" && body.record?.email) {
       if (token !== SUPABASE_SERVICE_ROLE_KEY) {
-        // Also accept a valid user JWT for the webhook (pg_net uses service role)
-        const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
-        const { data: { user }, error } = await supabase.auth.getUser(token);
-        if (error || !user) {
-          return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
-        }
+        return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
       }
       const { record } = body as WebhookPayload;
       const content = welcomeEmail(record.display_name || "");
@@ -315,6 +310,6 @@ serve(async (req) => {
     return new Response(JSON.stringify(result), { status: result.success ? 200 : 500 });
   } catch (err) {
     console.error("send-email error:", err);
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500 });
+    return new Response(JSON.stringify({ error: "Failed to send email" }), { status: 500 });
   }
 });

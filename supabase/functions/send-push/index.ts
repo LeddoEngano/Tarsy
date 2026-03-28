@@ -154,6 +154,6 @@ serve(async (req) => {
     );
   } catch (err) {
     console.error("Edge function error:", err);
-    return new Response(JSON.stringify({ error: String(err) }), { status: 500 });
+    return new Response(JSON.stringify({ error: "Failed to send notification" }), { status: 500 });
   }
 });

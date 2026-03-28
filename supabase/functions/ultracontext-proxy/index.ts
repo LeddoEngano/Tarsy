@@ -1,6 +1,6 @@
 // Supabase Edge Function: ultracontext-proxy
 // Proxies requests to UltraContext API with server-side API key.
-// Deploy with: supabase functions deploy ultracontext-proxy --no-verify-jwt
+// Deploy with: supabase functions deploy ultracontext-proxy
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -286,7 +286,7 @@ serve(async (req) => {
     });
   } catch (err) {
     console.error("[ultracontext-proxy] Error:", err);
-    return new Response(JSON.stringify({ error: String(err) }), {
+    return new Response(JSON.stringify({ error: "Proxy request failed" }), {
       status: 500, headers: { "Content-Type": "application/json" },
     });
   }
