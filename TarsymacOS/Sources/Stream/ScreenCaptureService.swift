@@ -1,8 +1,6 @@
 import Foundation
 import ScreenCaptureKit
-import CoreGraphics
-import CoreImage
-import VideoToolbox
+import CoreMedia
 
 @MainActor
 class ScreenCaptureService: NSObject, ObservableObject {
@@ -15,8 +13,7 @@ class ScreenCaptureService: NSObject, ObservableObject {
     private var cachedContent: SCShareableContent?
     private var hasPermission = false
 
-    var onFrame: ((CGImage) -> Void)?
-    /// Direct pixel buffer callback for H.264 encoding (avoids CGImage conversion)
+    /// Direct pixel buffer callback for H.264 encoding
     var onPixelBuffer: ((CVPixelBuffer) -> Void)?
 
     // Request permission once at startup without triggering a capture
@@ -131,11 +128,10 @@ class ScreenCaptureService: NSObject, ObservableObject {
 
         // Reuse stream output if possible
         if streamOutput == nil {
-            streamOutput = StreamOutput { [weak self] image in
-                self?.onFrame?(image)
+            streamOutput = StreamOutput { [weak self] pixelBuffer in
+                self?.onPixelBuffer?(pixelBuffer)
             }
         }
-        // Wire pixel buffer handler for H.264 path
         streamOutput?.pixelBufferHandler = onPixelBuffer != nil ? { [weak self] pixelBuffer in
             self?.onPixelBuffer?(pixelBuffer)
         } : nil
@@ -177,8 +173,8 @@ class ScreenCaptureService: NSObject, ObservableObject {
         config.showsCursor = true
 
         if streamOutput == nil {
-            streamOutput = StreamOutput { [weak self] image in
-                self?.onFrame?(image)
+            streamOutput = StreamOutput { [weak self] pixelBuffer in
+                self?.onPixelBuffer?(pixelBuffer)
             }
         }
         streamOutput?.pixelBufferHandler = onPixelBuffer != nil ? { [weak self] pixelBuffer in
@@ -206,28 +202,16 @@ class ScreenCaptureService: NSObject, ObservableObject {
 }
 
 private class StreamOutput: NSObject, SCStreamOutput {
-    let handler: (CGImage) -> Void
     var pixelBufferHandler: ((CVPixelBuffer) -> Void)?
 
-    init(handler: @escaping (CGImage) -> Void) {
-        self.handler = handler
+    init(handler: @escaping (CVPixelBuffer) -> Void) {
+        self.pixelBufferHandler = handler
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen,
               let imageBuffer = sampleBuffer.imageBuffer else { return }
 
-        // If H.264 encoder is connected, send pixel buffer directly (no conversion needed)
-        if let pixelBufferHandler {
-            pixelBufferHandler(imageBuffer)
-            return
-        }
-
-        // Fallback: convert to CGImage for MJPEG path
-        var cgImage: CGImage?
-        VTCreateCGImageFromCVPixelBuffer(imageBuffer, options: nil, imageOut: &cgImage)
-        guard let cgImage else { return }
-
-        handler(cgImage)
+        pixelBufferHandler?(imageBuffer)
     }
 }

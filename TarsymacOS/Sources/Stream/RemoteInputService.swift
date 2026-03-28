@@ -434,8 +434,9 @@ class RemoteInputService {
         idbQueue.async { [self] in
             let idb = findIdb()
 
+            // Shell-escape each argument with single quotes (prevents all injection)
             let escaped = argsCopy.map { a in
-                a.contains(" ") ? "\"\(a)\"" : a
+                "'" + a.replacingOccurrences(of: "'", with: "'\\''") + "'"
             }.joined(separator: " ")
             let fullCommand = "rm -f /tmp/idb/state.lock && \(idb) \(escaped)"
 

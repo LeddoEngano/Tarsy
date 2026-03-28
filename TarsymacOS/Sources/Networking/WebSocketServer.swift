@@ -7,13 +7,18 @@ actor WebSocketServer {
     private var connections: [String: NWConnection] = [:]
     private let port: UInt16
     private let validateToken: @Sendable (String) async -> Bool
+    private let tlsEnabled: Bool
 
     private var onPacketReceived: (@Sendable (String, WSPacket) async -> Void)?
     private var onClientConnected: (@Sendable (String) -> Void)?
     private var onClientDisconnected: (@Sendable (String) -> Void)?
 
-    init(port: UInt16 = TarsyConfig.websocketPort, validateToken: @escaping @Sendable (String) async -> Bool) {
+    /// The SHA-256 fingerprint of the TLS certificate (available after start if TLS is enabled)
+    private(set) var certificateFingerprint: String?
+
+    init(port: UInt16 = TarsyConfig.websocketPort, tlsEnabled: Bool = true, validateToken: @escaping @Sendable (String) async -> Bool) {
         self.port = port
+        self.tlsEnabled = tlsEnabled
         self.validateToken = validateToken
     }
 
@@ -35,7 +40,31 @@ actor WebSocketServer {
         // Kill any lingering process on our port before binding
         killProcessOnPort(port)
 
-        let parameters = NWParameters.tcp
+        let parameters: NWParameters
+
+        if tlsEnabled, let identity = TLSCertificateManager.shared.getOrCreateIdentity() {
+            // Configure TLS with self-signed certificate
+            let tlsOptions = NWProtocolTLS.Options()
+            sec_protocol_options_set_local_identity(
+                tlsOptions.securityProtocolOptions,
+                sec_identity_create(identity)!
+            )
+            sec_protocol_options_set_min_tls_protocol_version(
+                tlsOptions.securityProtocolOptions,
+                .TLSv12
+            )
+
+            let tcpOptions = NWProtocolTCP.Options()
+            parameters = NWParameters(tls: tlsOptions, tcp: tcpOptions)
+
+            certificateFingerprint = TLSCertificateManager.shared.certificateFingerprint()
+            print("[WSServer] TLS enabled, fingerprint: \(certificateFingerprint ?? "unknown")")
+        } else if tlsEnabled {
+            throw NWError.posix(.ENOTSUP)
+        } else {
+            parameters = NWParameters.tcp
+        }
+
         let wsOptions = NWProtocolWebSocket.Options()
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
 
@@ -156,7 +185,11 @@ actor WebSocketServer {
                         let valid = await self.validateToken(token)
                         if valid {
                             print("[WSServer] Client \(clientId) authenticated")
-                            await self.send(WSPacket(action: .authSuccess), to: clientId)
+                            var authPayload: [String: String] = [:]
+                            if let fp = await self.certificateFingerprint {
+                                authPayload["fingerprint"] = fp
+                            }
+                            await self.send(WSPacket(action: .authSuccess, payload: authPayload.isEmpty ? nil : authPayload), to: clientId)
                             await self.onClientConnected?(clientId)
                             await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)
                         } else {

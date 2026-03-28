@@ -14,6 +14,7 @@ class DaemonManager: ObservableObject {
     @Published var tailscaleIP: String?
     @Published var machineId: UUID?
     @Published var lastError: String?
+    private var ownerUserId: UUID?
     @Published var debugLog: String = ""
 
     private var wsServer: WebSocketServer?
@@ -21,7 +22,6 @@ class DaemonManager: ObservableObject {
     private let terminalManager = TerminalSessionManager()
     private var orchestrator: WorkspaceOrchestrator?
     private let screenCapture = ScreenCaptureService()
-    private var mjpegServer: MJPEGStreamServer?
     private var h264Encoder: H264Encoder?
     private let openClaw = OpenClawService()
     private let remoteInput = RemoteInputService()
@@ -242,7 +242,16 @@ class DaemonManager: ObservableObject {
 
     private func validateAuthToken(_ token: String) async -> Bool {
         do {
-            _ = try await supabase.auth.user(jwt: token)
+            let user = try await supabase.auth.user(jwt: token)
+            // Verify the connecting user owns this machine
+            guard let ownerId = ownerUserId else {
+                log("validateAuthToken: machine not yet registered — rejecting")
+                return false
+            }
+            guard user.id == ownerId else {
+                log("validateAuthToken: user \(user.id) does not own this machine (owner: \(ownerId)) — rejecting")
+                return false
+            }
             return true
         } catch {
             return false
@@ -1434,13 +1443,6 @@ class DaemonManager: ObservableObject {
         }
 
         do {
-            // Start MJPEG server if not running
-            if mjpegServer == nil {
-                mjpegServer = MJPEGStreamServer()
-                try await mjpegServer?.start()
-                log("streamStart: MJPEG server started on port 8643")
-            }
-
             // OpenClaw: capture entire display
             if isOpenClaw {
                 await screenCapture.requestPermission()
@@ -1455,7 +1457,7 @@ class DaemonManager: ObservableObject {
 
                 setupEncoderFrameRelay(encoder: encoder, isRelay: isRelay, clientId: clientId)
 
-                screenCapture.onFrame = nil
+    
                 screenCapture.onPixelBuffer = { [weak encoder] pixelBuffer in
                     encoder?.encode(pixelBuffer)
                 }
@@ -1527,7 +1529,7 @@ class DaemonManager: ObservableObject {
 
             setupEncoderFrameRelay(encoder: encoder, isRelay: isRelay, clientId: clientId)
 
-            screenCapture.onFrame = nil
+
             screenCapture.onPixelBuffer = { [weak encoder] pixelBuffer in
                 encoder?.encode(pixelBuffer)
             }
@@ -1630,8 +1632,6 @@ class DaemonManager: ObservableObject {
     private func handleStreamStop(clientId: String, packet: WSPacket) async {
         await screenCapture.stopCapture()
         screenCapture.onPixelBuffer = nil
-        await mjpegServer?.stop()
-        mjpegServer = nil
         h264Encoder?.stop()
         h264Encoder = nil
 
@@ -1686,6 +1686,7 @@ class DaemonManager: ObservableObject {
 
         do {
             let session = try await supabase.auth.session
+            ownerUserId = session.user.id
             log("registerMachine: got session for user \(session.user.id)")
 
             // Fetch all machines for this user
@@ -2150,7 +2151,7 @@ class DaemonManager: ObservableObject {
 
             // 3. GitHub repo (optional)
             if createGitHub && detectGhCLI() {
-                let ghCreate = await runShellCommand("gh repo create \(config.projectName) --private --source=. --remote=origin", at: expandedPath)
+                let ghCreate = await runProcess("/usr/local/bin/gh", arguments: ["repo", "create", config.projectName, "--private", "--source=.", "--remote=origin"], at: expandedPath)
                 log("wizardExecute: gh repo create: \(ghCreate.success ? "ok" : ghCreate.output)")
             }
 
@@ -2326,6 +2327,31 @@ class DaemonManager: ObservableObject {
         return paths.contains { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
+    private func runProcess(_ executable: String, arguments: [String], at directory: String) async -> (success: Bool, output: String) {
+        // Check common paths for the executable
+        let paths = [executable, "/opt/homebrew/bin/\(URL(fileURLWithPath: executable).lastPathComponent)", "/usr/bin/\(URL(fileURLWithPath: executable).lastPathComponent)"]
+        let resolvedPath = paths.first { FileManager.default.fileExists(atPath: $0) } ?? executable
+
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: resolvedPath)
+        process.arguments = arguments
+        process.currentDirectoryURL = URL(fileURLWithPath: directory)
+        process.standardOutput = pipe
+        process.standardError = pipe
+        process.environment = ProcessInfo.processInfo.environment
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            return (process.terminationStatus == 0, output)
+        } catch {
+            return (false, error.localizedDescription)
+        }
+    }
+
     private func runShellCommand(_ command: String, at directory: String) async -> (success: Bool, output: String) {
         let process = Process()
         let pipe = Pipe()
@@ -2399,6 +2425,14 @@ class DaemonManager: ObservableObject {
         let expandedPath = (path as NSString).expandingTildeInPath
         let target = packet.payload?["target"] ?? "HEAD~1"
 
+        // Validate target is a commit hash or HEAD~N pattern
+        let isValidTarget = target.range(of: #"^(HEAD(~\d+)?|[0-9a-fA-F]{7,40})$"#, options: .regularExpression) != nil
+        guard isValidTarget else {
+            await sendGitResult(action: .gitRollbackResult, clientId: clientId, packetId: packet.id,
+                               success: false, error: "Invalid rollback target")
+            return
+        }
+
         let result = await runGitCommand(["reset", "--hard", target], at: expandedPath)
 
         await sendGitResult(action: .gitRollbackResult, clientId: clientId, packetId: packet.id,
@@ -2408,7 +2442,7 @@ class DaemonManager: ObservableObject {
     private func handleGitHistory(clientId: String, packet: WSPacket) async {
         guard let path = packet.payload?["path"] else { return }
         let expandedPath = (path as NSString).expandingTildeInPath
-        let limit = packet.payload?["limit"] ?? "20"
+        let limit = min(Int(packet.payload?["limit"] ?? "20") ?? 20, 500)
 
         let result = await runGitCommand([
             "log", "--oneline", "--format=%H|||%s|||%ai|||%an", "-\(limit)"
@@ -2494,7 +2528,13 @@ class DaemonManager: ObservableObject {
         }
 
         // Untracked or new file — show entire content as added
-        let fullPath = "\(expandedPath)/\(file)"
+        guard let fullPath = sanitizedPath(base: expandedPath, relative: file) else {
+            await sendToClientOrRelay(
+                WSPacket(action: .gitFileDiffResult, payload: [
+                    "file": file, "diff": "", "success": "false", "error": "Invalid path"
+                ], id: packet.id), to: clientId)
+            return
+        }
         if let content = try? String(contentsOfFile: fullPath, encoding: .utf8) {
             let lines = content.components(separatedBy: "\n")
             let fakeDiff = lines.map { "+\($0)" }.joined(separator: "\n")
@@ -2550,6 +2590,13 @@ class DaemonManager: ObservableObject {
               let branch = packet.payload?["branch"] else { return }
         let expandedPath = (path as NSString).expandingTildeInPath
 
+        guard !branch.hasPrefix("-") else {
+            await sendToClientOrRelay(
+                WSPacket(action: .gitCheckoutResult, payload: ["success": "false", "error": "Invalid branch name"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
         let result = await runGitCommand(["checkout", branch], at: expandedPath)
 
         await sendGitResult(action: .gitCheckoutResult, clientId: clientId, packetId: packet.id,
@@ -2666,7 +2713,14 @@ class DaemonManager: ObservableObject {
         guard let basePath = packet.payload?["path"],
               let filePath = packet.payload?["file"] else { return }
         let expandedBase = (basePath as NSString).expandingTildeInPath
-        let fullPath = "\(expandedBase)/\(filePath)"
+
+        guard let fullPath = sanitizedPath(base: expandedBase, relative: filePath) else {
+            await sendToClientOrRelay(
+                WSPacket(action: .fileReadResult, payload: ["success": "false", "error": "Invalid path"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
 
         guard FileManager.default.fileExists(atPath: fullPath) else {
             await sendToClientOrRelay(
@@ -2696,6 +2750,16 @@ class DaemonManager: ObservableObject {
                 to: clientId
             )
         }
+    }
+
+    /// Validates that a resolved file path stays within the expected base directory.
+    /// Prevents path traversal attacks (e.g., "../../etc/passwd") and symlink escapes.
+    private func sanitizedPath(base: String, relative: String) -> String? {
+        let baseURL = URL(fileURLWithPath: base).resolvingSymlinksInPath()
+        let fullURL = URL(fileURLWithPath: relative, relativeTo: baseURL).resolvingSymlinksInPath()
+        let basePath = baseURL.path
+        guard fullURL.path == basePath || fullURL.path.hasPrefix(basePath + "/") else { return nil }
+        return fullURL.path
     }
 
     private func languageFromExtension(_ ext: String) -> String {
@@ -2868,6 +2932,19 @@ class DaemonManager: ObservableObject {
             return
         }
 
+        // SSRF protection: only allow requests to loopback addresses
+        let allowedHosts: Set<String> = ["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"]
+        guard let host = url.host, allowedHosts.contains(host) else {
+            log("proxyRequest: blocked non-loopback host '\(url.host ?? "nil")'")
+            await sendToClientOrRelay(
+                WSPacket(action: .proxyResponse, payload: [
+                    "requestId": requestId, "status": "0", "error": "Proxy only allows localhost requests"
+                ], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
         var request = URLRequest(url: url, timeoutInterval: 30)
         request.httpMethod = method
 
@@ -2886,7 +2963,9 @@ class DaemonManager: ObservableObject {
         }
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            // Use session with redirect protection to prevent SSRF via server-side redirects
+            let session = URLSession(configuration: .default, delegate: LoopbackRedirectGuard(), delegateQueue: nil)
+            let (data, response) = try await session.data(for: request)
             let httpResponse = response as? HTTPURLResponse
 
             // Get response headers
@@ -3062,6 +3141,28 @@ class DaemonManager: ObservableObject {
             Task {
                 await self?.updateMachineStatus("online")
             }
+        }
+    }
+}
+
+// MARK: - SSRF Redirect Guard
+
+/// URLSession delegate that blocks redirects to non-loopback hosts.
+private class LoopbackRedirectGuard: NSObject, URLSessionTaskDelegate {
+    private let allowedHosts: Set<String> = ["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"]
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        if let host = request.url?.host, allowedHosts.contains(host) {
+            completionHandler(request)
+        } else {
+            // Block redirect to non-loopback host
+            completionHandler(nil)
         }
     }
 }

@@ -2,7 +2,7 @@
 
 Tarsy is a remote desktop + AI coding agent platform for the Apple ecosystem. It lets developers control their Mac and run AI coding agents (Claude Code, Gemini CLI, Codex CLI, Aider) remotely from their iPhone. The core value proposition: you can monitor, interact with, and steer AI agents working on your codebase from anywhere.
 
-**Status:** MVP / private beta.
+**Status:** Production. All decisions should be made with production-grade quality, security, and reliability in mind. No shortcuts, no "good enough for now" — treat every change as shipping to paying users.
 
 ## Architecture
 
@@ -22,7 +22,7 @@ Shared library consumed by both apps. `supabase-swift` (>= 2.0) is the only exte
 
 Menu bar app (LSUIElement) that runs on the Mac being controlled. `DaemonManager` is the central orchestrator (~2600 lines) that wires all services together.
 
-- **Screen capture** — `ScreenCaptureService` (ScreenCaptureKit) → `H264Encoder` (VideoToolbox, adaptive bitrate: 6Mbps/30fps LAN, 2Mbps/20fps relay) → WebSocket binary frames. Also `MJPEGStreamServer` on port 8643 for browser dev.
+- **Screen capture** — `ScreenCaptureService` (ScreenCaptureKit) → `H264Encoder` (VideoToolbox, adaptive bitrate: 6Mbps/30fps LAN, 2Mbps/20fps relay) → WebSocket binary frames (authenticated, port 8642).
 - **Remote input** — `RemoteInputService` dispatches tap/scroll/keyboard/drag/pinch to browser (CGEvent) or iOS Simulator (idb) with coordinate mapping.
 - **AI engines** — `TerminalSessionManager` (zsh sessions with rich PATH enrichment: nvm, fnm, asdf, cargo, etc.) + `ClaudeCodeSession` (dedicated Claude Code subprocess with token tracking) + `GenericCLIEngine` (wraps any CLI agent). All conform to `AIEngineProtocol` (actor protocol). `AgentDetector` scans standard paths for installed AI binaries.
 - **Workspace orchestration** — `WorkspaceOrchestrator` (git clone, stack detection, dependency install, dev server start), `RepoScanner` (async scan of ~10 standard directories)
@@ -35,7 +35,7 @@ Menu bar app (LSUIElement) that runs on the Mac being controlled. `DaemonManager
 
 iPhone/iPad app. Entry point: `ContentView` manages auth state (splash → login → dashboard) with environment objects: `AuthManager`, `ConnectionManager`, `WorkspaceService`, `MachineService`, `SubscriptionManager`, `ProfileService`, `DeepLinkRouter`.
 
-- **Stream player** — `StreamPlayerView` (dual-mode: MJPEG for LAN, H.264 for relay) + `H264Decoder` (hardware-accelerated, supports H.264 and HEVC with auto-detection) + `H264PlayerView` (AVSampleBufferDisplayLayer) + `InteractiveStreamView` (touch/keyboard/scroll/pinch input with hidden UITextField for keyboard capture)
+- **Stream player** — `StreamPlayerView` + `StreamViewModel` + `H264Decoder` (hardware-accelerated, supports H.264 and HEVC with auto-detection) + `H264PlayerView` (AVSampleBufferDisplayLayer) + `InteractiveStreamView` (touch/keyboard/scroll/pinch input with hidden UITextField for keyboard capture). All streaming uses H.264 via authenticated WebSocket (both LAN and relay).
 - **AI chat** — `WorkspaceView` with tab system (per-tab state isolation: thinking, activity, options, questions, model, contextPercent), voice input, attachments, interactive options/questions (PaginatedQuestionCard with pagination, multi-select), VoiceTodoManager/VoiceTodoOverlay for task tracking
 - **Dashboard** — `DashboardView` lists machines (online/offline indicator), workspaces (status-colored), active tasks, action buttons (Quick Dispatch, Active Sessions, New Workspace, Settings)
 - **Workspace management** — `NewWorkspaceView` (scanned repos + manual creation), `WorkspaceSettingsView`, `AIContextEditorView` (templates for project overview, coding style, testing rules)

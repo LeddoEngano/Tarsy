@@ -72,7 +72,7 @@ class HiddenTextField: UITextField {
 }
 
 struct InteractiveStreamView: View {
-    @ObservedObject var viewModel: MJPEGStreamViewModel
+    @ObservedObject var viewModel: StreamViewModel
     var connectionManager: ConnectionManager
     var workspaceStack: Workspace.WorkspaceStack
     var onClose: () -> Void
@@ -162,7 +162,7 @@ struct InteractiveStreamView: View {
                 // Stream image — fills all available space
                 GeometryReader { geo in
                     ZStack {
-                        if viewModel.isH264Mode, let layer = viewModel.h264Decoder.displayLayer {
+                        if let layer = viewModel.h264Decoder.displayLayer {
                             H264PlayerView(displayLayer: layer)
                                 .id("h264-fullscreen")
                                 .frame(width: geo.size.width, height: geo.size.height)
@@ -173,22 +173,6 @@ struct InteractiveStreamView: View {
                                             .onChange(of: imageGeo.size) { _, s in imageContentSize = s }
                                     }
                                 )
-                                .gesture(tapGesture(containerSize: geo.size))
-                                .gesture(scrollGesture(containerSize: geo.size))
-                                .gesture(pinchGesture(containerSize: geo.size))
-                                .gesture(longPressGesture(containerSize: geo.size))
-                        } else if let frame = viewModel.currentFrame {
-                            Image(uiImage: frame)
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .background(
-                                    GeometryReader { imageGeo in
-                                        Color.clear
-                                            .onAppear { imageContentSize = imageGeo.size }
-                                            .onChange(of: imageGeo.size) { _, s in imageContentSize = s }
-                                    }
-                                )
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                                 .gesture(tapGesture(containerSize: geo.size))
                                 .gesture(scrollGesture(containerSize: geo.size))
                                 .gesture(pinchGesture(containerSize: geo.size))
@@ -462,7 +446,7 @@ struct InteractiveStreamView: View {
             Button("cancel", role: .cancel) { urlText = "" }
         }
         .onAppear {
-            print("[InteractiveStream] onAppear — fps=\(viewModel.fps) isConnected=\(viewModel.isConnected) hasFrame=\(viewModel.currentFrame != nil)")
+            print("[InteractiveStream] onAppear — fps=\(viewModel.fps) isConnected=\(viewModel.isConnected)")
             requestHighQuality()
             setupVoiceTodoListener()
             if isWebMode {

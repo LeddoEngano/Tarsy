@@ -53,7 +53,7 @@ struct WorkspaceView: View {
     @State private var isRecording = false
     @StateObject private var voiceInput = VoiceInputManager()
     @StateObject private var todoManager = VoiceTodoManager()
-    @StateObject private var streamViewModel = MJPEGStreamViewModel()
+    @StateObject private var streamViewModel = StreamViewModel()
     @State private var engineModel = ""
     @State private var contextPercent: Double = 0
     @State private var currentBranch = ""

@@ -10,7 +10,7 @@ const ULTRACONTEXT_BASE_URL = "https://api.ultracontext.ai";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-const contextOwners = new Map<string, string>();
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function authenticateUser(req: Request): Promise<{ userId: string } | Response> {
   const authHeader = req.headers.get("Authorization");
@@ -30,6 +30,11 @@ async function authenticateUser(req: Request): Promise<{ userId: string } | Resp
   return { userId: user.id };
 }
 
+/** Validate a context ID is a valid UUID to prevent path traversal in API URLs */
+function isValidId(id: unknown): id is string {
+  return typeof id === "string" && UUID_REGEX.test(id);
+}
+
 // Extract readable text from UltraContext message content.
 // CLI-ingested messages store the raw JSONL event as content object.
 function extractText(content: any): string {
@@ -45,6 +50,22 @@ function extractText(content: any): string {
     }
   }
   return "";
+}
+
+/** Fetch all contexts and return only those owned by the given user */
+async function fetchUserContexts(userId: string): Promise<any[]> {
+  const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts`, {
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
+  });
+  const raw = await res.json();
+  const all = raw?.data ?? raw ?? [];
+  return all.filter((ctx: any) => ctx.metadata?.user_id === userId);
+}
+
+/** Check if a specific context is owned by the user */
+async function isOwnedByUser(contextId: string, userId: string): Promise<boolean> {
+  const userContexts = await fetchUserContexts(userId);
+  return userContexts.some((ctx: any) => ctx.id === contextId);
 }
 
 serve(async (req) => {
@@ -68,7 +89,6 @@ serve(async (req) => {
         body: JSON.stringify({ metadata }),
       });
       const data = await res.json();
-      if (data?.id) contextOwners.set(data.id, userId);
       return new Response(JSON.stringify(data), {
         status: res.status, headers: { "Content-Type": "application/json" },
       });
@@ -76,18 +96,7 @@ serve(async (req) => {
 
     // LIST
     if (action === "list") {
-      const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts`, {
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
-      });
-      const raw = await res.json();
-      const all = raw?.data ?? raw ?? [];
-
-      // Filter to user's contexts (by UUID or username match)
-      const filtered = all.filter((ctx: any) => {
-        if (contextOwners.get(ctx.id) === userId) return true;
-        if (ctx.metadata?.user_id === userId) return true;
-        return false;
-      });
+      const filtered = await fetchUserContexts(userId);
 
       // Fetch first 2 messages of each context to build title
       const enriched = await Promise.all(
@@ -111,7 +120,6 @@ serve(async (req) => {
                 // Detect image references
                 if (text.match(/\[Image[:\s]|\/var\/folders|\/tmp\/|\.png|\.jpg|\.jpeg|\.heic|\.webp|screenshot/i)) {
                   hasImage = true;
-                  // Look for actual text after/before the image reference
                   const cleanText = text
                     .replace(/\[Image[^\]]*\]/gi, "")
                     .replace(/\/[\w\/\-._]+\.(png|jpg|jpeg|heic|webp)/gi, "")
@@ -164,8 +172,10 @@ serve(async (req) => {
 
     // GET
     if (action === "get" && payload.id) {
-      const owner = contextOwners.get(payload.id);
-      if (owner && owner !== userId) {
+      if (!isValidId(payload.id)) {
+        return new Response(JSON.stringify({ error: "Invalid context ID" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      }
+      if (!(await isOwnedByUser(payload.id, userId))) {
         return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
       }
       const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/${payload.id}`, {
@@ -186,8 +196,10 @@ serve(async (req) => {
 
     // MESSAGE
     if (action === "message" && payload.id) {
-      const owner = contextOwners.get(payload.id);
-      if (owner && owner !== userId) {
+      if (!isValidId(payload.id)) {
+        return new Response(JSON.stringify({ error: "Invalid context ID" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      }
+      if (!(await isOwnedByUser(payload.id, userId))) {
         return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
       }
       const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/${payload.id}`, {
@@ -199,11 +211,26 @@ serve(async (req) => {
       return new Response(data, { status: res.status, headers: { "Content-Type": "application/json" } });
     }
 
-    // DELETE — uses batch-delete endpoint (1 request) or falls back to per-context delete
+    // DELETE — verify ownership of each context before deletion
     if (action === "delete" && payload.ids) {
-      const contextIds = Array.isArray(payload.ids) ? payload.ids : [payload.ids];
+      const contextIds = (Array.isArray(payload.ids) ? payload.ids : [payload.ids]).filter(isValidId);
+      if (contextIds.length === 0) {
+        return new Response(JSON.stringify({ error: "No valid context IDs provided" }), {
+          status: 400, headers: { "Content-Type": "application/json" },
+        });
+      }
 
-      // Try batch-delete first (requires ultracontext/ultracontext#20)
+      // Verify ownership of all contexts before deleting any
+      const userContexts = await fetchUserContexts(userId);
+      const ownedIds = new Set(userContexts.map((ctx: any) => ctx.id));
+      const unauthorizedIds = contextIds.filter((id: string) => !ownedIds.has(id));
+      if (unauthorizedIds.length > 0) {
+        return new Response(JSON.stringify({ error: "Forbidden: not all contexts belong to you" }), {
+          status: 403, headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Try batch-delete first
       const batchRes = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/batch-delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
@@ -211,14 +238,13 @@ serve(async (req) => {
       });
 
       if (batchRes.ok) {
-        for (const id of contextIds) contextOwners.delete(id);
         const data = await batchRes.json();
         return new Response(JSON.stringify(data), {
           status: 200, headers: { "Content-Type": "application/json" },
         });
       }
 
-      // Fallback: delete each context individually (no body = delete entire context)
+      // Fallback: delete each context individually
       const results = await Promise.all(
         contextIds.map(async (ctxId: string) => {
           try {
@@ -226,10 +252,7 @@ serve(async (req) => {
               method: "DELETE",
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
             });
-            if (res.ok) {
-              contextOwners.delete(ctxId);
-              return { id: ctxId, deleted: true };
-            }
+            if (res.ok) return { id: ctxId, deleted: true };
             // Final fallback: delete all messages individually
             const getRes = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/${ctxId}`, {
               headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
@@ -246,7 +269,6 @@ serve(async (req) => {
                 });
               }
             }
-            contextOwners.delete(ctxId);
             return { id: ctxId, deleted: true };
           } catch {
             return { id: ctxId, deleted: false };

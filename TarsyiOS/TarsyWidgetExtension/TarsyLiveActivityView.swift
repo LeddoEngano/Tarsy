@@ -5,51 +5,41 @@ import WidgetKit
 struct TarsyLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TarsyActivityAttributes.self) { context in
-            // Lock Screen — compact single row
+            // Lock Screen — thin single row
             lockScreenView(context: context)
+                .activityBackgroundTint(Color(red: 0.1, green: 0.1, blue: 0.1))
         } dynamicIsland: { context in
             DynamicIsland {
-                // Expanded — single row: tool status + workspace + timer
+                // Expanded — keep minimal
                 DynamicIslandExpandedRegion(.leading) {
-                    HStack(spacing: 5) {
-                        Image(systemName: statusIcon(context.state))
-                            .font(.system(size: 13))
-                            .foregroundColor(statusColor(context.state.status))
-                        Text(context.state.currentTool)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                    }
+                    Label(context.state.currentTool, systemImage: statusIcon(context.state))
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(statusColor(context.state.status))
+                        .lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text(context.state.startedAt, style: .timer)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(.system(size: 12, design: .monospaced))
                         .foregroundColor(secondaryColor)
                         .monospacedDigit()
-                        .frame(minWidth: 36, alignment: .trailing)
-                }
-                DynamicIslandExpandedRegion(.center) {
-                    Text(context.attributes.workspaceName)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(secondaryColor)
-                        .lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     EmptyView()
                 }
             } compactLeading: {
+                // Just the status/tool icon
                 Image(systemName: statusIcon(context.state))
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
                     .foregroundColor(statusColor(context.state.status))
             } compactTrailing: {
+                // Just the timer, no forced width
                 Text(context.state.startedAt, style: .timer)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(secondaryColor)
                     .monospacedDigit()
-                    .frame(minWidth: 32)
             } minimal: {
                 Image(systemName: statusIcon(context.state))
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
                     .foregroundColor(statusColor(context.state.status))
             }
         }
@@ -59,31 +49,25 @@ struct TarsyLiveActivityWidget: Widget {
 
     @ViewBuilder
     private func lockScreenView(context: ActivityViewContext<TarsyActivityAttributes>) -> some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
             Image(systemName: statusIcon(context.state))
-                .font(.system(size: 16))
+                .font(.system(size: 13))
                 .foregroundColor(statusColor(context.state.status))
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(context.attributes.workspaceName)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-                Text(context.state.currentTool)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(statusColor(context.state.status))
-            }
+            Text(context.attributes.workspaceName)
+                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .foregroundColor(.white)
+                .lineLimit(1)
 
             Spacer()
 
             Text(context.state.startedAt, style: .timer)
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(secondaryColor)
                 .monospacedDigit()
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color(red: 0.1, green: 0.1, blue: 0.1))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Helpers

@@ -136,15 +136,10 @@ const server = Bun.serve({
       }), { headers: { "Content-Type": "application/json" } });
     }
 
-    // WebSocket upgrade — upgrade FIRST, validate token via first message
-    // This prevents Fly.io proxy timeout during Supabase API call
+    // WebSocket upgrade — validate token via first message (query param auth removed for security)
     if (url.pathname === "/ws") {
-      // Accept token+role from query params (legacy) or first message (secure)
-      const token = url.searchParams.get("token");
-      const role = url.searchParams.get("role") as "machine" | "client" | null;
-
       const upgraded = server.upgrade(req, {
-        data: { token: token || null, role: role || null },
+        data: { token: null, role: null },
       });
 
       if (!upgraded) {
@@ -160,27 +155,16 @@ const server = Bun.serve({
 
   websocket: {
     async open(ws) {
-      const { token, role } = ws.data as { token: string | null; role: "machine" | "client" | null };
+      // Auth via first message only — no query param tokens
+      console.log(`[Relay] WS opened, awaiting auth message...`);
 
-      // If token+role provided in query params (legacy), validate immediately
-      if (token && role && ["machine", "client"].includes(role)) {
-        console.log(`[Relay] WS opened, validating ${role} token...`);
-        const start = Date.now();
-        const { userId, error } = await validateToken(token);
-        const elapsed = Date.now() - start;
-
-        if (!userId) {
-          console.log(`[Relay] Auth failed for ${role}: ${error} (${elapsed}ms)`);
-          ws.close(4001, "Invalid token");
-          return;
+      // Close unauthenticated connections after 10 seconds
+      setTimeout(() => {
+        if (!connections.has(ws)) {
+          console.log(`[Relay] Auth timeout — closing unauthenticated connection`);
+          ws.close(4001, "Auth timeout");
         }
-
-        console.log(`[Relay] Auth OK for ${role} ${userId} (${elapsed}ms)`);
-        registerConnection(ws, userId, role);
-      } else {
-        // No token in URL — expect auth via first message
-        console.log(`[Relay] WS opened, awaiting auth message...`);
-      }
+      }, 10_000);
     },
 
     async message(ws, message) {
@@ -235,7 +219,7 @@ const server = Bun.serve({
     idleTimeout: 120, // seconds — send ping/pong to keep alive
     sendPings: true, // Bun auto-sends WebSocket pings
     maxPayloadLength: 4 * 1024 * 1024, // 4MB max message size
-    perMessageDeflate: false, // Keep off for binary MJPEG frames
+    perMessageDeflate: false, // Keep off for binary H.264 frames
   },
 });
 

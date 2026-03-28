@@ -38,6 +38,13 @@ class TarsyProxySchemeHandler: NSObject, WKURLSchemeHandler {
             return
         }
 
+        // Validate host — only allow proxying to localhost/loopback to prevent SSRF
+        let allowedHosts: Set<String> = ["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]
+        guard let host = url.host, allowedHosts.contains(host) else {
+            urlSchemeTask.didFailWithError(URLError(.badURL))
+            return
+        }
+
         // Convert tarsy-http://localhost:3000/path → http://localhost:3000/path
         let realUrlString: String
         if var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
@@ -49,6 +56,14 @@ class TarsyProxySchemeHandler: NSObject, WKURLSchemeHandler {
 
         let requestId = UUID().uuidString
         pendingTasks[requestId] = urlSchemeTask
+
+        // Timeout pending requests after 30 seconds to prevent memory leaks
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 30_000_000_000)
+            if let task = self?.pendingTasks.removeValue(forKey: requestId) {
+                task.didFailWithError(URLError(.timedOut))
+            }
+        }
 
         // Build headers JSON
         var headers: [String: String] = [:]
@@ -104,6 +119,7 @@ class TarsyProxySchemeHandler: NSObject, WKURLSchemeHandler {
                 .replacingOccurrences(of: "http://localhost", with: "tarsy-http://localhost")
                 .replacingOccurrences(of: "http://127.0.0.1", with: "tarsy-http://127.0.0.1")
                 .replacingOccurrences(of: "http://0.0.0.0", with: "tarsy-http://0.0.0.0")
+                .replacingOccurrences(of: "http://[::1]", with: "tarsy-http://[::1]")
             responseHeaders["Location"] = rewritten
             responseHeaders.removeValue(forKey: "location")
         }

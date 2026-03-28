@@ -92,6 +92,16 @@ async function sendAPNs(
 
 serve(async (req) => {
   try {
+    // Validate Authorization header (webhook calls use service role key)
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Missing authorization" }), { status: 401 });
+    }
+    const token = authHeader.replace("Bearer ", "");
+    if (token !== SUPABASE_SERVICE_ROLE_KEY) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    }
+
     const { record } = await req.json() as { record: PushNotification };
 
     if (!record || record.sent) {

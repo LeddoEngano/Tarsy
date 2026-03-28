@@ -550,7 +550,7 @@ struct OnboardingWindow: View {
                 statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "signed in as \(authManager.currentUser?.email ?? "...")")
                 statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "relay connected (remote access ready)")
                 statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "websocket server on port \(TarsyConfig.websocketPort)")
-                statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "stream server on port 8643")
+                statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "H.264 streaming ready")
             }
 
             Text("tarsy will now run in your menu bar.\nopen the tarsy app on your iphone to start.")
