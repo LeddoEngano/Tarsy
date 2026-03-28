@@ -40,7 +40,7 @@ struct MCPStoreView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             // Claude Code section
-                            engineSection("Claude Code", icon: "brain.head.profile", mcps: mcps)
+                            engineSection(.claude, mcps: mcps)
 
                             // Other engines placeholder
                             otherEnginesSection
@@ -74,13 +74,11 @@ struct MCPStoreView: View {
 
     // MARK: - Engine Section
 
-    private func engineSection(_ name: String, icon: String, mcps: [MCPEntry]) -> some View {
+    private func engineSection(_ engine: AIEngineType, mcps: [MCPEntry]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 14))
-                    .foregroundColor(TarsyTheme.accentAmber)
-                Text(name)
+                AgentIcon(engineType: engine, size: 18)
+                Text(engine.displayName)
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
                     .foregroundColor(TarsyTheme.textPrimary)
 
@@ -153,13 +151,12 @@ struct MCPStoreView: View {
     }
 
     private var otherEnginesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(["Gemini CLI", "Codex CLI", "Aider"], id: \.self) { engine in
+        let otherEngines: [AIEngineType] = [.gemini, .codex, .aider, .cursor, .windsurf, .amp, .cline, .copilot]
+        return VStack(alignment: .leading, spacing: 8) {
+            ForEach(otherEngines, id: \.self) { engine in
                 HStack(spacing: 8) {
-                    Image(systemName: "terminal")
-                        .font(.system(size: 14))
-                        .foregroundColor(TarsyTheme.textSecondary)
-                    Text(engine)
+                    AgentIcon(engineType: engine, size: 16)
+                    Text(engine.displayName)
                         .font(.system(size: 13, weight: .semibold, design: .monospaced))
                         .foregroundColor(TarsyTheme.textSecondary)
                     Spacer()

@@ -326,7 +326,11 @@ struct WorkspaceView: View {
                                         Text(engine.displayName)
                                     } icon: {
                                         if let asset = engine.iconAsset {
-                                            Image(asset).renderingMode(.template)
+                                            Image(asset)
+                                                .renderingMode(.template)
+                                                .resizable()
+                                                .aspectRatio(contentMode: .fit)
+                                                .frame(width: 16, height: 16)
                                         } else {
                                             Image(systemName: engine.iconName)
                                         }
