@@ -1115,6 +1115,17 @@ struct WorkspaceView: View {
             isAgentThinking = true
             print("[Chat] sendMessage: tab=\(currentTab.type), sessionId=\(currentTab.sessionId ?? "nil"), connected=\(connectionManager.isConnected), path=\(workspace.localPath)")
 
+            // Start Live Activity when user sends a real task
+            if currentTab.type == .claude || currentTab.type == .engine {
+                let engine = currentTab.engineType ?? .claude
+                LiveActivityManager.shared.startActivity(
+                    workspaceId: workspace.id.uuidString,
+                    workspaceName: workspace.name,
+                    engineType: engine,
+                    tabId: currentTab.id
+                )
+            }
+
             // Build payload with optional images
             let messageText = text.isEmpty && !imageDataList.isEmpty ? "Here is a screenshot of the current screen." : text
             var imagesPayload: String? = nil
@@ -1326,14 +1337,9 @@ struct WorkspaceView: View {
                         for i in todoManager.items.indices where todoManager.items[i].sessionId == "pending" {
                             todoManager.items[i].sessionId = sessionId
                         }
-                        // Start Live Activity (scoped to tab)
-                        let engine = currentTab.engineType ?? .claude
-                        LiveActivityManager.shared.startActivity(
-                            workspaceId: workspace.id.uuidString,
-                            workspaceName: workspace.name,
-                            engineType: engine,
-                            tabId: currentTab.id
-                        )
+                        // NOTE: Live Activity is NOT started here — it starts when the
+                        // agent actually begins working (first engineOutput after a user message).
+                        // Starting here would trigger on workspace open (auto-connect).
                     }
                 case .engineAskUser:
                     handleEngineAskUser(packet)

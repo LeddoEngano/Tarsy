@@ -11,7 +11,14 @@ class LiveActivityManager: ObservableObject {
     /// Start times per activity
     private var startDates: [String: Date] = [:]
 
-    private init() {}
+    private init() {
+        // Clean up any zombie activities from previous app sessions
+        Task {
+            for activity in Activity<TarsyActivityAttributes>.activities {
+                await activity.end(nil, dismissalPolicy: .immediate)
+            }
+        }
+    }
 
     // MARK: - Keys
 
