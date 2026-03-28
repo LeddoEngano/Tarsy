@@ -3,26 +3,117 @@ import TarsyShared
 
 /// Manages sudo password requests by sending them to the iOS client and waiting for the response.
 /// The password dialog is shown on the iPhone, not on the Mac.
-final class SudoPasswordManager {
+/// Actor ensures thread-safe access to mutable state (password cache, pending requests).
+actor SudoPasswordManager {
     static let shared = SudoPasswordManager()
 
-    private var cachedPassword: String?
+    private var cachedPassword: [UInt8]?
     private var cacheExpiry: Date?
-    private let cacheDuration: TimeInterval = 60 // 60 seconds (reduced from 5min for security)
+    private let cacheDuration: TimeInterval = 60 // 60 seconds
 
     private var pendingRequests: [String: CheckedContinuation<String?, Never>] = [:]
 
     /// Set by DaemonManager to send packets to the iOS client
-    var sendPacket: ((WSPacket) async -> Void)?
+    private var sendPacket: ((WSPacket) async -> Void)?
+
+    func setSendPacket(_ handler: @escaping (WSPacket) async -> Void) {
+        sendPacket = handler
+    }
 
     private var handlingSudoForSession: Set<String> = []
 
-    private init() {}
+    // MARK: - Sudo Command Whitelist
+
+    enum SudoCategory: String, Codable, CaseIterable {
+        case packageManagers
+        case filePermissions
+        case processControl
+        case devTools
+    }
+
+    private static let categoryPatterns: [SudoCategory: [String]] = [
+        .packageManagers: [
+            "npm install", "npm ci", "npm rebuild", "npm cache clean",
+            "yarn install", "yarn add",
+            "pnpm install", "pnpm add",
+            "bun install", "bun add",
+            "gem install", "bundle install",
+            "pip install", "pip3 install",
+            "brew install", "brew upgrade", "brew update",
+            "apt-get install", "apt-get update",
+            "cargo install",
+        ],
+        .filePermissions: ["chmod", "chown", "mkdir"],
+        .processControl: ["kill", "killall", "launchctl", "pkill"],
+        .devTools: ["xcode-select", "xcodebuild", "softwareupdate"],
+    ]
+
+    /// Shell metacharacters that indicate command chaining (potential injection)
+    private static let dangerousPatterns = ["; ", " && ", " || ", " | ", "$(", "`", " > ", " >> ", " < "]
+
+    /// Active categories — loaded from Supabase profile, configurable from iPhone
+    private(set) var enabledCategories: Set<SudoCategory> = Set(SudoCategory.allCases)
+
+    func setEnabledCategories(_ categories: Set<SudoCategory>) {
+        enabledCategories = categories
+    }
+
+    /// Validates that a command matches the whitelist
+    func isCommandAllowed(_ command: String) -> Bool {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Strip leading "sudo " or "sudo -S " etc to get the actual command
+        var baseCommand = trimmed
+        if baseCommand.hasPrefix("sudo ") {
+            let parts = baseCommand.components(separatedBy: " ").drop(while: { $0 == "sudo" || $0.hasPrefix("-") })
+            baseCommand = parts.joined(separator: " ")
+        }
+
+        // Check against allowed patterns in enabled categories
+        for category in enabledCategories {
+            guard let patterns = Self.categoryPatterns[category] else { continue }
+            for pattern in patterns {
+                if baseCommand.hasPrefix(pattern) {
+                    let rest = String(baseCommand.dropFirst(pattern.count))
+                    let hasDangerousChars = Self.dangerousPatterns.contains { rest.contains($0) }
+                    if !hasDangerousChars {
+                        return true
+                    }
+                }
+            }
+        }
+        return false
+    }
+
+    // MARK: - Secure password memory
+
+    /// Store password as zeroed-on-clear byte array instead of immutable String
+    private func cachePassword(_ password: String) {
+        clearPasswordBytes()
+        cachedPassword = Array(password.utf8)
+        cacheExpiry = Date().addingTimeInterval(cacheDuration)
+    }
+
+    private func getCachedPasswordString() -> String? {
+        guard let bytes = cachedPassword, let expiry = cacheExpiry, Date() < expiry else {
+            clearPasswordBytes()
+            return nil
+        }
+        return String(bytes: bytes, encoding: .utf8)
+    }
+
+    private func clearPasswordBytes() {
+        if var bytes = cachedPassword {
+            for i in bytes.indices { bytes[i] = 0 }
+        }
+        cachedPassword = nil
+        cacheExpiry = nil
+    }
 
     // MARK: - Password request (asks iOS client)
 
     func requestPassword(reason: String? = nil) async -> String? {
-        if let cached = cachedPassword, let expiry = cacheExpiry, Date() < expiry {
+        if let cached = getCachedPasswordString() {
             return cached
         }
 
@@ -42,8 +133,7 @@ final class SudoPasswordManager {
 
         guard let password, !password.isEmpty else { return nil }
 
-        cachedPassword = password
-        cacheExpiry = Date().addingTimeInterval(cacheDuration)
+        cachePassword(password)
         return password
     }
 
@@ -56,12 +146,13 @@ final class SudoPasswordManager {
     }
 
     func clearCache() {
-        cachedPassword = nil
-        cacheExpiry = nil
+        clearPasswordBytes()
     }
 
-    // MARK: - Command rewriting
+    // MARK: - Command rewriting (uses stdin pipe instead of temp files)
 
+    /// Rewrites a command that needs sudo to pipe password via stdin.
+    /// Uses `sudo -S` which reads from stdin — no temp files, no env vars.
     func rewriteCommandIfSudo(_ command: String, workingDirectory: String? = nil, reason: String? = nil) async -> String? {
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -78,7 +169,7 @@ final class SudoPasswordManager {
                 ) else {
                     return nil
                 }
-                return sudoAskpassWrapper(password: password, command: trimmed)
+                return sudoStdinWrapper(password: password, command: trimmed)
             }
         }
 
@@ -91,29 +182,20 @@ final class SudoPasswordManager {
         ) else {
             return nil
         }
-        return sudoAskpassWrapper(password: password, command: command)
+        return sudoStdinWrapper(password: password, command: command)
     }
 
-    /// Wraps a command so any `sudo` call inside it gets the password via SUDO_ASKPASS.
-    /// Since terminal sessions use pipes (no PTY), sudo can't prompt interactively.
-    /// We create a temp askpass script with restricted permissions (0700 dir, 0755 scripts),
-    /// then prepend them to PATH.
-    private func sudoAskpassWrapper(password: String, command: String) -> String {
+    /// Wraps a command so sudo reads the password from a here-string via stdin.
+    /// No temp files, no env vars, no askpass scripts — password stays in memory only.
+    /// Uses `sudo -S` which reads password from stdin.
+    private func sudoStdinWrapper(password: String, command: String) -> String {
         // Escape single quotes for safe embedding in shell single-quoted string
         let escaped = password.replacingOccurrences(of: "'", with: "'\\''")
-        let setup = [
-            "_SUDO_DIR=$(mktemp -d /tmp/.sudo_wrap.XXXXXX)",
-            "chmod 700 \"$_SUDO_DIR\"",
-            "_ASKPASS=\"$_SUDO_DIR/askpass\"",
-            "printf '%s\\n' '#!/bin/sh' 'echo '\\\"'\(escaped)'\\\"'' > \"$_ASKPASS\"",
-            "chmod 700 \"$_ASKPASS\"",
-            "printf '%s\\n' '#!/bin/sh' 'exec /usr/bin/sudo -A \"$@\"' > \"$_SUDO_DIR/sudo\"",
-            "chmod 700 \"$_SUDO_DIR/sudo\"",
-            "export SUDO_ASKPASS=\"$_ASKPASS\"",
-            "export PATH=\"$_SUDO_DIR:$PATH\"",
-        ].joined(separator: " && ")
-
-        return "\(setup) && \(command); _EC=$?; rm -rf \"$_SUDO_DIR\"; exit $_EC"
+        // Replace bare "sudo " with "sudo -S " so it reads from stdin
+        var cmd = command
+        cmd = cmd.replacingOccurrences(of: "sudo ", with: "sudo -S ")
+        // Pipe password via here-string: echo 'pass' | sudo -S <cmd>
+        return "echo '\(escaped)' | \(cmd)"
     }
 
     private func resolvePackageScript(_ command: String, in directory: String) -> String? {
@@ -171,13 +253,18 @@ final class SudoPasswordManager {
     // MARK: - Standalone sudo execution
 
     /// Runs a command with sudo by piping the password via stdin to `sudo -S`.
-    /// The command parts are passed as separate arguments to avoid shell injection.
+    /// The command must match the whitelist of allowed sudo commands.
     func runWithSudo(_ command: String, reason: String? = nil) async throws -> (output: String, exitCode: Int32) {
+        guard isCommandAllowed(command) else {
+            print("[Security] Sudo command rejected by whitelist: \(command)")
+            throw SudoError.commandNotAllowed
+        }
+
         guard let password = await requestPassword(reason: reason) else {
             throw SudoError.cancelled
         }
 
-        // First, authenticate sudo via stdin pipe (safe — no shell interpolation)
+        // Authenticate sudo via stdin pipe (safe — no shell interpolation, no temp files)
         let authProcess = Process()
         authProcess.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
         authProcess.arguments = ["-S", "-v"]
@@ -200,10 +287,9 @@ final class SudoPasswordManager {
             throw SudoError.authenticationFailed
         }
 
-        // Now run the actual command with sudo (credentials are cached by sudo -v)
+        // Run the actual command with sudo (credentials cached by sudo -v)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        // Split the command for argument passing — use shell for complex commands
         process.arguments = ["/bin/zsh", "-c", command]
         process.environment = ProcessInfo.processInfo.environment
 
@@ -223,11 +309,13 @@ final class SudoPasswordManager {
     enum SudoError: LocalizedError {
         case cancelled
         case authenticationFailed
+        case commandNotAllowed
 
         var errorDescription: String? {
             switch self {
             case .cancelled: return "Password entry was cancelled"
             case .authenticationFailed: return "Authentication failed — wrong password"
+            case .commandNotAllowed: return "Command not allowed for remote sudo execution"
             }
         }
     }
