@@ -28,17 +28,20 @@ public class ConnectionManager: ObservableObject {
     private var pingTimer: Timer?
     private var reconnectTimer: Timer?
     private var lastPingTime: Date?
+    private var lastPongTime: Date?
     private var authToken: String?
     private var host: String?
     private var port: UInt16?
     private var reconnectAttempts = 0
-    private let maxReconnectAttempts = 10
+    private let maxReconnectAttempts = Int.max
 
     public var onPacketReceived: ((WSPacket) -> Void)?
     public var onStreamFrameReceived: ((Data) -> Void)?
     public var onScreenshotReceived: ((Data) -> Void)? // Binary screenshot from relay (prefixed with "SCRN")
     /// Called when a sudoRequest arrives. Set this to show a password prompt and call the completion with the password.
     public var onSudoRequest: ((WSPacket) -> Void)?
+    /// Called after a successful reconnection (not on first connect).
+    public var onReconnected: (() -> Void)?
     private var packetListeners: [String: (WSPacket) -> Void] = [:]
 
     /// Stored TLS fingerprint for the current host (TOFU pinning)
@@ -99,11 +102,40 @@ public class ConnectionManager: ObservableObject {
         }
     }
 
+    /// Re-establish connection using stored parameters. Uses smart connect (LAN first if host known).
+    /// Refreshes auth token before connecting. Safe to call when already connected (no-op).
+    public func reconnectIfNeeded() async {
+        guard !isConnected else { return }
+
+        // Refresh token
+        if let session = try? await supabase.auth.session {
+            authToken = session.accessToken
+        }
+
+        guard authToken != nil, let port else { return }
+
+        // Mark as reconnecting so authSuccess fires onReconnected
+        isReconnecting = true
+        reconnectAttempts = 0
+        errorMessage = nil
+
+        if let host {
+            print("[WS] Reconnecting with smart connect to \(host):\(port)...")
+            performLANConnectWithRelayFallback()
+        } else {
+            print("[WS] Reconnecting via relay...")
+            performRelayConnect()
+        }
+    }
+
+    /// Intentional disconnect — does NOT trigger reconnection.
     public func disconnect() {
         reconnectTimer?.invalidate()
         reconnectTimer = nil
         pingTimer?.invalidate()
         pingTimer = nil
+        lastPingTime = nil
+        lastPongTime = nil
         connection?.cancel()
         connection = nil
         relayTask?.cancel(with: .goingAway, reason: nil)
@@ -158,13 +190,13 @@ public class ConnectionManager: ObservableObject {
 
     private func performLANConnect() {
         guard let host, let port else { return }
+        guard let url = URL(string: "ws://\(host):\(port)/") else {
+            errorMessage = "Invalid WebSocket URL"
+            return
+        }
 
         let parameters = createLANTLSParameters()
-        let conn = NWConnection(
-            host: NWEndpoint.Host(host),
-            port: NWEndpoint.Port(rawValue: port)!,
-            using: parameters
-        )
+        let conn = NWConnection(to: .url(url), using: parameters)
 
         conn.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
@@ -194,13 +226,13 @@ public class ConnectionManager: ObservableObject {
 
     private func performLANConnectWithRelayFallback() {
         guard let host, let port else { return }
+        guard let url = URL(string: "ws://\(host):\(port)/") else {
+            errorMessage = "Invalid WebSocket URL"
+            return
+        }
 
         let parameters = createLANTLSParameters()
-        let conn = NWConnection(
-            host: NWEndpoint.Host(host),
-            port: NWEndpoint.Port(rawValue: port)!,
-            using: parameters
-        )
+        let conn = NWConnection(to: .url(url), using: parameters)
 
         // Timeout: if LAN doesn't connect in 3 seconds, try relay
         var lanConnected = false
@@ -231,7 +263,8 @@ public class ConnectionManager: ObservableObject {
                     }
                     print("[WS] LAN connected to \(host):\(port)")
                     self?.isConnected = true
-                    self?.isReconnecting = false
+                    // Don't reset isReconnecting here — let authSuccess handle it
+                    // so onReconnected fires correctly on lifecycle reconnections
                     self?.reconnectAttempts = 0
                     self?.errorMessage = nil
                     self?.connectionMode = .lan
@@ -316,9 +349,10 @@ public class ConnectionManager: ObservableObject {
 
     private func sendViaRelay(_ data: Data) {
         guard let relayTask, let str = String(data: data, encoding: .utf8) else { return }
-        relayTask.send(.string(str)) { error in
+        relayTask.send(.string(str)) { [weak self] error in
             if let error {
                 print("[WS] Relay send error: \(error)")
+                Task { @MainActor in self?.handleDisconnect() }
             }
         }
     }
@@ -358,13 +392,13 @@ public class ConnectionManager: ObservableObject {
         Task {
             try? await Task.sleep(nanoseconds: 500_000_000)
             if !self.isConnected {
-                // Check if relay responded with machine_online
+                // Fallback: consider relay connected after 500ms if no authSuccess yet.
+                // Don't reset isReconnecting — let authSuccess handle it for onReconnected.
                 self.isConnected = true
-                self.isReconnecting = false
                 self.reconnectAttempts = 0
                 self.errorMessage = nil
                 self.startPing()
-                print("[WS] Relay connected")
+                print("[WS] Relay connected (fallback)")
             }
         }
     }
@@ -425,10 +459,12 @@ public class ConnectionManager: ObservableObject {
     private func handlePacket(_ packet: WSPacket) {
         switch packet.action {
         case .authSuccess:
+            let wasReconnecting = isReconnecting
             isConnected = true
             isReconnecting = false
             reconnectAttempts = 0
             errorMessage = nil
+            lastPongTime = Date() // Baseline for ping timeout detection
             // Save TLS fingerprint from server for TOFU pinning.
             // Only save on first use (no existing pin) or on LAN connections (trusted channel).
             // Never allow a relay-delivered authSuccess to overwrite an existing pin.
@@ -471,6 +507,10 @@ public class ConnectionManager: ObservableObject {
             } else {
                 print("[WS] Authenticated (no E2E)")
             }
+            // Notify listeners that we successfully reconnected
+            if wasReconnecting {
+                onReconnected?()
+            }
         case .authFail:
             isConnected = false
             errorMessage = "authentication failed"
@@ -478,8 +518,11 @@ public class ConnectionManager: ObservableObject {
         case .relayMachineOnline:
             print("[WS] Mac is online via relay")
             isConnected = true
-            isReconnecting = false
+            // Don't reset isReconnecting here — let authSuccess handle it
+            // so onReconnected fires correctly
+            lastPongTime = Date()
         case .auth, .pong:
+            lastPongTime = Date()
             if let pingTime = lastPingTime {
                 latency = Date().timeIntervalSince(pingTime)
             }
@@ -545,7 +588,7 @@ public class ConnectionManager: ObservableObject {
 
         isReconnecting = true
         reconnectAttempts += 1
-        let delay = min(Double(reconnectAttempts) * 2, 30)
+        let delay = min(Double(reconnectAttempts) * 2, 60)
 
         reconnectTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             Task { @MainActor in
@@ -554,11 +597,11 @@ public class ConnectionManager: ObservableObject {
                     self?.authToken = session.accessToken
                 }
 
-                // Reconnect using the same mode
-                if self?.connectionMode == .relay || self?.host == nil {
-                    self?.performRelayConnect()
-                } else {
+                // Always try LAN first if host is known (smart reconnect)
+                if self?.host != nil {
                     self?.performLANConnectWithRelayFallback()
+                } else {
+                    self?.performRelayConnect()
                 }
             }
         }
@@ -568,6 +611,16 @@ public class ConnectionManager: ObservableObject {
         pingTimer?.invalidate()
         pingTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor in
+                // Detect zombie connections: if last ping was sent but pong never arrived
+                if let lastPing = self?.lastPingTime {
+                    let lastPong = self?.lastPongTime
+                    let pongMissing = (lastPong == nil) || (lastPong! < lastPing)
+                    if pongMissing && Date().timeIntervalSince(lastPing) > 15 {
+                        print("[WS] Ping timeout — no pong in 15s, treating as disconnected")
+                        self?.handleDisconnect()
+                        return
+                    }
+                }
                 self?.lastPingTime = Date()
                 self?.send(WSPacket(action: .ping))
             }

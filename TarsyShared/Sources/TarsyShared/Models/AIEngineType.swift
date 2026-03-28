@@ -27,6 +27,7 @@ public enum AIEngineType: String, Codable, Sendable, CaseIterable {
         }
     }
 
+    /// SF Symbol name (fallback icon)
     public var iconName: String {
         switch self {
         case .claude: return "brain.head.profile"
@@ -39,6 +40,22 @@ public enum AIEngineType: String, Codable, Sendable, CaseIterable {
         case .cline: return "command.circle"
         case .copilot: return "airplane"
         case .custom: return "terminal"
+        }
+    }
+
+    /// Asset Catalog image name (nil = use SF Symbol fallback)
+    public var iconAsset: String? {
+        switch self {
+        case .claude: return "ClaudeIcon"
+        case .gemini: return "GeminiIcon"
+        case .codex: return "CodexIcon"
+        case .aider: return "AiderIcon"
+        case .cursor: return "CursorIcon"
+        case .windsurf: return "WindsurfIcon"
+        case .amp: return "AmpIcon"
+        case .cline: return "ClineIcon"
+        case .copilot: return "CopilotIcon"
+        case .custom: return nil
         }
     }
 

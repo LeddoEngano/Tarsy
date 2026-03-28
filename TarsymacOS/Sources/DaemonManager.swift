@@ -36,6 +36,9 @@ class DaemonManager: ObservableObject {
     private let e2e = E2ECrypto()
     private let agentTaskService = AgentTaskService()
     private var sessionTaskMap: [String: UUID] = [:] // sessionId -> agentTask.id
+    /// Last terminal-state packet per session (engineComplete, engineAskUser).
+    /// Re-sent to clients on reconnect so they can sync missed state transitions.
+    private var sessionLastEvent: [String: WSPacket] = [:]
     let profileService = ProfileService()
     private var machineSecret: String?
 
@@ -250,6 +253,7 @@ class DaemonManager: ObservableObject {
             onConnect: { [weak self] clientId in
                 Task { @MainActor in
                     self?.connectedClients += 1
+                    self?.lastActiveClientId = clientId
                     // Send detected agents to the newly connected client
                     let agents = self?.detectedAgents ?? []
                     print("[Daemon] onConnect \(clientId): detectedAgents=\(agents.map(\.rawValue))")
@@ -265,9 +269,12 @@ class DaemonManager: ObservableObject {
                     }
                 }
             },
-            onDisconnect: { [weak self] _ in
+            onDisconnect: { [weak self] clientId in
                 Task { @MainActor in
                     self?.connectedClients = max(0, (self?.connectedClients ?? 1) - 1)
+                    if self?.lastActiveClientId == clientId {
+                        self?.lastActiveClientId = "relay"
+                    }
                 }
             },
             onAuthSuccess: { [weak self] authPacket in
@@ -588,6 +595,15 @@ class DaemonManager: ObservableObject {
             WSPacket(action: .workspaceList, payload: ["sessions": sessions.joined(separator: ",")], id: packet.id),
             to: clientId
         )
+
+        // Replay missed session events (complete/askUser) so reconnecting clients sync state.
+        // workspaceList is always requested on reconnect, making this a reliable sync point.
+        if !sessionLastEvent.isEmpty {
+            log("Replaying \(sessionLastEvent.count) missed session events to \(clientId)")
+            for (_, eventPacket) in sessionLastEvent {
+                await sendToClientOrRelay(eventPacket, to: clientId)
+            }
+        }
     }
 
     private func handleWorkspaceStart(clientId: String, packet: WSPacket) async {
@@ -612,10 +628,11 @@ class DaemonManager: ObservableObject {
             let sessionId = try await orchestrator?.coldStart(localPath: path, devServerCommand: devCmd) ?? ""
             await terminalManager.setOutputHandler(for: sessionId) { [weak self] output in
                 Task {
-                    await self?.detectSudoPromptInOutput(output, sessionId: sessionId)
-                    await self?.sendToClientOrRelay(
+                    guard let self else { return }
+                    await self.detectSudoPromptInOutput(output, sessionId: sessionId)
+                    await self.sendToClientOrRelay(
                         WSPacket(action: .terminalOutput, payload: ["sessionId": sessionId, "output": output]),
-                        to: clientId
+                        to: self.lastActiveClientId
                     )
                 }
             }
@@ -647,11 +664,12 @@ class DaemonManager: ObservableObject {
             let sessionId = try await terminalManager.createSession(workingDirectory: path)
             await terminalManager.setOutputHandler(for: sessionId) { [weak self] output in
                 Task {
+                    guard let self else { return }
                     // Detect sudo password prompts in terminal output
-                    await self?.detectSudoPromptInOutput(output, sessionId: sessionId)
-                    await self?.sendToClientOrRelay(
+                    await self.detectSudoPromptInOutput(output, sessionId: sessionId)
+                    await self.sendToClientOrRelay(
                         WSPacket(action: .terminalOutput, payload: ["sessionId": sessionId, "output": output]),
-                        to: clientId
+                        to: self.lastActiveClientId
                     )
                 }
             }
@@ -775,18 +793,19 @@ class DaemonManager: ObservableObject {
                 permissionMode: permissionMode,
                 onOutput: { [weak self] output in
                     Task {
-                        await self?.sendToClientOrRelay(
+                        guard let self else { return }
+                        await self.sendToClientOrRelay(
                             WSPacket(action: .claudeOutput, payload: ["sessionId": sid, "output": output]),
-                            to: clientId
+                            to: self.lastActiveClientId
                         )
                     }
                 },
                 onComplete: { [weak self] (message: String) in
-                    Task {
-                        await self?.sendToClientOrRelay(
-                            WSPacket(action: .claudeComplete, payload: ["sessionId": sid, "message": message]),
-                            to: clientId
-                        )
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let packet = WSPacket(action: .claudeComplete, payload: ["sessionId": sid, "message": message])
+                        self.sessionLastEvent[sid] = packet
+                        await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                         PushNotificationService.shared.notifyTaskComplete(
                             workspace: workspaceName,
                             summary: message,
@@ -795,15 +814,15 @@ class DaemonManager: ObservableObject {
                     }
                 },
                 onAskUser: { [weak self] (questionsJson: String, _: [String]) in
-                    Task {
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let packet = WSPacket(action: .claudeAskUser, payload: [
+                            "sessionId": sid,
+                            "questions": questionsJson
+                        ])
+                        self.sessionLastEvent[sid] = packet
                         // questionsJson is already a JSON string of the full questions array
-                        await self?.sendToClientOrRelay(
-                            WSPacket(action: .claudeAskUser, payload: [
-                                "sessionId": sid,
-                                "questions": questionsJson
-                            ]),
-                            to: clientId
-                        )
+                        await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                         PushNotificationService.shared.notifyAgentQuestion(
                             workspace: workspaceName,
                             question: questionsJson,
@@ -840,6 +859,7 @@ class DaemonManager: ObservableObject {
         guard let sessionId = packet.payload?["sessionId"],
               let answer = packet.payload?["answer"] else { return }
         log("claudeUserResponse: \(answer) for session \(sessionId)")
+        sessionLastEvent.removeValue(forKey: sessionId)
         await terminalManager.respondToClaudeQuestion(answer, sessionId: sessionId)
     }
 
@@ -852,6 +872,7 @@ class DaemonManager: ObservableObject {
 
     private func handleClaudeClose(clientId: String, packet: WSPacket) async {
         guard let sessionId = packet.payload?["sessionId"] else { return }
+        sessionLastEvent.removeValue(forKey: sessionId)
         await terminalManager.closeClaudeSession(sessionId)
         await sendToClientOrRelay(
             WSPacket(action: .claudeClose, payload: ["sessionId": sessionId], id: packet.id),
@@ -895,9 +916,10 @@ class DaemonManager: ObservableObject {
             try await openClaw.sendMessage(message, agentId: agentId) { [weak self] chunk in
                 responseAccumulator.withLock { $0 += chunk }
                 Task {
-                    await self?.sendToClientOrRelay(
+                    guard let self else { return }
+                    await self.sendToClientOrRelay(
                         WSPacket(action: .openclawOutput, payload: ["output": chunk]),
-                        to: clientId
+                        to: self.lastActiveClientId
                     )
                 }
             }
@@ -972,7 +994,7 @@ class DaemonManager: ObservableObject {
                                     "port": "\(port)",
                                     "sessionId": sessionId
                                 ]),
-                                to: clientId
+                                to: strongSelf.lastActiveClientId
                             )
                         }
                     }
@@ -1481,7 +1503,7 @@ class DaemonManager: ObservableObject {
                         } else {
                             var binaryData = Data("SCRN".utf8)
                             binaryData.append(screenshotPayload)
-                            wsServer?.broadcastBinary(binaryData)
+                            await wsServer?.broadcastBinary(binaryData)
                         }
                         return
                     }
@@ -1859,6 +1881,7 @@ class DaemonManager: ObservableObject {
             if let ip = tailscaleIP { updateData["tailscale_ip"] = ip }
             if let lip = localIp { updateData["local_ip"] = lip }
             if let hw = hwUuid { updateData["hardware_uuid"] = hw }
+            if let model = getModelIdentifier() { updateData["model_identifier"] = model }
 
             // Match by hardware_uuid first (unique per Mac), then fall back to first machine
             let matched = existing.first(where: { $0.hardwareUuid == hwUuid && hwUuid != nil })
@@ -1972,6 +1995,36 @@ class DaemonManager: ObservableObject {
         return uuidCF?.takeRetainedValue() as? String
     }
 
+    /// Returns the Mac model identifier (e.g. "MacBookAir10,1", "Mac14,3") via sysctl
+    private func getModelIdentifier() -> String? {
+        var size = 0
+        sysctlbyname("hw.model", nil, &size, nil, 0)
+        guard size > 0 else { return nil }
+        var model = [CChar](repeating: 0, count: size)
+        sysctlbyname("hw.model", &model, &size, nil, 0)
+        let identifier = String(cString: model)
+
+        // Also get the human-readable model name (e.g. "MacBook Air")
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/sbin/system_profiler")
+        proc.arguments = ["SPHardwareDataType"]
+        let pipe = Pipe()
+        proc.standardOutput = pipe
+        proc.standardError = FileHandle.nullDevice
+        do {
+            try proc.run()
+            proc.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8),
+               let range = output.range(of: "Model Name: ") {
+                let modelName = output[range.upperBound...].prefix(while: { $0 != "\n" })
+                return "\(modelName) (\(identifier))"
+            }
+        } catch {}
+
+        return identifier
+    }
+
     private func updateMachineStatus(_ status: String) async {
         guard let id = machineId else { return }
         do {
@@ -2026,43 +2079,44 @@ class DaemonManager: ObservableObject {
                     permissionMode: permissionMode,
                     onOutput: { [weak self] output in
                         Task {
-                            await self?.sendToClientOrRelay(
+                            guard let self else { return }
+                            await self.sendToClientOrRelay(
                                 WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": "claude"]),
-                                to: clientId
+                                to: self.lastActiveClientId
                             )
                             await UltraContextSync.shared.agentOutput(sessionId: sid, content: output)
                         }
                     },
                     onComplete: { [weak self] (message: String) in
-                        Task {
-                            await self?.sendToClientOrRelay(
-                                WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": "claude"]),
-                                to: clientId
-                            )
+                        Task { @MainActor in
+                            guard let self else { return }
+                            let packet = WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": "claude"])
+                            self.sessionLastEvent[sid] = packet
+                            await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                             PushNotificationService.shared.notifyTaskComplete(
                                 workspace: workspaceName,
                                 summary: String(message.prefix(200)),
                                 workspaceId: wsIdStr
                             )
-                            if let taskId = await self?.sessionTaskMap[sid] {
-                                await self?.agentTaskService.updateStatus(taskId, status: .completed)
+                            if let taskId = self.sessionTaskMap[sid] {
+                                await self.agentTaskService.updateStatus(taskId, status: .completed)
                             }
                             await UltraContextSync.shared.engineCompleted(sessionId: sid, summary: message)
                         }
                     },
                     onAskUser: { [weak self] questionsJson, _ in
-                        Task {
-                            await self?.sendToClientOrRelay(
-                                WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": "claude"]),
-                                to: clientId
-                            )
+                        Task { @MainActor in
+                            guard let self else { return }
+                            let packet = WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": "claude"])
+                            self.sessionLastEvent[sid] = packet
+                            await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                             PushNotificationService.shared.notifyAgentQuestion(
                                 workspace: workspaceName,
                                 question: questionsJson,
                                 workspaceId: wsIdStr
                             )
-                            if let taskId = await self?.sessionTaskMap[sid] {
-                                await self?.agentTaskService.updateStatus(taskId, status: .waiting)
+                            if let taskId = self.sessionTaskMap[sid] {
+                                await self.agentTaskService.updateStatus(taskId, status: .waiting)
                             }
                         }
                     }
@@ -2071,14 +2125,15 @@ class DaemonManager: ObservableObject {
                 // Set status handler for model/usage info
                 await terminalManager.setClaudeStatusHandler(sessionId: sid) { [weak self] model, inputTokens, outputTokens in
                     Task {
-                        await self?.sendToClientOrRelay(
+                        guard let self else { return }
+                        await self.sendToClientOrRelay(
                             WSPacket(action: .engineStatus, payload: [
                                 "sessionId": sid,
                                 "model": model,
                                 "inputTokens": "\(inputTokens)",
                                 "outputTokens": "\(outputTokens)"
                             ]),
-                            to: clientId
+                            to: self.lastActiveClientId
                         )
                     }
                 }
@@ -2122,28 +2177,29 @@ class DaemonManager: ObservableObject {
                 permissionMode: permissionMode,
                 onOutput: { [weak self] output in
                     Task {
-                        await self?.sendToClientOrRelay(
+                        guard let self else { return }
+                        await self.sendToClientOrRelay(
                             WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": engineTypeRaw]),
-                            to: clientId
+                            to: self.lastActiveClientId
                         )
                         await UltraContextSync.shared.agentOutput(sessionId: sid, content: output)
                     }
                 },
                 onComplete: { [weak self] (message: String) in
-                    Task {
-                        await self?.sendToClientOrRelay(
-                            WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": engineTypeRaw]),
-                            to: clientId
-                        )
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let packet = WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": engineTypeRaw])
+                        self.sessionLastEvent[sid] = packet
+                        await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                         await UltraContextSync.shared.engineCompleted(sessionId: sid, summary: message)
                     }
                 },
                 onAskUser: { [weak self] questionsJson, _ in
-                    Task {
-                        await self?.sendToClientOrRelay(
-                            WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": engineTypeRaw]),
-                            to: clientId
-                        )
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let packet = WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": engineTypeRaw])
+                        self.sessionLastEvent[sid] = packet
+                        await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                     }
                 }
             )
@@ -2199,6 +2255,9 @@ class DaemonManager: ObservableObject {
             await terminalManager.respondToEngineQuestion(answer, sessionId: sessionId)
         }
 
+        // User responded — session is running again, clear last event
+        sessionLastEvent.removeValue(forKey: sessionId)
+
         // Update task status back to running
         if let taskId = sessionTaskMap[sessionId] {
             await agentTaskService.updateStatus(taskId, status: .running)
@@ -2208,6 +2267,10 @@ class DaemonManager: ObservableObject {
     private func handleEngineClose(clientId: String, packet: WSPacket) async {
         guard let sessionId = packet.payload?["sessionId"] else { return }
         let engineType = packet.payload?["engineType"] ?? ""
+
+        // Clean up session state tracking
+        sessionLastEvent.removeValue(forKey: sessionId)
+        sessionTaskMap.removeValue(forKey: sessionId)
 
         if engineType == "claude" {
             await terminalManager.closeClaudeSession(sessionId)
@@ -2283,21 +2346,23 @@ class DaemonManager: ObservableObject {
                     },
                     onComplete: { [weak self] _ in
                         Task {
-                            await self?.sendToClientOrRelay(
+                            guard let self else { return }
+                            await self.sendToClientOrRelay(
                                 WSPacket(action: .wizardResponse, payload: ["response": fullResponse], id: packet.id),
-                                to: clientId
+                                to: self.lastActiveClientId
                             )
-                            await self?.terminalManager.closeClaudeSession(sid)
+                            await self.terminalManager.closeClaudeSession(sid)
                         }
                     },
                     onAskUser: { [weak self] _, _ in
                         // If agent asks a question during wizard, just send what we have
                         Task {
-                            await self?.sendToClientOrRelay(
+                            guard let self else { return }
+                            await self.sendToClientOrRelay(
                                 WSPacket(action: .wizardResponse, payload: ["response": fullResponse], id: packet.id),
-                                to: clientId
+                                to: self.lastActiveClientId
                             )
-                            await self?.terminalManager.closeClaudeSession(sid)
+                            await self.terminalManager.closeClaudeSession(sid)
                         }
                     }
                 )
@@ -2323,11 +2388,12 @@ class DaemonManager: ObservableObject {
                     },
                     onComplete: { [weak self] _ in
                         Task {
-                            await self?.sendToClientOrRelay(
+                            guard let self else { return }
+                            await self.sendToClientOrRelay(
                                 WSPacket(action: .wizardResponse, payload: ["response": fullResponse], id: packet.id),
-                                to: clientId
+                                to: self.lastActiveClientId
                             )
-                            await self?.terminalManager.closeEngineSession(sid)
+                            await self.terminalManager.closeEngineSession(sid)
                         }
                     }
                 )
@@ -2435,41 +2501,42 @@ class DaemonManager: ObservableObject {
                     permissionMode: permissionMode,
                     onOutput: { [weak self] output in
                         Task {
-                            await self?.sendToClientOrRelay(
+                            guard let self else { return }
+                            await self.sendToClientOrRelay(
                                 WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": "claude"]),
-                                to: clientId
+                                to: self.lastActiveClientId
                             )
                         }
                     },
                     onComplete: { [weak self] message in
-                        Task {
-                            await self?.sendToClientOrRelay(
-                                WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": "claude"]),
-                                to: clientId
-                            )
+                        Task { @MainActor in
+                            guard let self else { return }
+                            let packet = WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": "claude"])
+                            self.sessionLastEvent[sid] = packet
+                            await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                             PushNotificationService.shared.notifyTaskComplete(
                                 workspace: workspaceName,
                                 summary: String(message.prefix(200)),
                                 workspaceId: workspace.id.uuidString
                             )
-                            if let taskId = await self?.sessionTaskMap[sid] {
-                                await self?.agentTaskService.updateStatus(taskId, status: .completed)
+                            if let taskId = self.sessionTaskMap[sid] {
+                                await self.agentTaskService.updateStatus(taskId, status: .completed)
                             }
                         }
                     },
                     onAskUser: { [weak self] questionsJson, _ in
-                        Task {
-                            await self?.sendToClientOrRelay(
-                                WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": "claude"]),
-                                to: clientId
-                            )
+                        Task { @MainActor in
+                            guard let self else { return }
+                            let packet = WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": "claude"])
+                            self.sessionLastEvent[sid] = packet
+                            await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                             PushNotificationService.shared.notifyAgentQuestion(
                                 workspace: workspaceName,
                                 question: questionsJson,
                                 workspaceId: workspace.id.uuidString
                             )
-                            if let taskId = await self?.sessionTaskMap[sid] {
-                                await self?.agentTaskService.updateStatus(taskId, status: .waiting)
+                            if let taskId = self.sessionTaskMap[sid] {
+                                await self.agentTaskService.updateStatus(taskId, status: .waiting)
                             }
                         }
                     }
@@ -2477,12 +2544,13 @@ class DaemonManager: ObservableObject {
 
                 await terminalManager.setClaudeStatusHandler(sessionId: sid) { [weak self] model, inputTokens, outputTokens in
                     Task {
-                        await self?.sendToClientOrRelay(
+                        guard let self else { return }
+                        await self.sendToClientOrRelay(
                             WSPacket(action: .engineStatus, payload: [
                                 "sessionId": sid, "model": model,
                                 "inputTokens": "\(inputTokens)", "outputTokens": "\(outputTokens)"
                             ]),
-                            to: clientId
+                            to: self.lastActiveClientId
                         )
                     }
                 }
@@ -2505,18 +2573,19 @@ class DaemonManager: ObservableObject {
                     permissionMode: permissionMode,
                     onOutput: { [weak self] output in
                         Task {
-                            await self?.sendToClientOrRelay(
+                            guard let self else { return }
+                            await self.sendToClientOrRelay(
                                 WSPacket(action: .engineOutput, payload: ["sessionId": sid, "output": output, "engineType": engineTypeRaw]),
-                                to: clientId
+                                to: self.lastActiveClientId
                             )
                         }
                     },
                     onComplete: { [weak self] message in
-                        Task {
-                            await self?.sendToClientOrRelay(
-                                WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": engineTypeRaw]),
-                                to: clientId
-                            )
+                        Task { @MainActor in
+                            guard let self else { return }
+                            let packet = WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": engineTypeRaw])
+                            self.sessionLastEvent[sid] = packet
+                            await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                         }
                     }
                 )
@@ -2997,7 +3066,7 @@ class DaemonManager: ObservableObject {
         let expandedPath = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
             .resolvingSymlinksInPath().path
         for workspace in activeWorkspaces {
-            guard let localPath = workspace.localPath else { continue }
+            let localPath = workspace.localPath
             let workspacePath = URL(fileURLWithPath: (localPath as NSString).expandingTildeInPath)
                 .resolvingSymlinksInPath().path
             if expandedPath == workspacePath || expandedPath.hasPrefix(workspacePath + "/") {
