@@ -97,4 +97,6 @@ schemes:
     build:
       targets:
         TarsyiOS: all
-        TarsyWidgetExtension: all
+        TarsyWidgetExtension: [build, archive]
+    run:
+      executable: TarsyiOS
