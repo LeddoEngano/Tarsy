@@ -351,21 +351,19 @@ struct NewWorkspaceView: View {
         isScanning = true
         connectionManager.send(WSPacket(action: .workspaceScanRepos))
 
-        // Listen for scan result
-        let previousHandler = connectionManager.onPacketReceived
-        connectionManager.onPacketReceived = { packet in
-            if packet.action == .workspaceScanResult,
-               let json = packet.payload?["repos"],
-               let data = json.data(using: .utf8),
-               let repos = try? JSONDecoder().decode([ScannedRepo].self, from: data) {
-                Task { @MainActor in
+        connectionManager.addListener("scan_repos") { packet in
+            guard packet.action == .workspaceScanResult,
+                  let json = packet.payload?["repos"],
+                  let data = json.data(using: .utf8) else { return }
+
+            Task { @MainActor in
+                self.connectionManager.removeListener("scan_repos")
+                if let repos = try? JSONDecoder().decode([ScannedRepo].self, from: data) {
                     self.scannedRepos = repos
-                    self.isScanning = false
-                    // Restore previous handler
-                    self.connectionManager.onPacketReceived = previousHandler
+                } else {
+                    self.error = "failed to parse repo list from mac"
                 }
-            } else {
-                previousHandler?(packet)
+                self.isScanning = false
             }
         }
 
@@ -375,7 +373,7 @@ struct NewWorkspaceView: View {
             await MainActor.run {
                 if isScanning {
                     isScanning = false
-                    connectionManager.onPacketReceived = previousHandler
+                    connectionManager.removeListener("scan_repos")
                 }
             }
         }
@@ -412,7 +410,10 @@ struct NewWorkspaceView: View {
                     let suggestedCommand: String?
                 }
 
-                guard let analysis = try? JSONDecoder().decode(Analysis.self, from: data) else { return }
+                guard let analysis = try? JSONDecoder().decode(Analysis.self, from: data) else {
+                    self.error = "failed to analyze repo"
+                    return
+                }
 
                 // Auto-fill dev server command if empty
                 if self.devServerCommand.isEmpty, let cmd = analysis.suggestedCommand {
