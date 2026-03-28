@@ -364,7 +364,25 @@ struct AIProjectWizardView: View {
             summaryCard(icon: "hammer.fill", label: "framework", value: framework)
             summaryCard(icon: "square.stack.3d.up.fill", label: "stack", value: stack.rawValue)
             summaryCard(icon: "folder.badge.gearshape", label: "path", value: projectPath)
-            summaryCard(icon: selectedEngine.iconName, label: "agent", value: selectedEngine.displayName)
+            HStack(spacing: 12) {
+                AgentIcon(engineType: selectedEngine, size: 18)
+                    .frame(width: 24)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("agent")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                    Text(selectedEngine.displayName)
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textPrimary)
+                        .lineLimit(2)
+                }
+
+                Spacer()
+            }
+            .padding(12)
+            .background(TarsyTheme.backgroundSecondary)
+            .cornerRadius(8)
 
             if !dependencies.isEmpty {
                 summaryCard(icon: "shippingbox.fill", label: "dependencies", value: dependencies.joined(separator: ", "))

@@ -322,7 +322,15 @@ struct WorkspaceView: View {
                         Section("New chat") {
                             ForEach(detectedAgents, id: \.self) { engine in
                                 Button(action: { addEngineTab(engine) }) {
-                                    Label(engine.displayName, systemImage: engine.iconName)
+                                    Label {
+                                        Text(engine.displayName)
+                                    } icon: {
+                                        if let asset = engine.iconAsset {
+                                            Image(asset).renderingMode(.template)
+                                        } else {
+                                            Image(systemName: engine.iconName)
+                                        }
+                                    }
                                 }
                             }
                         }
