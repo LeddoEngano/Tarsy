@@ -233,6 +233,8 @@ struct WorkspaceView: View {
         }
         .onDisappear {
             cleanupHandler()
+            // Don't end activities when navigating away — agent keeps running in background.
+            // Activities end naturally via engineComplete/engineError packets.
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
             let info = notification.userInfo
@@ -437,6 +439,8 @@ struct WorkspaceView: View {
         if let sessionId = currentTab.sessionId {
             todoManager.markResumed(sessionId: sessionId)
         }
+        // Resume Live Activity to running
+        LiveActivityManager.shared.updateStatus(workspaceId: workspace.id.uuidString, status: "running", tabId: currentTab.id)
 
         let msg = ChatMessage(
             workspaceId: workspace.id,
@@ -467,6 +471,8 @@ struct WorkspaceView: View {
         if let sessionId = currentTab.sessionId {
             todoManager.markResumed(sessionId: sessionId)
         }
+        // Resume Live Activity to running
+        LiveActivityManager.shared.updateStatus(workspaceId: workspace.id.uuidString, status: "running", tabId: currentTab.id)
 
         // Format answers as readable text
         let answerText = answers.map { "\($0.key): \($0.value)" }.joined(separator: "\n")
@@ -1307,8 +1313,12 @@ struct WorkspaceView: View {
                     } else {
                         updateBackgroundTabState(sessionId: eSid) { $0.isThinking = false; $0.activity = nil }
                     }
-                    // End Live Activity
-                    LiveActivityManager.shared.endActivity(workspaceId: workspace.id.uuidString)
+                    // End Live Activity (scoped to tab)
+                    if let tid = tabId(forSession: eSid) {
+                        LiveActivityManager.shared.endActivity(workspaceId: workspace.id.uuidString, tabId: tid)
+                    } else {
+                        LiveActivityManager.shared.endActivity(workspaceId: workspace.id.uuidString, tabId: currentTab.id)
+                    }
                 case .engineCreate:
                     if let sessionId = packet.payload?["sessionId"] {
                         tabs[selectedTabIndex].sessionId = sessionId
@@ -1316,12 +1326,13 @@ struct WorkspaceView: View {
                         for i in todoManager.items.indices where todoManager.items[i].sessionId == "pending" {
                             todoManager.items[i].sessionId = sessionId
                         }
-                        // Start Live Activity
+                        // Start Live Activity (scoped to tab)
                         let engine = currentTab.engineType ?? .claude
                         LiveActivityManager.shared.startActivity(
                             workspaceId: workspace.id.uuidString,
                             workspaceName: workspace.name,
-                            engineType: engine
+                            engineType: engine,
+                            tabId: currentTab.id
                         )
                     }
                 case .engineAskUser:
@@ -1399,14 +1410,14 @@ struct WorkspaceView: View {
                 }
                 // Update Live Activity with current tool
                 if let tool = AgentToolType.parse(from: clean) {
-                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool)
+                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: currentTab.id)
                 }
             } else {
                 agentActivity = nil
                 chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
                 // Parse tool from raw output too
                 if let tool = AgentToolType.parse(from: output) {
-                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool)
+                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: currentTab.id)
                 }
             }
         }
@@ -1416,8 +1427,8 @@ struct WorkspaceView: View {
         isAgentThinking = false
         let sessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
         todoManager.markQuestion(sessionId: sessionId)
-        // Update Live Activity to waiting
-        LiveActivityManager.shared.updateStatus(workspaceId: workspace.id.uuidString, status: "waiting")
+        // Update Live Activity to waiting (scoped to tab)
+        LiveActivityManager.shared.updateStatus(workspaceId: workspace.id.uuidString, status: "waiting", tabId: currentTab.id)
         if let questionsJson = packet.payload?["questions"],
            let questionsData = questionsJson.data(using: .utf8),
            let questions = try? JSONDecoder().decode([InteractiveQuestion].self, from: questionsData) {

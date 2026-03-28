@@ -65,8 +65,36 @@ targets:
         CODE_SIGN_STYLE: "Automatic"
     dependencies:
       - package: TarsyShared
+      - target: TarsyWidgetExtension
+  TarsyWidgetExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - TarsyWidgetExtension
+      - path: Sources/LiveActivity/TarsyActivityAttributes.swift
+        buildPhase: sources
+    info:
+      path: TarsyWidgetExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Tarsy Widgets
+        CFBundleName: TarsyWidgets
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tarsy.ios.widgets
+        DEVELOPMENT_TEAM: "J2M334NJ3L"
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: "Automatic"
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: YES
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
 schemes:
   TarsyiOS:
     build:
       targets:
         TarsyiOS: all
+        TarsyWidgetExtension: all

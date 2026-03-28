@@ -14,7 +14,7 @@ struct TarsyLiveActivityWidget: Widget {
                     HStack(spacing: 6) {
                         Image(systemName: context.attributes.engineIcon)
                             .font(.system(size: 14))
-                            .foregroundColor(Color(hexValue: "d4a574"))
+                            .foregroundColor(amberColor)
                         Text(context.attributes.engineType)
                             .font(.system(size: 12, weight: .medium, design: .monospaced))
                             .foregroundColor(.white)
@@ -24,10 +24,11 @@ struct TarsyLiveActivityWidget: Widget {
                     HStack(spacing: 4) {
                         Image(systemName: "clock")
                             .font(.system(size: 10))
-                            .foregroundColor(Color(hexValue: "a89e91"))
-                        Text(formatElapsed(context.state.elapsedSeconds))
+                            .foregroundColor(secondaryColor)
+                        Text(context.state.startedAt, style: .timer)
                             .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(Color(hexValue: "a89e91"))
+                            .foregroundColor(secondaryColor)
+                            .monospacedDigit()
                     }
                 }
                 DynamicIslandExpandedRegion(.center) {
@@ -35,6 +36,7 @@ struct TarsyLiveActivityWidget: Widget {
                         Text(context.attributes.workspaceName)
                             .font(.system(size: 14, weight: .semibold, design: .monospaced))
                             .foregroundColor(.white)
+                            .lineLimit(1)
 
                         HStack(spacing: 4) {
                             Image(systemName: context.state.currentToolIcon)
@@ -49,32 +51,29 @@ struct TarsyLiveActivityWidget: Widget {
                     statusBadge(context.state.status)
                 }
             } compactLeading: {
-                // Compact leading — engine icon
-                Image(systemName: context.attributes.engineIcon)
-                    .font(.system(size: 12))
-                    .foregroundColor(Color(hexValue: "d4a574"))
+                HStack(spacing: 4) {
+                    Image(systemName: context.attributes.engineIcon)
+                        .font(.system(size: 12))
+                        .foregroundColor(amberColor)
+                }
             } compactTrailing: {
-                // Compact trailing — status indicator
                 HStack(spacing: 3) {
-                    if context.state.status == "running" {
-                        Image(systemName: context.state.currentToolIcon)
-                            .font(.system(size: 10))
-                            .foregroundColor(Color(hexValue: "7a8b6f"))
-                    } else if context.state.status == "waiting" {
+                    if context.state.status == "waiting" {
                         Image(systemName: "questionmark.circle.fill")
                             .font(.system(size: 12))
-                            .foregroundColor(Color(hexValue: "d4a574"))
+                            .foregroundColor(amberColor)
                     } else {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 12))
-                            .foregroundColor(Color(hexValue: "7a8b6f"))
+                        Text(context.state.startedAt, style: .timer)
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(mossColor)
+                            .monospacedDigit()
+                            .frame(minWidth: 32)
                     }
                 }
             } minimal: {
-                // Minimal — just the status dot
-                Image(systemName: context.attributes.engineIcon)
+                Image(systemName: context.state.status == "waiting" ? "questionmark.circle.fill" : context.attributes.engineIcon)
                     .font(.system(size: 12))
-                    .foregroundColor(statusColor(context.state.status))
+                    .foregroundColor(context.state.status == "waiting" ? amberColor : mossColor)
             }
         }
     }
@@ -87,11 +86,11 @@ struct TarsyLiveActivityWidget: Widget {
             // Engine icon
             ZStack {
                 Circle()
-                    .fill(Color(hexValue: "d4a574").opacity(0.2))
+                    .fill(amberColor.opacity(0.2))
                     .frame(width: 40, height: 40)
                 Image(systemName: context.attributes.engineIcon)
                     .font(.system(size: 18))
-                    .foregroundColor(Color(hexValue: "d4a574"))
+                    .foregroundColor(amberColor)
             }
 
             // Info
@@ -100,14 +99,15 @@ struct TarsyLiveActivityWidget: Widget {
                     Text(context.attributes.workspaceName)
                         .font(.system(size: 14, weight: .semibold, design: .monospaced))
                         .foregroundColor(.white)
+                        .lineLimit(1)
                     Spacer()
-                    Text(formatElapsed(context.state.elapsedSeconds))
+                    Text(context.state.startedAt, style: .timer)
                         .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(Color(hexValue: "a89e91"))
+                        .foregroundColor(secondaryColor)
+                        .monospacedDigit()
                 }
 
                 HStack(spacing: 6) {
-                    // Tool indicator
                     HStack(spacing: 3) {
                         Image(systemName: context.state.currentToolIcon)
                             .font(.system(size: 10))
@@ -118,13 +118,12 @@ struct TarsyLiveActivityWidget: Widget {
 
                     Spacer()
 
-                    // Status badge
                     statusBadge(context.state.status)
                 }
             }
         }
         .padding(16)
-        .background(Color(hexValue: "1a1a1a"))
+        .background(Color(red: 0.1, green: 0.1, blue: 0.1))
     }
 
     // MARK: - Helpers
@@ -145,35 +144,19 @@ struct TarsyLiveActivityWidget: Widget {
         .cornerRadius(6)
     }
 
+    // TarsyTheme colors as computed properties (avoid Color(hex:) conflicts)
+    private var amberColor: Color { Color(red: 212/255, green: 165/255, blue: 116/255) }
+    private var mossColor: Color { Color(red: 122/255, green: 139/255, blue: 111/255) }
+    private var terracottaColor: Color { Color(red: 196/255, green: 112/255, blue: 75/255) }
+    private var secondaryColor: Color { Color(red: 168/255, green: 158/255, blue: 145/255) }
+
     private func statusColor(_ status: String) -> Color {
         switch status {
-        case "running": return Color(hexValue: "7a8b6f")
-        case "waiting": return Color(hexValue: "d4a574")
-        case "completed": return Color(hexValue: "7a8b6f")
-        case "error": return Color(hexValue: "c4704b")
-        default: return Color(hexValue: "a89e91")
+        case "running": return mossColor
+        case "waiting": return amberColor
+        case "completed": return mossColor
+        case "error": return terracottaColor
+        default: return secondaryColor
         }
-    }
-
-    private func formatElapsed(_ seconds: Int) -> String {
-        let m = seconds / 60
-        let s = seconds % 60
-        if m > 0 {
-            return "\(m)m \(s)s"
-        }
-        return "\(s)s"
-    }
-}
-
-// Color helper for Live Activity (fileprivate to avoid redeclaration with TarsyTheme)
-fileprivate extension Color {
-    init(hexValue: String) {
-        let hex = hexValue.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let r = Double((int >> 16) & 0xFF) / 255
-        let g = Double((int >> 8) & 0xFF) / 255
-        let b = Double(int & 0xFF) / 255
-        self.init(.sRGB, red: r, green: g, blue: b, opacity: 1)
     }
 }
