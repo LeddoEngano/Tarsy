@@ -275,8 +275,22 @@ class DaemonManager: ObservableObject {
                 var extra: [String: String] = [:]
                 if let clientKey = authPacket.payload?["e2ePublicKey"], !clientKey.isEmpty {
                     if self?.e2e.completeKeyExchange(remotePublicKeyBase64: clientKey) == true {
-                        extra["e2ePublicKey"] = self?.e2e.publicKeyBase64 ?? ""
-                        print("[Daemon] E2E key exchange completed")
+                        let ourKey = self?.e2e.publicKeyBase64 ?? ""
+                        extra["e2ePublicKey"] = ourKey
+
+                        // Sign our E2E public key with the TLS private key to bind it to our identity.
+                        // iOS can verify this signature against the pinned TLS certificate fingerprint,
+                        // preventing a compromised relay from performing a MITM on the key exchange.
+                        if let keyData = ourKey.data(using: .utf8),
+                           let signature = TLSCertificateManager.shared.sign(keyData) {
+                            extra["e2eKeySignature"] = signature.base64EncodedString()
+                            // Also send the cert so iOS can extract the public key for verification
+                            if let certDER = TLSCertificateManager.shared.certificateDER() {
+                                extra["tlsCertificate"] = certDER.base64EncodedString()
+                            }
+                        }
+
+                        print("[Daemon] E2E key exchange completed (TLS-bound)")
                     }
                 }
                 return extra
@@ -991,11 +1005,12 @@ class DaemonManager: ObservableObject {
             }
 
             // Source shell config + common version managers to ensure PATH has npm/node/pnpm/etc.
-            // Shell-escape cmdName with single quotes to prevent injection
-            let escapedCmdName = "'" + baseCmdName.replacingOccurrences(of: "'", with: "'\\''") + "'"
-            let fullCommand = "export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"; which \(escapedCmdName) 2>&1; \(rewrittenCmd)"
+            // Sent as a separate input to avoid interpolating the user command into the shell setup string.
+            let nvmSetup = "export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
+            await terminalManager.sendInput(nvmSetup, to: sessionId)
 
-            await terminalManager.sendInput(fullCommand, to: sessionId)
+            // Run the actual dev server command (validated against allowedRunners above)
+            await terminalManager.sendInput(rewrittenCmd, to: sessionId)
             log("devServerStart: running '\(command)' in \(expandedPath)\(needsSudo ? " (with sudo)" : "")")
 
             // Wait for actual confirmation: either output-based or port-based
@@ -2365,7 +2380,7 @@ class DaemonManager: ObservableObject {
             try FileManager.default.createDirectory(atPath: expandedPath, withIntermediateDirectories: true)
 
             // 2. git init
-            let gitInit = await runShellCommand("git init", at: expandedPath)
+            let gitInit = await runProcess("/usr/bin/git", arguments: ["init"], at: expandedPath)
             log("wizardExecute: git init: \(gitInit.success ? "ok" : gitInit.output)")
 
             // 3. GitHub repo (optional)
@@ -2555,27 +2570,6 @@ class DaemonManager: ObservableObject {
         let pipe = Pipe()
         process.executableURL = URL(fileURLWithPath: resolvedPath)
         process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: directory)
-        process.standardOutput = pipe
-        process.standardError = pipe
-        process.environment = ProcessInfo.processInfo.environment
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-            return (process.terminationStatus == 0, output)
-        } catch {
-            return (false, error.localizedDescription)
-        }
-    }
-
-    private func runShellCommand(_ command: String, at directory: String) async -> (success: Bool, output: String) {
-        let process = Process()
-        let pipe = Pipe()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-c", command]
         process.currentDirectoryURL = URL(fileURLWithPath: directory)
         process.standardOutput = pipe
         process.standardError = pipe

@@ -188,6 +188,40 @@ final class TLSCertificateManager {
         return derData
     }
 
+    // MARK: - E2E Key Binding
+
+    /// Signs data with the TLS private key (RSA-PSS SHA256).
+    /// Used to bind E2E public keys to the TLS identity, preventing relay MITM.
+    func sign(_ data: Data) -> Data? {
+        guard let identity = loadIdentityFromKeychain() else { return nil }
+
+        var privateKeyRef: SecKey?
+        let status = SecIdentityCopyPrivateKey(identity, &privateKeyRef)
+        guard status == errSecSuccess, let privateKey = privateKeyRef else { return nil }
+
+        var error: Unmanaged<CFError>?
+        guard let signature = SecKeyCreateSignature(
+            privateKey,
+            .rsaSignatureMessagePSSSHA256,
+            data as CFData,
+            &error
+        ) else {
+            print("[TLS] Signing failed: \(error?.takeRetainedValue().localizedDescription ?? "unknown")")
+            return nil
+        }
+
+        return signature as Data
+    }
+
+    /// Returns the DER-encoded certificate data for verification on the iOS side.
+    func certificateDER() -> Data? {
+        guard let identity = loadIdentityFromKeychain() else { return nil }
+        var certRef: SecCertificate?
+        let status = SecIdentityCopyCertificate(identity, &certRef)
+        guard status == errSecSuccess, let cert = certRef else { return nil }
+        return SecCertificateCopyData(cert) as Data
+    }
+
     // MARK: - Utilities
 
     private func sha256Hex(_ data: Data) -> String {

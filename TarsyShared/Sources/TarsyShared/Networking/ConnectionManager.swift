@@ -429,15 +429,47 @@ public class ConnectionManager: ObservableObject {
             isReconnecting = false
             reconnectAttempts = 0
             errorMessage = nil
-            // Save TLS fingerprint from server for TOFU pinning
+            // Save TLS fingerprint from server for TOFU pinning.
+            // Only save on first use (no existing pin) or on LAN connections (trusted channel).
+            // Never allow a relay-delivered authSuccess to overwrite an existing pin.
             if let fp = packet.payload?["fingerprint"], let h = host {
-                savePinnedFingerprint(fp, forHost: h)
+                let existingPin = loadPinnedFingerprint(forHost: h)
+                if existingPin == nil {
+                    // True first use — save the fingerprint
+                    savePinnedFingerprint(fp, forHost: h)
+                } else if connectionMode == .lan {
+                    // LAN is direct (TLS protected), safe to update
+                    savePinnedFingerprint(fp, forHost: h)
+                } else if existingPin == fp {
+                    // Same fingerprint — no-op
+                }
+                // If relay + different fingerprint → ignore (prevents relay MITM overwrite)
             }
-            // Complete E2E key exchange
+            // Complete E2E key exchange with TLS binding verification
             if let remoteKey = packet.payload?["e2ePublicKey"], e2e.completeKeyExchange(remotePublicKeyBase64: remoteKey) {
-                print("[WS] Authenticated successfully (TLS pinned, E2E ready)")
+                // Verify E2E key is signed by the TLS certificate (prevents relay MITM)
+                if let sigB64 = packet.payload?["e2eKeySignature"],
+                   let certB64 = packet.payload?["tlsCertificate"],
+                   let h = host {
+                    let verified = verifyE2EKeyBinding(
+                        e2ePublicKey: remoteKey,
+                        signatureBase64: sigB64,
+                        certificateBase64: certB64,
+                        forHost: h
+                    )
+                    if verified {
+                        print("[WS] Authenticated (E2E ready, TLS-bound key verified)")
+                    } else {
+                        print("[WS] WARNING: E2E key signature verification failed — possible MITM")
+                        // Still connected but E2E may be compromised — reset and rely on TLS only
+                        e2e.reset()
+                    }
+                } else {
+                    // LAN connection (no signature needed — TLS protects directly)
+                    print("[WS] Authenticated (E2E ready, LAN/TLS)")
+                }
             } else {
-                print("[WS] Authenticated successfully (no E2E)")
+                print("[WS] Authenticated (no E2E)")
             }
         case .authFail:
             isConnected = false
@@ -590,6 +622,61 @@ public class ConnectionManager: ObservableObject {
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
 
         return parameters
+    }
+
+    // MARK: - E2E Key Binding Verification
+
+    /// Verifies that the remote E2E public key was signed by the TLS certificate we trust.
+    /// This prevents a compromised relay from performing a MITM on the key exchange.
+    private func verifyE2EKeyBinding(e2ePublicKey: String, signatureBase64: String, certificateBase64: String, forHost host: String) -> Bool {
+        guard let signatureData = Data(base64Encoded: signatureBase64),
+              let certData = Data(base64Encoded: certificateBase64),
+              let keyData = e2ePublicKey.data(using: .utf8) else {
+            return false
+        }
+
+        // Verify the certificate fingerprint matches our pinned one
+        let certFingerprint = SHA256.hash(data: certData).map { String(format: "%02x", $0) }.joined(separator: ":")
+        let pinnedFP = loadPinnedFingerprint(forHost: host)
+
+        if let pinned = pinnedFP, pinned != certFingerprint {
+            print("[WS] E2E binding failed: certificate fingerprint doesn't match pinned TLS cert")
+            return false
+        }
+
+        // Create SecCertificate and extract public key
+        guard let certificate = SecCertificateCreateWithData(nil, certData as CFData) else {
+            print("[WS] E2E binding failed: invalid certificate data")
+            return false
+        }
+
+        var trust: SecTrust?
+        let policy = SecPolicyCreateBasicX509()
+        guard SecTrustCreateWithCertificates(certificate, policy, &trust) == errSecSuccess,
+              let trustRef = trust else {
+            return false
+        }
+
+        guard let publicKey = SecTrustCopyKey(trustRef) else {
+            print("[WS] E2E binding failed: could not extract public key from certificate")
+            return false
+        }
+
+        // Verify the signature (RSA-PSS SHA256)
+        var error: Unmanaged<CFError>?
+        let verified = SecKeyVerifySignature(
+            publicKey,
+            .rsaSignatureMessagePSSSHA256,
+            keyData as CFData,
+            signatureData as CFData,
+            &error
+        )
+
+        if !verified {
+            print("[WS] E2E binding failed: signature verification error: \(error?.takeRetainedValue().localizedDescription ?? "unknown")")
+        }
+
+        return verified
     }
 
     // MARK: - Fingerprint Keychain Storage
