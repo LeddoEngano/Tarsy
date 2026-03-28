@@ -1,6 +1,8 @@
 import Foundation
 import TarsyShared
 
+/// Runs CLI coding agents. Uses headless mode (-p/--prompt) for TUI-based CLIs (Gemini, etc.)
+/// and PTY interactive mode for line-based CLIs (Aider, etc.).
 actor GenericCLIEngine: AIEngine {
     let id: String
     let engineType: AIEngineType
@@ -8,9 +10,10 @@ actor GenericCLIEngine: AIEngine {
     let command: String
     let apiKey: String?
     let permissionMode: AgentPermissionConfig.PermissionMode
-    private var process: Process?
-    private var stdinPipe: Pipe?
     private var isRunning = false
+
+    // Headless mode state
+    private var currentProcess: Process?
 
     private var onOutput: (@Sendable (String) -> Void)?
     private var onComplete: (@Sendable (String) -> Void)?
@@ -38,126 +41,218 @@ actor GenericCLIEngine: AIEngine {
     }
 
     func start() throws {
-        let expandedPath = (workspacePath as NSString).expandingTildeInPath
-        let cliPath = findCLI()
-
-        print("[GenericCLI] Starting \(engineType.displayName) session \(id) at \(expandedPath)")
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: cliPath)
-        proc.arguments = argsForEngine()
-        proc.currentDirectoryURL = URL(fileURLWithPath: expandedPath)
-
-        var env = ProcessInfo.processInfo.environment
-        // Inject API key if provided
-        if let key = apiKey, let envVar = engineType.envKeyName {
-            env[envVar] = key
-        }
-        env["TERM"] = "dumb"
-        proc.environment = env
-
-        let stdin = Pipe()
-        let stdout = Pipe()
-        let stderr = Pipe()
-        proc.standardInput = stdin
-        proc.standardOutput = stdout
-        proc.standardError = stderr
-
-        // Stream stdout in real time
-        stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Task { await self?.onOutput?(text) }
-        }
-
-        // Also capture stderr as output
-        stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            Task { await self?.onOutput?(text) }
-        }
-
-        proc.terminationHandler = { [weak self] _ in
-            Task { await self?.handleExit() }
-        }
-
-        try proc.run()
-
-        self.process = proc
-        self.stdinPipe = stdin
-        self.isRunning = true
-
-        print("[GenericCLI] \(engineType.displayName) session \(id) started with PID \(proc.processIdentifier)")
-        onOutput?("\(engineType.displayName) ready. Send a message to start.\n")
+        isRunning = true
+        print("[GenericCLI] Session \(id) ready (\(engineType.displayName), headless mode)")
     }
 
     func sendMessage(_ message: String) {
-        guard isRunning, let pipe = stdinPipe else {
-            print("[GenericCLI] Cannot send — process not running")
+        guard isRunning else {
+            print("[GenericCLI] Cannot send — session not running")
             return
         }
 
-        print("[GenericCLI] Sending to \(engineType.displayName): \(message.prefix(80))...")
+        print("[GenericCLI] Processing message for \(engineType.displayName): \(message.prefix(80))...")
 
-        if let data = "\(message)\n".data(using: .utf8) {
-            pipe.fileHandleForWriting.write(data)
+        // Kill any previous in-flight request
+        currentProcess?.terminate()
+        currentProcess = nil
+
+        let cliPath = findCLI()
+        let expandedPath = (workspacePath as NSString).expandingTildeInPath
+        let args = argsForEngine(message: message)
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: cliPath)
+        proc.arguments = args
+        proc.currentDirectoryURL = URL(fileURLWithPath: expandedPath)
+        proc.environment = buildEnvironment()
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        proc.standardOutput = stdout
+        proc.standardError = stderr
+        // No stdin needed for headless mode
+
+        let onOutput = self.onOutput
+        let engineName = self.engineType.displayName
+
+        // Stream stdout chunks in real time
+        stdout.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            let cleaned = GenericCLIEngine.stripAnsi(text)
+            if !cleaned.isEmpty {
+                onOutput?(cleaned)
+            }
+        }
+
+        // Capture stderr but filter noise (credential messages, warnings)
+        stderr.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+            let cleaned = GenericCLIEngine.stripAnsi(text)
+            // Filter common noise from stderr
+            let lower = cleaned.lowercased()
+            let isNoise = lower.contains("cached credentials") ||
+                          lower.contains("loaded cached") ||
+                          lower.contains("warning:") ||
+                          lower.contains("256-color") ||
+                          cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if !isNoise {
+                onOutput?(cleaned)
+            }
+        }
+
+        let onComplete = self.onComplete
+        proc.terminationHandler = { process in
+            stdout.fileHandleForReading.readabilityHandler = nil
+            stderr.fileHandleForReading.readabilityHandler = nil
+            print("[GenericCLI] \(engineName) headless process exited with code \(process.terminationStatus)")
+            // Signal message completion so iOS clears "thinking..." state
+            onComplete?("")
+        }
+
+        do {
+            try proc.run()
+            currentProcess = proc
+            print("[GenericCLI] Started headless process PID \(proc.processIdentifier): \(cliPath) \(args.joined(separator: " "))")
+        } catch {
+            print("[GenericCLI] Failed to start headless process: \(error)")
+            onOutput?("Error: \(error.localizedDescription)\n")
         }
     }
 
     func respondToQuestion(_ answer: String) {
-        // Generic CLIs don't have structured questions — just send as input
+        // In headless mode, questions are handled by sending a new message
         sendMessage(answer)
     }
 
     func terminate() {
         isRunning = false
-        stdinPipe?.fileHandleForWriting.closeFile()
-        process?.terminate()
-        process = nil
-        stdinPipe = nil
+        currentProcess?.terminate()
+        currentProcess = nil
+        onComplete?("Session ended")
     }
 
     // MARK: - Private
 
-    private func handleExit() {
-        isRunning = false
-        onComplete?("Session ended")
-        print("[GenericCLI] \(engineType.displayName) session \(id) exited")
+    private func buildEnvironment() -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+        let realHome = FileManager.default.homeDirectoryForCurrentUser.path
+            .replacingOccurrences(of: "/Library/Containers/com.tarsy.macos/Data", with: "")
+        let home = realHome.isEmpty ? (env["HOME"] ?? NSHomeDirectory()) : realHome
+        env["HOME"] = home
+
+        var extraPaths: [String] = []
+        let candidates = [
+            "/opt/homebrew/bin",
+            "\(home)/.local/bin",
+            "/usr/local/bin",
+            "\(home)/.npm-global/bin",
+            "\(home)/.cargo/bin",
+            "\(home)/.bun/bin",
+            "\(home)/.volta/bin",
+            "\(home)/.asdf/shims",
+            "\(home)/.local/share/mise/shims",
+        ]
+        for p in candidates where FileManager.default.fileExists(atPath: p) {
+            extraPaths.append(p)
+        }
+        let nvmDir = "\(home)/.nvm/versions/node"
+        if let versions = try? FileManager.default.contentsOfDirectory(atPath: nvmDir) {
+            for v in versions.sorted(by: { $0.compare($1, options: .numeric) == .orderedDescending }) {
+                let binPath = "\(nvmDir)/\(v)/bin"
+                if FileManager.default.fileExists(atPath: binPath) {
+                    extraPaths.append(binPath)
+                }
+            }
+        }
+        let fnmDir = "\(home)/.local/share/fnm/node-versions"
+        if let versions = try? FileManager.default.contentsOfDirectory(atPath: fnmDir) {
+            for v in versions {
+                let binPath = "\(fnmDir)/\(v)/installation/bin"
+                if FileManager.default.fileExists(atPath: binPath) {
+                    extraPaths.append(binPath)
+                }
+            }
+        }
+        let currentPath = env["PATH"] ?? "/usr/bin:/bin"
+        env["PATH"] = (extraPaths + [currentPath]).joined(separator: ":")
+
+        if let key = apiKey, let envVar = engineType.envKeyName {
+            env[envVar] = key
+        }
+        env["TERM"] = "dumb"
+        env["NO_COLOR"] = "1"
+
+        return env
     }
 
-    private func argsForEngine() -> [String] {
+    /// Build CLI arguments. For TUI-based CLIs, uses headless/prompt flags.
+    private func argsForEngine(message: String) -> [String] {
         switch engineType {
         case .gemini:
-            return []
+            var args = ["-p", message]
+            if permissionMode == .dangerous {
+                args.append("--yolo")
+            }
+            return args
         case .codex:
+            var args = ["-p", message]
             if permissionMode == .dangerous {
-                return ["--approval-mode", "full-auto"]
+                args.append(contentsOf: ["--approval-mode", "full-auto"])
             } else {
-                return ["--approval-mode", "suggest"]
+                args.append(contentsOf: ["--approval-mode", "suggest"])
             }
+            return args
         case .aider:
-            if permissionMode == .dangerous {
-                return []
-            } else {
-                return ["--no-auto-commits", "--no-git"]
+            var args = ["--message", message]
+            if permissionMode != .dangerous {
+                args.append(contentsOf: ["--no-auto-commits", "--no-git"])
             }
+            return args
+        case .cursor:
+            return [message]
+        case .windsurf:
+            return [message]
+        case .amp:
+            return ["--prompt", message]
+        case .cline:
+            return ["--prompt", message]
+        case .copilot:
+            return ["copilot", message]
         case .custom, .claude:
-            return []
+            return [message]
         }
+    }
+
+    /// Strips ANSI escape sequences from output.
+    nonisolated static func stripAnsi(_ input: String) -> String {
+        var result = input
+        let esc = "\u{1b}"
+
+        // Strip CSI sequences
+        result = result.replacingOccurrences(
+            of: "\(esc)\\[[0-9;?]*[A-Za-z@-~]",
+            with: "",
+            options: .regularExpression
+        )
+        // Strip OSC sequences
+        result = result.replacingOccurrences(
+            of: "\(esc)\\][^\u{07}\(esc)]*(?:\u{07}|\(esc)\\\\)",
+            with: "",
+            options: .regularExpression
+        )
+        // Strip remaining ESC
+        result = result.replacingOccurrences(of: esc, with: "")
+
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func findCLI() -> String {
-        let searchPaths = [
-            "/opt/homebrew/bin/\(command)",
-            "\(NSHomeDirectory())/.local/bin/\(command)",
-            "/usr/local/bin/\(command)",
-            "\(NSHomeDirectory())/.npm-global/bin/\(command)",
-            "\(NSHomeDirectory())/.cargo/bin/\(command)",
-            "\(NSHomeDirectory())/.pyenv/shims/\(command)"
-        ]
-        for path in searchPaths {
-            if FileManager.default.fileExists(atPath: path) { return path }
+        if let path = AgentDetector.agentPath(for: engineType) {
+            return path
         }
-        return "/opt/homebrew/bin/\(command)"
+        return "/usr/bin/env"
     }
 }

@@ -100,7 +100,7 @@ actor TerminalSessionManager {
         onOutput: @escaping @Sendable (String) -> Void,
         onComplete: @escaping @Sendable (String) -> Void,
         onAskUser: @escaping @Sendable (String, [String]) -> Void = { _, _ in }
-    ) throws -> String {
+    ) async throws -> String {
         let engine: any AIEngine
 
         if engineType == .claude {
@@ -114,14 +114,17 @@ actor TerminalSessionManager {
 
         engineSessions[id] = engine
 
-        Task {
-            await engine.setHandlers(onOutput: onOutput, onComplete: { [weak self] (msg: String) in
-                onComplete(msg)
+        let isHeadless = engineType != .claude
+        await engine.setHandlers(onOutput: onOutput, onComplete: { [weak self] (msg: String) in
+            onComplete(msg)
+            // Only auto-remove for interactive sessions (Claude).
+            // Headless engines (Gemini etc.) stay alive for multiple messages.
+            if !isHeadless {
                 Task { await self?.removeEngineSession(id) }
-            })
-            await engine.setAskUserHandler(onAskUser)
-            try await engine.start()
-        }
+            }
+        })
+        await engine.setAskUserHandler(onAskUser)
+        try await engine.start()
 
         return id
     }

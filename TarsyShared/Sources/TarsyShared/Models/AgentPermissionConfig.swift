@@ -5,6 +5,11 @@ public struct AgentPermissionConfig: Codable, Sendable {
     public var codex: PermissionMode = .dangerous
     public var gemini: PermissionMode = .dangerous
     public var aider: PermissionMode = .dangerous
+    public var cursor: PermissionMode = .dangerous
+    public var windsurf: PermissionMode = .dangerous
+    public var amp: PermissionMode = .dangerous
+    public var cline: PermissionMode = .dangerous
+    public var copilot: PermissionMode = .dangerous
 
     public init() {}
 
@@ -19,6 +24,11 @@ public struct AgentPermissionConfig: Codable, Sendable {
         case .codex: return codex
         case .gemini: return gemini
         case .aider: return aider
+        case .cursor: return cursor
+        case .windsurf: return windsurf
+        case .amp: return amp
+        case .cline: return cline
+        case .copilot: return copilot
         case .custom: return .dangerous
         }
     }
@@ -29,6 +39,11 @@ public struct AgentPermissionConfig: Codable, Sendable {
         case .codex: codex = mode
         case .gemini: gemini = mode
         case .aider: aider = mode
+        case .cursor: cursor = mode
+        case .windsurf: windsurf = mode
+        case .amp: amp = mode
+        case .cline: cline = mode
+        case .copilot: copilot = mode
         case .custom: break
         }
     }
