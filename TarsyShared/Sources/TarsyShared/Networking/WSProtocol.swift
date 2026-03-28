@@ -150,6 +150,12 @@ public enum WSAction: String, Codable, Sendable {
     // UltraContext
     case ultracontextStatus = "ultracontext:status"
 
+    // Security
+    case securityRotateSecret = "security:rotate_machine_secret"
+    case securityRotateResult = "security:rotate_result"
+    case securityFingerprintUpdate = "security:fingerprint_update"
+    case e2eEncrypted = "e2e:encrypted"
+
     // System
     case auth
     case authSuccess = "auth:success"

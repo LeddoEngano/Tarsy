@@ -12,6 +12,7 @@ actor RelayClient {
     private var onBinaryReceived: (@Sendable (Data) -> Void)?
 
     private var authToken: String?
+    private var machineSecret: String?
     private var isReconnecting = false
 
     func setHandlers(
@@ -22,8 +23,9 @@ actor RelayClient {
         self.onBinaryReceived = onBinary
     }
 
-    func connect(token: String) async {
+    func connect(token: String, machineSecret: String? = nil) async {
         self.authToken = token
+        if let machineSecret { self.machineSecret = machineSecret }
         // Only reset reconnect attempts on explicit connect (not reconnect)
         if !isReconnecting {
             reconnectAttempts = 0
@@ -53,8 +55,9 @@ actor RelayClient {
         self.webSocket = ws
         ws.resume()
 
-        // Send auth as first message (token not in URL)
-        let auth: [String: String] = ["action": "auth", "token": token, "role": "machine"]
+        // Send auth as first message (token not in URL, machineSecret for role verification)
+        var auth: [String: String] = ["action": "auth", "token": token, "role": "machine"]
+        if let secret = machineSecret { auth["machineSecret"] = secret }
         if let data = try? JSONSerialization.data(withJSONObject: auth),
            let str = String(data: data, encoding: .utf8) {
             ws.send(.string(str)) { error in
