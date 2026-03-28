@@ -14,6 +14,9 @@ struct NewWorkspaceView: View {
     @EnvironmentObject var workspaceService: WorkspaceService
     @EnvironmentObject var machineService: MachineService
     @EnvironmentObject var connectionManager: ConnectionManager
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
+
+    @State private var showPaywall = false
 
     @State private var name = ""
     @State private var repoUrl = ""
@@ -79,6 +82,10 @@ struct NewWorkspaceView: View {
             }
         }
         .onAppear { scanRepos() }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView()
+                .environmentObject(subscriptionManager)
+        }
     }
 
     // MARK: - Repo Suggestions
@@ -256,12 +263,22 @@ struct NewWorkspaceView: View {
                         .background(workspaceType == .standard ? TarsyTheme.accentAmber : TarsyTheme.backgroundSecondary)
                         .cornerRadius(8)
                     }
-                    Button(action: { workspaceType = .openClaw }) {
+                    Button(action: {
+                        if subscriptionManager.isPro {
+                            workspaceType = .openClaw
+                        } else {
+                            showPaywall = true
+                        }
+                    }) {
                         HStack(spacing: 4) {
                             Image(systemName: "display")
                                 .font(.system(size: 10))
                             Text("openclaw")
                                 .font(TarsyTheme.monoFontSmall)
+                            if !subscriptionManager.isPro {
+                                Image(systemName: "lock.fill")
+                                    .font(.system(size: 8))
+                            }
                         }
                         .foregroundColor(workspaceType == .openClaw ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
                         .padding(.horizontal, 12)

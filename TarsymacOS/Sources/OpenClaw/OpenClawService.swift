@@ -29,6 +29,18 @@ actor OpenClawService {
         }
     }
 
+    // MARK: - Detection
+
+    func isInstalled() -> Bool {
+        let paths = [
+            "/usr/local/bin/openclaw",
+            "/opt/homebrew/bin/openclaw",
+            "\(NSHomeDirectory())/.openclaw/bin/openclaw",
+            "\(NSHomeDirectory())/.local/bin/openclaw"
+        ]
+        return paths.contains { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
     // MARK: - Gateway Management
 
     func checkGateway() async -> Bool {

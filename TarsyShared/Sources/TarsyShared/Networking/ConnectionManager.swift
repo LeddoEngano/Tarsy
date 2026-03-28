@@ -17,6 +17,7 @@ public class ConnectionManager: ObservableObject {
     @Published public var errorMessage: String?
     @Published public var connectionMode: ConnectionMode = .disconnected
     @Published public var detectedAgents: [AIEngineType] = []
+    @Published public var openclawAvailable = false
 
     // LAN connection (Network.framework)
     private var connection: NWConnection?
@@ -533,6 +534,11 @@ public class ConnectionManager: ObservableObject {
                 detectedAgents = parsed
             } else {
                 print("[WS] agentsDetected packet with no 'agents' payload: \(packet.payload ?? [:])")
+            }
+            notifyListeners(packet)
+        case .openclawStatus:
+            if let installed = packet.payload?["installed"] {
+                openclawAvailable = installed == "true"
             }
             notifyListeners(packet)
         case .sudoRequest:

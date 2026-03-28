@@ -267,6 +267,15 @@ class DaemonManager: ObservableObject {
                     } else {
                         print("[Daemon] No agents detected yet, skipping send to \(clientId)")
                     }
+                    // Send OpenClaw availability
+                    let openclawInstalled = await self?.openClaw.isInstalled() ?? false
+                    await self?.sendToClientOrRelay(
+                        WSPacket(action: .openclawStatus, payload: [
+                            "installed": openclawInstalled ? "true" : "false",
+                            "running": "false"
+                        ]),
+                        to: clientId
+                    )
                 }
             },
             onDisconnect: { [weak self] clientId in
@@ -883,9 +892,11 @@ class DaemonManager: ObservableObject {
     // MARK: - OpenClaw
 
     private func handleOpenClawStatus(clientId: String, packet: WSPacket) async {
-        let running = await openClaw.checkGateway()
+        let installed = await openClaw.isInstalled()
+        let running = installed ? await openClaw.checkGateway() : false
         await sendToClientOrRelay(
             WSPacket(action: .openclawStatus, payload: [
+                "installed": installed ? "true" : "false",
                 "running": running ? "true" : "false",
                 "port": "18789"
             ], id: packet.id),

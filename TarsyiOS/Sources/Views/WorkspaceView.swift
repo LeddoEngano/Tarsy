@@ -34,6 +34,7 @@ struct WorkspaceView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
     @EnvironmentObject var machineService: MachineService
     @EnvironmentObject var workspaceService: WorkspaceService
+    @EnvironmentObject var subscriptionManager: SubscriptionManager
 
     @State private var selectedTabIndex = 0
     @State private var tabs: [TerminalTab] = []
@@ -46,6 +47,7 @@ struct WorkspaceView: View {
     @State private var showGitSheet = false
     @State private var showFileExplorer = false
     @State private var showMCPStore = false
+    @State private var showPaywall = false
     @State private var checkpointFeedback: String? = nil
     @State private var isRecording = false
     @StateObject private var voiceInput = VoiceInputManager()
@@ -164,6 +166,10 @@ struct WorkspaceView: View {
             MCPStoreView(workspacePath: workspace.localPath)
                 .environmentObject(connectionManager)
         }
+        .sheet(isPresented: $showPaywall) {
+            PaywallView()
+                .environmentObject(subscriptionManager)
+        }
         .sheet(isPresented: $showSessionPicker) {
             WorkspaceSessionPicker(workspace: workspace, detectedAgents: detectedAgents) { session, engine in
                 showSessionPicker = false
@@ -223,14 +229,16 @@ struct WorkspaceView: View {
         .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .task {
-            // Initialize tabs based on workspace type
+            // Initialize tabs
             if tabs.isEmpty {
-                if workspace.isFullScreen {
+                // Show OpenClaw tab if installed (fixed tab, first position)
+                if connectionManager.openclawAvailable {
                     tabs.append(TerminalTab(id: "openclaw", title: "OpenClaw", isFixed: true, type: .openclaw))
                 }
                 tabs.append(TerminalTab(id: "claude-1", title: "Claude Code", isFixed: false, type: .claude, sessionId: nil, engineType: .claude))
-                if workspace.isFullScreen {
-                    selectedTabIndex = tabs.count - 1 // Select Claude tab, not OpenClaw
+                // Default to Claude tab
+                if tabs.count > 1 {
+                    selectedTabIndex = tabs.count - 1
                 }
             }
             chatService.switchTab(tabId: currentTab.id)
@@ -290,6 +298,11 @@ struct WorkspaceView: View {
                                 engineModel: engineModel,
                                 contextPercent: contextPercent
                             )
+                            // Pro gate for OpenClaw tab
+                            if tab.type == .openclaw && !subscriptionManager.isPro {
+                                showPaywall = true
+                                return
+                            }
                             // Switch tab
                             selectedTabIndex = index
                             // Restore new tab state
