@@ -136,7 +136,6 @@ actor WebSocketServer {
     }
 
     func broadcast(_ packet: WSPacket) {
-        print("[WSServer] Broadcasting \(packet.action.rawValue) to \(connections.count) clients: \(Array(connections.keys))")
         for clientId in connections.keys {
             send(packet, to: clientId)
         }

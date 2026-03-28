@@ -96,11 +96,12 @@ struct AgentDetector {
     /// Uses the user's login shell to resolve a binary name via `which`.
     /// This catches any custom PATH setup (version managers, custom dirs, etc.)
     private static func resolveViaShell(_ binaryName: String) -> String? {
+        // Validate binary name to prevent shell injection (only alphanumeric, dash, underscore)
+        guard binaryName.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }) else { return nil }
+
         let process = Process()
-        // Use the user's default shell for full PATH resolution
         let shell = ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh"
         process.executableURL = URL(fileURLWithPath: shell)
-        // -l for login (loads .zprofile/.bash_profile), -c to run command
         process.arguments = ["-l", "-c", "which \(binaryName)"]
 
         let pipe = Pipe()

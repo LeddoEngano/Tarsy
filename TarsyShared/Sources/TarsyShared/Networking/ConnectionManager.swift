@@ -335,9 +335,6 @@ public class ConnectionManager: ObservableObject {
                         }
                     } else if let packet = try? WSPacket.decode(from: data) {
                         self?.handlePacket(packet)
-                    } else {
-                        let raw = String(data: data, encoding: .utf8) ?? "<binary \(data.count)b>"
-                        print("[WS] LAN failed to decode: \(raw.prefix(200))")
                     }
                 }
 
@@ -529,11 +526,7 @@ public class ConnectionManager: ObservableObject {
             }
         case .agentsDetected:
             if let csv = packet.payload?["agents"] {
-                let parsed = csv.split(separator: ",").compactMap { AIEngineType(rawValue: String($0)) }
-                print("[WS] agentsDetected payload: '\(csv)' -> parsed \(parsed.map(\.rawValue))")
-                detectedAgents = parsed
-            } else {
-                print("[WS] agentsDetected packet with no 'agents' payload: \(packet.payload ?? [:])")
+                detectedAgents = csv.split(separator: ",").compactMap { AIEngineType(rawValue: String($0)) }
             }
             notifyListeners(packet)
         case .openclawStatus:

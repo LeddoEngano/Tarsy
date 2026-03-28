@@ -116,15 +116,12 @@ class DaemonManager: ObservableObject {
 
         // Broadcast to any clients that connected before detection finished
         if !detectedAgents.isEmpty {
-            log("Broadcasting agentsDetected to all clients: \(detectedAgents.map(\.rawValue))")
             let agentsPacket = WSPacket(
                 action: .agentsDetected,
                 payload: ["agents": detectedAgents.map(\.rawValue).joined(separator: ",")]
             )
             await wsServer?.broadcast(agentsPacket)
             await relayClient.send(packet: agentsPacket)
-        } else {
-            log("No agents detected, nothing to broadcast")
         }
 
         // 8. UltraContext — watch Claude Code session files + sync via proxy
@@ -256,16 +253,12 @@ class DaemonManager: ObservableObject {
                     self?.lastActiveClientId = clientId
                     // Send detected agents to the newly connected client
                     let agents = self?.detectedAgents ?? []
-                    print("[Daemon] onConnect \(clientId): detectedAgents=\(agents.map(\.rawValue))")
                     if !agents.isEmpty {
                         let packet = WSPacket(
                             action: .agentsDetected,
                             payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
                         )
                         await self?.sendToClientOrRelay(packet, to: clientId)
-                        print("[Daemon] Sent agentsDetected to \(clientId)")
-                    } else {
-                        print("[Daemon] No agents detected yet, skipping send to \(clientId)")
                     }
                     // Send OpenClaw availability
                     let openclawInstalled = await self?.openClaw.isInstalled() ?? false

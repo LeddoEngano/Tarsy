@@ -42,16 +42,10 @@ actor GenericCLIEngine: AIEngine {
 
     func start() throws {
         isRunning = true
-        print("[GenericCLI] Session \(id) ready (\(engineType.displayName), headless mode)")
     }
 
     func sendMessage(_ message: String) {
-        guard isRunning else {
-            print("[GenericCLI] Cannot send — session not running")
-            return
-        }
-
-        print("[GenericCLI] Processing message for \(engineType.displayName): \(message.prefix(80))...")
+        guard isRunning else { return }
 
         // Kill any previous in-flight request
         currentProcess?.terminate()
@@ -71,12 +65,9 @@ actor GenericCLIEngine: AIEngine {
         let stderr = Pipe()
         proc.standardOutput = stdout
         proc.standardError = stderr
-        // No stdin needed for headless mode
 
         let onOutput = self.onOutput
-        let engineName = self.engineType.displayName
 
-        // Stream stdout chunks in real time
         stdout.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
@@ -86,12 +77,10 @@ actor GenericCLIEngine: AIEngine {
             }
         }
 
-        // Capture stderr but filter noise (credential messages, warnings)
         stderr.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
             let cleaned = GenericCLIEngine.stripAnsi(text)
-            // Filter common noise from stderr
             let lower = cleaned.lowercased()
             let isNoise = lower.contains("cached credentials") ||
                           lower.contains("loaded cached") ||
@@ -104,20 +93,16 @@ actor GenericCLIEngine: AIEngine {
         }
 
         let onComplete = self.onComplete
-        proc.terminationHandler = { process in
+        proc.terminationHandler = { _ in
             stdout.fileHandleForReading.readabilityHandler = nil
             stderr.fileHandleForReading.readabilityHandler = nil
-            print("[GenericCLI] \(engineName) headless process exited with code \(process.terminationStatus)")
-            // Signal message completion so iOS clears "thinking..." state
             onComplete?("")
         }
 
         do {
             try proc.run()
             currentProcess = proc
-            print("[GenericCLI] Started headless process PID \(proc.processIdentifier): \(cliPath) \(args.joined(separator: " "))")
         } catch {
-            print("[GenericCLI] Failed to start headless process: \(error)")
             onOutput?("Error: \(error.localizedDescription)\n")
         }
     }
