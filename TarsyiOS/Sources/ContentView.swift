@@ -8,6 +8,7 @@ struct ContentView: View {
     @EnvironmentObject var profileService: ProfileService
 
     @State private var showSudoAlert = false
+    @State private var showSudoE2EError = false
     @State private var sudoPassword = ""
     @State private var sudoReason = ""
     @State private var sudoRequestId = ""
@@ -76,9 +77,15 @@ struct ContentView: View {
         .alert("Administrator Password", isPresented: $showSudoAlert) {
             SecureField("Password", text: $sudoPassword)
             Button("OK") {
+                guard connectionManager.e2e.isReady,
+                      let encrypted = connectionManager.e2e.encrypt(sudoPassword) else {
+                    sudoPassword = ""
+                    showSudoE2EError = true
+                    return
+                }
                 connectionManager.send(WSPacket(
                     action: .sudoResponse,
-                    payload: ["password": sudoPassword],
+                    payload: ["encryptedPassword": encrypted],
                     id: sudoRequestId
                 ))
                 sudoPassword = ""
@@ -93,6 +100,11 @@ struct ContentView: View {
             }
         } message: {
             Text(sudoReason)
+        }
+        .alert("Secure Connection Required", isPresented: $showSudoE2EError) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Cannot send password — encrypted connection not established. Please reconnect and try again.")
         }
     }
 

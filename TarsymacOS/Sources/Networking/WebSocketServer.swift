@@ -14,6 +14,14 @@ actor WebSocketServer {
     private var onClientConnected: (@Sendable (String) -> Void)?
     private var onClientDisconnected: (@Sendable (String) -> Void)?
 
+    /// The machineId this server belongs to — used to validate auth packets
+    var machineId: UUID?
+
+    /// Auth failure rate limiting by IP: tracks failure count and optional ban expiry
+    private var authFailures: [String: (count: Int, firstFailure: Date, bannedUntil: Date?)] = [:]
+    /// Called on successful auth with the auth packet. Returns extra fields to include in authSuccess.
+    private var onAuthSuccess: (@Sendable (WSPacket) async -> [String: String])?
+
     /// The SHA-256 fingerprint of the TLS certificate (available after start if TLS is enabled)
     private(set) var certificateFingerprint: String?
 
@@ -30,11 +38,13 @@ actor WebSocketServer {
     func setHandlers(
         onPacket: @escaping @Sendable (String, WSPacket) async -> Void,
         onConnect: @escaping @Sendable (String) -> Void,
-        onDisconnect: @escaping @Sendable (String) -> Void
+        onDisconnect: @escaping @Sendable (String) -> Void,
+        onAuthSuccess: @escaping @Sendable (WSPacket) async -> [String: String] = { _ in [:] }
     ) {
         self.onPacketReceived = onPacket
         self.onClientConnected = onConnect
         self.onClientDisconnected = onDisconnect
+        self.onAuthSuccess = onAuthSuccess
     }
 
     func start() async throws {
@@ -52,7 +62,7 @@ actor WebSocketServer {
             )
             sec_protocol_options_set_min_tls_protocol_version(
                 tlsOptions.securityProtocolOptions,
-                .TLSv12
+                .TLSv13
             )
 
             let tcpOptions = NWProtocolTCP.Options()
@@ -147,25 +157,101 @@ actor WebSocketServer {
         }
     }
 
+    /// Checks if a remote endpoint is from a local/private network (RFC 1918, loopback, Tailscale).
+    /// Rejects connections from public IPs to prevent exposure if the Mac lacks a firewall.
+    private nonisolated func isLocalNetwork(_ endpoint: NWEndpoint) -> Bool {
+        guard case let .hostPort(host, _) = endpoint else { return true }
+        let hostStr = "\(host)"
+
+        // Loopback
+        if hostStr == "127.0.0.1" || hostStr == "::1" || hostStr.hasPrefix("127.") { return true }
+        // RFC 1918
+        if hostStr.hasPrefix("10.") { return true }
+        if hostStr.hasPrefix("192.168.") { return true }
+        if hostStr.hasPrefix("172.") {
+            let parts = hostStr.split(separator: ".")
+            if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) { return true }
+        }
+        // Link-local
+        if hostStr.hasPrefix("169.254.") { return true }
+        if hostStr.hasPrefix("fe80:") { return true }
+        // Tailscale CGNAT range (100.64.0.0/10)
+        if hostStr.hasPrefix("100.") {
+            let parts = hostStr.split(separator: ".")
+            if parts.count >= 2, let second = Int(parts[1]), (64...127).contains(second) { return true }
+        }
+        return false
+    }
+
+    /// Extract IP string from a connection's remote endpoint
+    private nonisolated func extractIP(from endpoint: NWEndpoint?) -> String {
+        guard case let .hostPort(host, _) = endpoint else { return "unknown" }
+        return "\(host)"
+    }
+
+    /// Check if an IP is currently banned due to auth failure rate limiting
+    private func isIPBanned(_ ip: String) -> Bool {
+        guard let entry = authFailures[ip] else { return false }
+        if let bannedUntil = entry.bannedUntil {
+            if Date() < bannedUntil { return true }
+            // Ban expired, clear entry
+            authFailures.removeValue(forKey: ip)
+        }
+        return false
+    }
+
+    /// Record an auth failure for rate limiting. Returns true if the IP is now banned.
+    private func recordAuthFailure(ip: String) -> Bool {
+        let now = Date()
+        var entry = authFailures[ip] ?? (count: 0, firstFailure: now, bannedUntil: nil)
+
+        // Reset counter if the window (60s) has passed
+        if now.timeIntervalSince(entry.firstFailure) > 60 {
+            entry = (count: 0, firstFailure: now, bannedUntil: nil)
+        }
+
+        entry.count += 1
+
+        if entry.count >= 3 {
+            // Ban for 5 minutes
+            entry.bannedUntil = now.addingTimeInterval(300)
+            authFailures[ip] = entry
+            print("[WSServer] IP \(ip) temporarily banned for 5 minutes after \(entry.count) auth failures")
+            return true
+        }
+
+        authFailures[ip] = entry
+        return false
+    }
+
     private func handleNewConnection(_ connection: NWConnection) {
+        // Reject connections from public IPs
+        if let remote = connection.currentPath?.remoteEndpoint, !isLocalNetwork(remote) {
+            print("[WSServer] Rejected connection from public IP: \(remote)")
+            connection.cancel()
+            return
+        }
+
+        // Check if IP is banned due to auth failure rate limiting
+        let ip = extractIP(from: connection.currentPath?.remoteEndpoint)
+        if isIPBanned(ip) {
+            print("[WSServer] Rejected connection from banned IP: \(ip)")
+            connection.cancel()
+            return
+        }
+
         let clientId = UUID().uuidString
         connections[clientId] = connection
 
         connection.start(queue: .global(qos: .userInitiated))
-        receiveLoop(connection: connection, clientId: clientId, authenticated: false)
+        receiveLoop(connection: connection, clientId: clientId, authenticated: false, clientIP: ip)
 
-        // Auth timeout: disconnect if not authenticated within 5 seconds
+        // Auth timeout: disconnect if not authenticated within 3 seconds
         Task {
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
-            // If the client is still connected but never authenticated,
-            // the receive loop will still have authenticated: false.
-            // We check if the connection is still in our map — if so and
-            // the connection state isn't ready (already removed), skip.
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard await self.connections[clientId] != nil else { return }
-            // We can't track auth state externally from the receive loop,
-            // so we use a dedicated set.
             guard await !self.authenticatedClients.contains(clientId) else { return }
-            print("[WSServer] Client \(clientId) auth timeout (5s), disconnecting")
+            print("[WSServer] Client \(clientId) auth timeout (3s), disconnecting")
             await self.send(WSPacket(action: .authFail, payload: ["reason": "auth timeout"]), to: clientId)
             await self.removeConnection(clientId)
         }
@@ -173,7 +259,7 @@ actor WebSocketServer {
         print("[WSServer] Client connected: \(clientId)")
     }
 
-    private func receiveLoop(connection: NWConnection, clientId: String, authenticated: Bool) {
+    private func receiveLoop(connection: NWConnection, clientId: String, authenticated: Bool, clientIP: String = "unknown") {
         connection.receiveMessage { [weak self] content, context, _, error in
             Task {
                 guard let self else { return }
@@ -186,7 +272,7 @@ actor WebSocketServer {
 
                 guard let data = content else {
                     // No data but no error — continue listening
-                    await self.receiveLoop(connection: connection, clientId: clientId, authenticated: authenticated)
+                    await self.receiveLoop(connection: connection, clientId: clientId, authenticated: authenticated, clientIP: clientIP)
                     return
                 }
 
@@ -194,12 +280,24 @@ actor WebSocketServer {
                     // Log the raw data for debugging unknown actions
                     let raw = String(data: data, encoding: .utf8) ?? "<binary \(data.count) bytes>"
                     print("[WSServer] Failed to decode packet from \(clientId): \(raw.prefix(300))")
-                    await self.receiveLoop(connection: connection, clientId: clientId, authenticated: authenticated)
+                    await self.receiveLoop(connection: connection, clientId: clientId, authenticated: authenticated, clientIP: clientIP)
                     return
                 }
 
                 if !authenticated {
                     if packet.action == .auth, let token = packet.payload?["token"] {
+                        // Validate machineId if set on this server
+                        if let expectedMachineId = await self.machineId {
+                            let packetMachineId = packet.payload?["machineId"]
+                            if packetMachineId != expectedMachineId.uuidString {
+                                print("[WSServer] Client \(clientId) auth failed: machineId mismatch (got \(packetMachineId ?? "nil"), expected \(expectedMachineId))")
+                                let _ = await self.recordAuthFailure(ip: clientIP)
+                                await self.send(WSPacket(action: .authFail, payload: ["reason": "invalid machineId"]), to: clientId)
+                                await self.removeConnection(clientId)
+                                return
+                            }
+                        }
+
                         let valid = await self.validateToken(token)
                         if valid {
                             await self.markAuthenticated(clientId)
@@ -208,11 +306,15 @@ actor WebSocketServer {
                             if let fp = await self.certificateFingerprint {
                                 authPayload["fingerprint"] = fp
                             }
+                            // Let DaemonManager handle E2E key exchange and add extra fields
+                            let extraFields = await self.onAuthSuccess?(packet) ?? [:]
+                            authPayload.merge(extraFields) { _, new in new }
                             await self.send(WSPacket(action: .authSuccess, payload: authPayload.isEmpty ? nil : authPayload), to: clientId)
                             await self.onClientConnected?(clientId)
-                            await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)
+                            await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true, clientIP: clientIP)
                         } else {
                             print("[WSServer] Client \(clientId) auth failed")
+                            let banned = await self.recordAuthFailure(ip: clientIP)
                             await self.send(WSPacket(action: .authFail), to: clientId)
                             await self.removeConnection(clientId)
                         }
@@ -226,7 +328,7 @@ actor WebSocketServer {
 
                 if packet.action == .ping {
                     await self.send(WSPacket(action: .pong, id: packet.id), to: clientId)
-                    await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)
+                    await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true, clientIP: clientIP)
                     return
                 }
 
@@ -237,7 +339,7 @@ actor WebSocketServer {
                 if let handler {
                     Task { await handler(clientId, packet) }
                 }
-                await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true)
+                await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true, clientIP: clientIP)
             }
         }
     }

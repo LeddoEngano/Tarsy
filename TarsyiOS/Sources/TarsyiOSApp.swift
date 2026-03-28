@@ -34,7 +34,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        print("[Push] Device token: \(token)")
+        print("[Push] Device token registered (\(token.count) chars)")
         AppDelegate.pendingPushToken = token
         // Try to save now — will fail silently if not authed yet
         Task { await AppDelegate.savePushTokenIfNeeded() }
@@ -116,6 +116,11 @@ struct TarsyiOSApp: App {
                     subscriptionManager.start()
                 }
                 .onOpenURL { url in
+                    guard url.scheme == "com.tarsy.ios",
+                          url.host == "login-callback" else {
+                        print("[Auth] Ignored unexpected URL: \(url.scheme ?? "nil")")
+                        return
+                    }
                     Task {
                         await authManager.handleOAuthCallback(url: url)
                     }
