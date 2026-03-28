@@ -129,11 +129,9 @@ const server = Bun.serve({
 
     // Health check
     if (url.pathname === "/health") {
-      return new Response(JSON.stringify({
-        status: "ok",
-        machines: machines.size,
-        clients: [...clients.values()].reduce((sum, s) => sum + s.size, 0),
-      }), { headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ status: "ok" }), {
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
     // WebSocket upgrade — validate token via first message (query param auth removed for security)

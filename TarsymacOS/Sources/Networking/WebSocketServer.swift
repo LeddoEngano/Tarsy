@@ -9,6 +9,7 @@ actor WebSocketServer {
     private let validateToken: @Sendable (String) async -> Bool
     private let tlsEnabled: Bool
 
+    private var authenticatedClients: Set<String> = []
     private var onPacketReceived: (@Sendable (String, WSPacket) async -> Void)?
     private var onClientConnected: (@Sendable (String) -> Void)?
     private var onClientDisconnected: (@Sendable (String) -> Void)?
@@ -111,6 +112,7 @@ actor WebSocketServer {
             connection.cancel()
         }
         connections.removeAll()
+        authenticatedClients.removeAll()
         print("[WSServer] Stopped")
     }
 
@@ -152,6 +154,22 @@ actor WebSocketServer {
         connection.start(queue: .global(qos: .userInitiated))
         receiveLoop(connection: connection, clientId: clientId, authenticated: false)
 
+        // Auth timeout: disconnect if not authenticated within 5 seconds
+        Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            // If the client is still connected but never authenticated,
+            // the receive loop will still have authenticated: false.
+            // We check if the connection is still in our map — if so and
+            // the connection state isn't ready (already removed), skip.
+            guard await self.connections[clientId] != nil else { return }
+            // We can't track auth state externally from the receive loop,
+            // so we use a dedicated set.
+            guard await !self.authenticatedClients.contains(clientId) else { return }
+            print("[WSServer] Client \(clientId) auth timeout (5s), disconnecting")
+            await self.send(WSPacket(action: .authFail, payload: ["reason": "auth timeout"]), to: clientId)
+            await self.removeConnection(clientId)
+        }
+
         print("[WSServer] Client connected: \(clientId)")
     }
 
@@ -184,6 +202,7 @@ actor WebSocketServer {
                     if packet.action == .auth, let token = packet.payload?["token"] {
                         let valid = await self.validateToken(token)
                         if valid {
+                            await self.markAuthenticated(clientId)
                             print("[WSServer] Client \(clientId) authenticated")
                             var authPayload: [String: String] = [:]
                             if let fp = await self.certificateFingerprint {
@@ -198,8 +217,9 @@ actor WebSocketServer {
                             await self.removeConnection(clientId)
                         }
                     } else {
+                        print("[WSServer] Client \(clientId) sent non-auth packet while unauthenticated, disconnecting")
                         await self.send(WSPacket(action: .authFail, payload: ["reason": "not authenticated"]), to: clientId)
-                        await self.receiveLoop(connection: connection, clientId: clientId, authenticated: false)
+                        await self.removeConnection(clientId)
                     }
                     return
                 }
@@ -222,9 +242,14 @@ actor WebSocketServer {
         }
     }
 
+    private func markAuthenticated(_ clientId: String) {
+        authenticatedClients.insert(clientId)
+    }
+
     private func removeConnection(_ clientId: String) {
         connections[clientId]?.cancel()
         connections.removeValue(forKey: clientId)
+        authenticatedClients.remove(clientId)
         onClientDisconnected?(clientId)
         print("[WSServer] Client disconnected: \(clientId)")
     }

@@ -5,21 +5,31 @@ import WidgetKit
 struct TarsyLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: TarsyActivityAttributes.self) { context in
-            // Lock Screen — thin single row
-            lockScreenView(context: context)
-                .activityBackgroundTint(Color(red: 0.1, green: 0.1, blue: 0.1))
+            // Lock Screen — icon + timer only
+            HStack {
+                Image(systemName: statusIcon(context.state))
+                    .font(.system(size: 14))
+                    .foregroundColor(statusColor(context.state.status))
+                Spacer()
+                Text(context.state.startedAt, style: .timer)
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .foregroundColor(secondaryColor)
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .activityBackgroundTint(Color(red: 0.1, green: 0.1, blue: 0.1))
         } dynamicIsland: { context in
             DynamicIsland {
-                // Expanded — keep minimal
+                // Expanded — just icon + timer, no text
                 DynamicIslandExpandedRegion(.leading) {
-                    Label(context.state.currentTool, systemImage: statusIcon(context.state))
-                        .font(.system(size: 12, design: .monospaced))
+                    Image(systemName: statusIcon(context.state))
+                        .font(.system(size: 14))
                         .foregroundColor(statusColor(context.state.status))
-                        .lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text(context.state.startedAt, style: .timer)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: 13, design: .monospaced))
                         .foregroundColor(secondaryColor)
                         .monospacedDigit()
                 }
@@ -27,12 +37,12 @@ struct TarsyLiveActivityWidget: Widget {
                     EmptyView()
                 }
             } compactLeading: {
-                // Just the status/tool icon
+                // Tool icon — updates in real time like the task button
                 Image(systemName: statusIcon(context.state))
                     .font(.system(size: 11))
                     .foregroundColor(statusColor(context.state.status))
             } compactTrailing: {
-                // Just the timer, no forced width
+                // Elapsed timer
                 Text(context.state.startedAt, style: .timer)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(secondaryColor)
@@ -43,31 +53,6 @@ struct TarsyLiveActivityWidget: Widget {
                     .foregroundColor(statusColor(context.state.status))
             }
         }
-    }
-
-    // MARK: - Lock Screen
-
-    @ViewBuilder
-    private func lockScreenView(context: ActivityViewContext<TarsyActivityAttributes>) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: statusIcon(context.state))
-                .font(.system(size: 13))
-                .foregroundColor(statusColor(context.state.status))
-
-            Text(context.attributes.workspaceName)
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
-                .foregroundColor(.white)
-                .lineLimit(1)
-
-            Spacer()
-
-            Text(context.state.startedAt, style: .timer)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(secondaryColor)
-                .monospacedDigit()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
     // MARK: - Helpers
