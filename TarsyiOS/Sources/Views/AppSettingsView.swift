@@ -166,9 +166,7 @@ struct AppSettingsView: View {
                         VStack(spacing: 1) {
                             ForEach(AIEngineType.allCases.filter { $0 != .custom }, id: \.self) { engine in
                                 HStack(spacing: 12) {
-                                    Image(systemName: engine.iconName)
-                                        .font(.system(size: 14))
-                                        .foregroundColor(TarsyTheme.accentAmber)
+                                    AgentIcon(engineType: engine, size: 18)
                                         .frame(width: 28)
 
                                     VStack(alignment: .leading, spacing: 2) {
@@ -283,9 +281,7 @@ struct AppSettingsView: View {
     private func apiKeyRow(_ engine: AIEngineType) -> some View {
         Button(action: { editingProvider = engine }) {
             HStack(spacing: 12) {
-                Image(systemName: engine.iconName)
-                    .font(.system(size: 16))
-                    .foregroundColor(TarsyTheme.accentAmber)
+                AgentIcon(engineType: engine, size: 20)
                     .frame(width: 28)
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -437,9 +433,7 @@ struct APIKeyEditorSheet: View {
                 VStack(alignment: .leading, spacing: 20) {
                     // Provider info
                     HStack(spacing: 12) {
-                        Image(systemName: provider.iconName)
-                            .font(.system(size: 24))
-                            .foregroundColor(TarsyTheme.accentAmber)
+                        AgentIcon(engineType: provider, size: 28)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(provider.displayName)
                                 .font(TarsyTheme.monoFont)

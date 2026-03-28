@@ -946,8 +946,7 @@ struct WorkspaceView: View {
 
                 // Engine + model
                 HStack(spacing: 3) {
-                    Image(systemName: currentTab.engineType?.iconName ?? "brain.head.profile")
-                        .font(.system(size: 10))
+                    AgentIcon(engineType: currentTab.engineType ?? .claude, size: 14)
                     Text(engineDisplayName)
                         .lineLimit(1)
                 }
@@ -1590,14 +1589,12 @@ struct TabButton: View {
 
                 switch tab.type {
                 case .claude:
-                    Image(systemName: "brain.head.profile")
-                        .font(.caption2)
+                    AgentIcon(engineType: .claude, size: 12)
                 case .openclaw:
-                    Image(systemName: "hand.raised")
-                        .font(.caption2)
+                    Text("🦞")
+                        .font(.system(size: 10))
                 case .engine:
-                    Image(systemName: tab.engineType?.iconName ?? "terminal")
-                        .font(.caption2)
+                    AgentIcon(engineType: tab.engineType ?? .custom, size: 12)
                 case .terminal:
                     Image(systemName: "chevron.left.forwardslash.chevron.right")
                         .font(.caption2)

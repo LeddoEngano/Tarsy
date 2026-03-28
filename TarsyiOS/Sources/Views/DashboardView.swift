@@ -279,19 +279,24 @@ struct DashboardView: View {
                 Button {
                     machineService.selectMachine(m.id)
                 } label: {
-                    HStack {
+                    Label {
                         Text(m.name)
-                        if m.status == .online {
-                            Image(systemName: "circle.fill")
-                        }
-                        if m.id == machineService.selectedMachineId {
-                            Image(systemName: "checkmark")
-                        }
+                    } icon: {
+                        Image(systemName: m.deviceIcon)
+                    }
+                    if m.status == .online {
+                        Image(systemName: "circle.fill")
+                    }
+                    if m.id == machineService.selectedMachineId {
+                        Image(systemName: "checkmark")
                     }
                 }
             }
         } label: {
-            HStack(spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: machineService.selectedMachine?.deviceIcon ?? "desktopcomputer")
+                    .font(.system(size: 12))
+                    .foregroundColor(TarsyTheme.accentAmber)
                 Circle()
                     .fill(machineService.isOnline ? TarsyTheme.statusRunning : TarsyTheme.statusError)
                     .frame(width: 6, height: 6)

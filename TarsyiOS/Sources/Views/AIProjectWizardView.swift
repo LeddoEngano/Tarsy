@@ -221,9 +221,7 @@ struct AIProjectWizardView: View {
                     .fill(TarsyTheme.accentAmber.opacity(0.1))
                     .frame(width: 80, height: 80)
 
-                Image(systemName: selectedEngine.iconName)
-                    .font(.system(size: 32))
-                    .foregroundColor(TarsyTheme.accentAmber)
+                AgentIcon(engineType: selectedEngine, size: 32)
                     .rotationEffect(.degrees(isWaitingForAI ? 360 : 0))
                     .animation(.linear(duration: 3).repeatForever(autoreverses: false), value: isWaitingForAI)
             }
@@ -662,8 +660,7 @@ struct AIProjectWizardView: View {
             selectedEngine = engine
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: engine.iconName)
-                    .font(.system(size: 12))
+                AgentIcon(engineType: engine, size: 14)
                 Text(engine.displayName)
                     .font(.system(size: 12, design: .monospaced))
             }

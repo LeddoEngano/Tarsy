@@ -292,9 +292,7 @@ struct ProfileView: View {
             VStack(spacing: 1) {
                 ForEach(connectionManager.detectedAgents.isEmpty ? [AIEngineType.claude] : connectionManager.detectedAgents, id: \.self) { engine in
                     HStack(spacing: 12) {
-                        Image(systemName: engine.iconName)
-                            .font(.system(size: 14))
-                            .foregroundColor(TarsyTheme.accentAmber)
+                        AgentIcon(engineType: engine, size: 18)
                             .frame(width: 28)
 
                         VStack(alignment: .leading, spacing: 2) {
@@ -457,9 +455,7 @@ struct ProfileView: View {
     private func apiKeyRow(_ engine: AIEngineType) -> some View {
         Button(action: { editingProvider = engine }) {
             HStack(spacing: 12) {
-                Image(systemName: engine.iconName)
-                    .font(.system(size: 16))
-                    .foregroundColor(TarsyTheme.accentAmber)
+                AgentIcon(engineType: engine, size: 20)
                     .frame(width: 28)
 
                 VStack(alignment: .leading, spacing: 2) {
