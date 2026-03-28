@@ -11,14 +11,7 @@ class LiveActivityManager: ObservableObject {
     /// Start times per activity
     private var startDates: [String: Date] = [:]
 
-    private init() {
-        // Clean up any zombie activities from previous app sessions
-        Task {
-            for activity in Activity<TarsyActivityAttributes>.activities {
-                await activity.end(nil, dismissalPolicy: .immediate)
-            }
-        }
-    }
+    private init() {}
 
     // MARK: - Keys
 
@@ -37,6 +30,12 @@ class LiveActivityManager: ObservableObject {
 
         // Don't create duplicate
         if activities[activityKey] != nil { return }
+
+        // Clean up zombie activities from previous sessions before creating new one
+        let knownIds = Set(activities.values.map(\.id))
+        for zombie in Activity<TarsyActivityAttributes>.activities where !knownIds.contains(zombie.id) {
+            Task { await zombie.end(nil, dismissalPolicy: .immediate) }
+        }
 
         let now = Date()
         let attributes = TarsyActivityAttributes(
