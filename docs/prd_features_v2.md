@@ -240,13 +240,13 @@ macOS scans the workspace directory for:
 
 ## Implementation Order
 
-| # | Feature | Priority | Complexity |
-|---|---------|----------|------------|
-| 1 | AI Project Creation (Wizard) | Highest | High |
-| 2 | Multi-Machine Support | High | Medium-High |
-| 3 | Auto-detect Start Command | Medium | Low |
-| 4 | OpenClaw Workspace Type | Medium | Low-Medium |
-| 5 | Live Activities | Lower | Medium |
+| # | Feature | Priority | Complexity | Status |
+|---|---------|----------|------------|--------|
+| 1 | AI Project Creation (Wizard) | Highest | High | ✅ Completo |
+| 2 | Multi-Machine Support | High | Medium-High | ✅ Completo |
+| 3 | Auto-detect Start Command | Medium | Low | ✅ Completo |
+| 4 | OpenClaw Workspace Type | Medium | Low-Medium | ✅ Completo |
+| 5 | Live Activities | Lower | Medium | ✅ Completo |
 
 ---
 
