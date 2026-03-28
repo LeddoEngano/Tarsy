@@ -92,6 +92,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 @main
 struct TarsyiOSApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @Environment(\.scenePhase) var scenePhase
     @StateObject private var authManager = AuthManager()
     @StateObject private var workspaceService = WorkspaceService()
     @StateObject private var machineService = MachineService()
@@ -123,6 +124,24 @@ struct TarsyiOSApp: App {
                     }
                     Task {
                         await authManager.handleOAuthCallback(url: url)
+                    }
+                }
+                .onChange(of: scenePhase) { _, newPhase in
+                    switch newPhase {
+                    case .background:
+                        // Clean disconnect prevents zombie connections when iOS suspends the socket
+                        print("[Lifecycle] App entering background — disconnecting cleanly")
+                        connectionManager.disconnect()
+                    case .active:
+                        // Re-establish connection when returning to foreground
+                        if authManager.isAuthenticated && !connectionManager.isConnected {
+                            print("[Lifecycle] App became active — reconnecting...")
+                            Task {
+                                await connectionManager.reconnectIfNeeded()
+                            }
+                        }
+                    default:
+                        break
                     }
                 }
         }

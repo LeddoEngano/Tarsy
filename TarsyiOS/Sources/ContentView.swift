@@ -73,6 +73,10 @@ struct ContentView: View {
                 sudoRequestId = packet.id
                 showSudoAlert = true
             }
+            connectionManager.onReconnected = { [weak connectionManager] in
+                // Re-request workspace state so UI syncs after reconnection
+                connectionManager?.send(WSPacket(action: .workspaceList))
+            }
         }
         .alert("Administrator Password", isPresented: $showSudoAlert) {
             SecureField("Password", text: $sudoPassword)

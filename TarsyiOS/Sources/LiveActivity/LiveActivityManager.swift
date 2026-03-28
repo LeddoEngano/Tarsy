@@ -98,20 +98,38 @@ class LiveActivityManager: ObservableObject {
 
     func endActivity(workspaceId: String, status: String = "completed", tabId: String? = nil) {
         let activityKey = key(workspaceId: workspaceId, tabId: tabId)
-        guard let activity = activities[activityKey],
-              let startDate = startDates[activityKey] else { return }
 
-        let finalState = TarsyActivityAttributes.ContentState(
-            status: status,
-            currentTool: status == "error" ? "Failed" : "Done",
-            currentToolIcon: status == "error" ? "xmark.circle" : "checkmark.circle",
-            startedAt: startDate
-        )
+        // Try tracked dict first
+        if let activity = activities[activityKey] {
+            let startDate = startDates[activityKey] ?? activity.content.state.startedAt
+            let finalState = TarsyActivityAttributes.ContentState(
+                status: status,
+                currentTool: status == "error" ? "Failed" : "Done",
+                currentToolIcon: status == "error" ? "xmark.circle" : "checkmark.circle",
+                startedAt: startDate
+            )
+            Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 60)) }
+            activities.removeValue(forKey: activityKey)
+            startDates.removeValue(forKey: activityKey)
+            return
+        }
 
-        Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 60)) }
-
-        activities.removeValue(forKey: activityKey)
-        startDates.removeValue(forKey: activityKey)
+        // Fallback: find matching activity directly from the system.
+        // This handles the case where the app was suspended and lost in-memory references
+        // but the Live Activity is still visible on the Lock Screen / Dynamic Island.
+        for activity in Activity<TarsyActivityAttributes>.activities {
+            if activity.attributes.workspaceId == workspaceId,
+               activity.activityState == .active || activity.activityState == .stale {
+                let finalState = TarsyActivityAttributes.ContentState(
+                    status: status,
+                    currentTool: status == "error" ? "Failed" : "Done",
+                    currentToolIcon: status == "error" ? "xmark.circle" : "checkmark.circle",
+                    startedAt: activity.content.state.startedAt
+                )
+                Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 60)) }
+                print("[LiveActivity] Ended orphaned system activity for workspace \(workspaceId)")
+            }
+        }
     }
 
     /// End all activities for a workspace (e.g., when user leaves the workspace view)
@@ -130,6 +148,20 @@ class LiveActivityManager: ObservableObject {
             activities.removeValue(forKey: k)
             startDates.removeValue(forKey: k)
         }
+
+        // Also end any system activities for this workspace not in our dict
+        for activity in Activity<TarsyActivityAttributes>.activities {
+            if activity.attributes.workspaceId == workspaceId,
+               activity.activityState == .active || activity.activityState == .stale {
+                let finalState = TarsyActivityAttributes.ContentState(
+                    status: "completed",
+                    currentTool: "Done",
+                    currentToolIcon: "checkmark.circle",
+                    startedAt: activity.content.state.startedAt
+                )
+                Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .default) }
+            }
+        }
     }
 
     func endAllActivities() {
@@ -142,9 +174,17 @@ class LiveActivityManager: ObservableObject {
         }
         activities.removeAll()
         startDates.removeAll()
+
+        // Also end any system activities not in our dict
+        for activity in Activity<TarsyActivityAttributes>.activities {
+            guard activity.activityState == .active || activity.activityState == .stale else { continue }
+            Task { await activity.end(nil, dismissalPolicy: .immediate) }
+        }
     }
 
     var hasActiveActivities: Bool {
-        !activities.isEmpty
+        !activities.isEmpty || !Activity<TarsyActivityAttributes>.activities.filter({
+            $0.activityState == .active || $0.activityState == .stale
+        }).isEmpty
     }
 }

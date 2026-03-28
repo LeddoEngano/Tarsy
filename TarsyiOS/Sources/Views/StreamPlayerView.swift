@@ -281,6 +281,10 @@ struct StreamPlayerView: View {
         .onAppear {
             checkDevServerStatus()
             if isWebMode { detectPorts() }
+            // Auto-restart stream when switching back from browser mode
+            if isActive && !viewModel.isConnected {
+                startStream()
+            }
         }
         .confirmationDialog("Select Port", isPresented: $showPortPicker, titleVisibility: .visible) {
             ForEach(detectedPorts) { port in
