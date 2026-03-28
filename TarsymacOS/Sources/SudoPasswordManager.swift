@@ -51,6 +51,9 @@ actor SudoPasswordManager {
     /// Shell metacharacters that indicate command chaining (potential injection)
     private static let dangerousPatterns = ["; ", " && ", " || ", " | ", "$(", "`", " > ", " >> ", " < "]
 
+    /// Known sudo flags to strip when parsing commands
+    private static let sudoFlags: Set<String> = ["-S", "-E", "-v", "-k", "-K", "-n", "-H", "-P", "-b"]
+
     /// Active categories — loaded from Supabase profile, configurable from iPhone
     private(set) var enabledCategories: Set<SudoCategory> = Set(SudoCategory.allCases)
 
@@ -58,22 +61,19 @@ actor SudoPasswordManager {
         enabledCategories = categories
     }
 
-    /// Validates that a command matches the whitelist
+    /// Validates that a command matches the whitelist.
+    /// Uses exact word-boundary matching to prevent prefix bypass attacks.
     func isCommandAllowed(_ command: String) -> Bool {
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Strip leading "sudo " or "sudo -S " etc to get the actual command
-        var baseCommand = trimmed
-        if baseCommand.hasPrefix("sudo ") {
-            let parts = baseCommand.components(separatedBy: " ").drop(while: { $0 == "sudo" || $0.hasPrefix("-") })
-            baseCommand = parts.joined(separator: " ")
-        }
+        let parts = parseCommandParts(command)
+        let baseCommand = parts.joined(separator: " ")
+        guard !baseCommand.isEmpty else { return false }
 
         // Check against allowed patterns in enabled categories
         for category in enabledCategories {
             guard let patterns = Self.categoryPatterns[category] else { continue }
             for pattern in patterns {
-                if baseCommand.hasPrefix(pattern) {
+                // Exact match or pattern followed by a space + arguments (word boundary)
+                if baseCommand == pattern || baseCommand.hasPrefix(pattern + " ") {
                     let rest = String(baseCommand.dropFirst(pattern.count))
                     let hasDangerousChars = Self.dangerousPatterns.contains { rest.contains($0) }
                     if !hasDangerousChars {
@@ -83,6 +83,40 @@ actor SudoPasswordManager {
             }
         }
         return false
+    }
+
+    /// Parses a command string into executable and arguments, stripping "sudo" prefix and its flags.
+    /// Does NOT use shell interpretation — splits on whitespace only.
+    private func parseCommandParts(_ command: String) -> [String] {
+        var parts = command.trimmingCharacters(in: .whitespacesAndNewlines)
+            .components(separatedBy: .whitespaces)
+            .filter { !$0.isEmpty }
+
+        // Strip "sudo" and known sudo flags
+        if parts.first == "sudo" {
+            parts.removeFirst()
+            while let first = parts.first, Self.sudoFlags.contains(first) {
+                parts.removeFirst()
+            }
+        }
+
+        return parts
+    }
+
+    /// Resolves a command name to its full path by checking common locations.
+    private func resolveExecutablePath(_ name: String) -> String {
+        if name.hasPrefix("/") { return name }
+
+        let searchPaths = [
+            "/opt/homebrew/bin/\(name)",
+            "/usr/local/bin/\(name)",
+            "/usr/bin/\(name)",
+            "/bin/\(name)",
+            "/usr/sbin/\(name)",
+            "/sbin/\(name)",
+        ]
+
+        return searchPaths.first { FileManager.default.isExecutableFile(atPath: $0) } ?? name
     }
 
     // MARK: - Secure password memory
@@ -185,17 +219,17 @@ actor SudoPasswordManager {
         return sudoStdinWrapper(password: password, command: command)
     }
 
-    /// Wraps a command so sudo reads the password from a here-string via stdin.
-    /// No temp files, no env vars, no askpass scripts — password stays in memory only.
-    /// Uses `sudo -S` which reads password from stdin.
+    /// Wraps a command so sudo reads the password via stdin pipe.
+    /// Uses printf (not echo) to avoid escape sequence interpretation.
+    /// Password is single-quote escaped to prevent shell injection.
     private func sudoStdinWrapper(password: String, command: String) -> String {
         // Escape single quotes for safe embedding in shell single-quoted string
         let escaped = password.replacingOccurrences(of: "'", with: "'\\''")
         // Replace bare "sudo " with "sudo -S " so it reads from stdin
         var cmd = command
         cmd = cmd.replacingOccurrences(of: "sudo ", with: "sudo -S ")
-        // Pipe password via here-string: echo 'pass' | sudo -S <cmd>
-        return "echo '\(escaped)' | \(cmd)"
+        // Pipe password via printf (safer than echo — no escape sequence interpretation)
+        return "printf '%s\\n' '\(escaped)' | \(cmd)"
     }
 
     private func resolvePackageScript(_ command: String, in directory: String) -> String? {
@@ -287,10 +321,19 @@ actor SudoPasswordManager {
             throw SudoError.authenticationFailed
         }
 
-        // Run the actual command with sudo (credentials cached by sudo -v)
+        // Parse command into executable + arguments (no shell interpretation)
+        let commandParts = parseCommandParts(command)
+        guard let executable = commandParts.first else {
+            throw SudoError.commandNotAllowed
+        }
+
+        // Resolve executable to full path so sudo can find it without a shell
+        let resolvedExecutable = resolveExecutablePath(executable)
+
+        // Run with sudo using array arguments — no shell, no injection possible
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/sudo")
-        process.arguments = ["/bin/zsh", "-c", command]
+        process.arguments = [resolvedExecutable] + Array(commandParts.dropFirst())
         process.environment = ProcessInfo.processInfo.environment
 
         let outputPipe = Pipe()
