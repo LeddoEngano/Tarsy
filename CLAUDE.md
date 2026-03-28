@@ -13,7 +13,7 @@ The project is a monorepo with five main components:
 Shared library consumed by both apps. `supabase-swift` (>= 2.0) is the only external dependency.
 
 - **AuthManager** — unified auth (Apple, GitHub OAuth, email/password) with platform-specific redirect schemes (`com.tarsy.ios://` and `com.tarsy.macos://`)
-- **Networking** — `ConnectionManager` (dual-mode WebSocket: LAN via `Network.framework`, relay via `URLSessionWebSocketTask`), `WSProtocol` (60+ action types), `UltraContextClient` (context API with Keychain storage)
+- **Networking** — `ConnectionManager` (dual-mode WebSocket: LAN via `Network.framework`, relay via `URLSessionWebSocketTask`), `WSProtocol` (60+ action types), `E2ECrypto` (end-to-end encryption with TOFU key pinning for all packets and binary frames), `UltraContextClient` (context API with Keychain storage)
 - **SupabaseClient** — global singleton for auth and data
 - **Models** — `Workspace`, `Machine`, `ChatMessage`, `AIEngineType`, `Profile`, `AgentTask`, `AgentPermissionConfig`
 - **Services** — `WorkspaceService`, `MachineService`, `ChatService` (paginated, 50/page), `ProfileService` (preferences, subscription sync, billing emails), `AgentTaskService` (task lifecycle: running → waiting → completed/error)
@@ -27,7 +27,7 @@ Menu bar app (LSUIElement) that runs on the Mac being controlled. `DaemonManager
 - **AI engines** — `TerminalSessionManager` (zsh sessions with rich PATH enrichment: nvm, fnm, asdf, cargo, etc.) + `ClaudeCodeSession` (dedicated Claude Code subprocess with token tracking) + `GenericCLIEngine` (wraps any CLI agent). All conform to `AIEngineProtocol` (actor protocol). `AgentDetector` scans standard paths for installed AI binaries.
 - **Workspace orchestration** — `WorkspaceOrchestrator` (git clone, stack detection, dependency install, dev server start), `RepoScanner` (async scan of ~10 standard directories)
 - **Networking** — `RelayClient` (machine-to-cloud WebSocket with exponential backoff, token refresh), `WebSocketServer` (local LAN server on port 8642), `TailscaleManager` (VPN discovery)
-- **Sudo handling** — `SudoPasswordManager` bridges sudo requests to iOS via WebSocket, caches password (60s TTL), rewrites commands with SUDO_ASKPASS wrapper
+- **Sudo handling** — `SudoPasswordManager` (actor) bridges sudo requests to iOS via WebSocket, caches password (60s TTL), rewrites commands with SUDO_ASKPASS wrapper. Hardened with command whitelist (word-boundary matching), no-shell execution, and printf wrapper.
 - **Background services** — `UltraContextDaemon` (CLI daemon lifecycle), `OpenClawService` (local LLM gateway on port 18789 with SSE streaming), `PushNotificationService` (local + remote via Supabase)
 - **System** — Sleep prevention (IOKit assertions), heartbeat (30s machine status update), onboarding window (3-step setup)
 
@@ -39,10 +39,11 @@ iPhone/iPad app. Entry point: `ContentView` manages auth state (splash → login
 - **AI chat** — `WorkspaceView` with tab system (per-tab state isolation: thinking, activity, options, questions, model, contextPercent), voice input, attachments, interactive options/questions (PaginatedQuestionCard with pagination, multi-select), VoiceTodoManager/VoiceTodoOverlay for task tracking
 - **Dashboard** — `DashboardView` lists machines (online/offline indicator), workspaces (status-colored), active tasks, action buttons (Quick Dispatch, Active Sessions, New Workspace, Settings)
 - **Workspace management** — `NewWorkspaceView` (scanned repos + manual creation), `WorkspaceSettingsView`, `AIContextEditorView` (templates for project overview, coding style, testing rules)
-- **MCP integrations** — `MCPStoreView` detects MCPs from `~/.claude.json` with health indicators
+- **MCP integrations** — `MCPStoreView` detects MCPs from all installed agents (not just Claude Code) with health indicators
 - **Web browser** — `WebBrowserView` (dev server management, port detection, WKWebView) + `TarsyProxySchemeHandler` (custom `tarsy-http://` scheme that proxies requests through WebSocket)
-- **Subscription** — `SubscriptionManager` (StoreKit 2, product: `tarsy_pro_monthly`) + `PaywallView`. Free: 1 workspace. Pro ($9/month): unlimited.
+- **Subscription** — `SubscriptionManager` (StoreKit 2, product: `tarsy_pro_monthly`) + `PaywallView`. Free: 1 workspace. Pro ($9/month): unlimited workspaces + OpenClaw access.
 - **Git** — `GitSafetyNetView` (3 tabs: Changes, History, Branches; diff viewer, rollback with checkpoints)
+- **Live Activities** — `LiveActivityManager` shows real-time agent status on the Lock Screen and Dynamic Island during active AI sessions
 - **Other** — `FileExplorerView` (tree view with search), `VoiceInputManager` (SFSpeechRecognizer, 9 languages, on-device when available), `PermissionOnboardingView` (auto/safe mode per engine), `ActiveSessionsView` (UltraContext session list with continue-session), `QuickDispatchView` (rapid task dispatch from dashboard), `SplashView`, `LoginView`, `StatusBanner` (reconnecting/error/relay indicators), `Haptics`
 
 ### Relay Server (Bun + Hono)
@@ -50,8 +51,8 @@ iPhone/iPad app. Entry point: `ContentView` manages auth state (splash → login
 WebSocket relay at `relay/`. Bridges iOS clients with macOS machines over the internet.
 
 - **Tech:** Bun runtime, Hono.js framework, TypeScript
-- **Auth:** JWT validation via Supabase
-- **Features:** Connection tracking (machines + clients per user), message forwarding, rate limiting (120 msg/sec per connection, max 5 clients per user), health endpoint (`/health`)
+- **Auth:** JWT validation via Supabase + machine secret verification
+- **Features:** Connection tracking (machines + clients per user), message forwarding, action allowlists (machines vs clients), rate limiting (120 msg/sec per connection, max 5 clients per user), health endpoint (`/health`)
 - **Deployment:** Fly.io, app `tarsy-relay`, region `gru` (São Paulo), 1 shared CPU, 1GB RAM, forced HTTPS
 - **URL:** `wss://tarsy-relay.fly.dev/ws`
 
@@ -59,17 +60,17 @@ WebSocket relay at `relay/`. Bridges iOS clients with macOS machines over the in
 
 Auth, database, edge functions, and realtime at `supabase/`.
 
-**Tables:** `machines`, `workspaces`, `push_tokens`, `push_notifications`, `agent_tasks`, `profiles`
+**Tables:** `machines` (includes `model_identifier` for device-specific icons), `workspaces`, `push_tokens`, `push_notifications`, `agent_tasks`, `profiles`
 
 **Edge Functions:**
 - `send-push` — APNs delivery triggered by webhook on `push_notifications` INSERT. Requires: `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, `APNS_BUNDLE_ID`
 - `send-email` — Transactional emails via Resend API triggered by webhook on `profiles` INSERT (welcome) or direct invocation (billing). Requires: `RESEND_API_KEY`, `RESEND_FROM_EMAIL`
 
-**Security:** RLS on all tables (users access only their own data). Auto-profile creation trigger on `auth.users` INSERT.
+**Security:** RLS on all tables (users access only their own data). Auto-profile creation trigger on `auth.users` INSERT. Edge functions hardened with JWS verification and error sanitization.
 
 **Realtime:** Enabled on `machines`, `workspaces`, `profiles`.
 
-**Migrations:** 9 sequential files in `supabase/migrations/` — always add new migrations sequentially (e.g., `010_*.sql`).
+**Migrations:** 24 sequential files in `supabase/migrations/` — always add new migrations sequentially (e.g., `025_*.sql`).
 
 ### Website (Next.js)
 
@@ -83,7 +84,7 @@ The iOS app connects to the macOS app via:
 2. **Relay** — pure relay via `wss://tarsy-relay.fly.dev/ws`
 3. **LAN direct** — connects directly when both devices are on the same network
 
-Communication uses WebSocket with a custom binary packet protocol (`WSProtocol`). Video frames are sent as binary WebSocket messages with a 4-byte `H264` prefix.
+Communication uses WebSocket with a custom binary packet protocol (`WSProtocol`). All packets and binary frames are end-to-end encrypted (`E2ECrypto` with TLS-bound key exchange and TOFU pinning). Video frames are sent as binary WebSocket messages with a 4-byte `H264` prefix.
 
 ## WSProtocol Actions
 
@@ -127,8 +128,8 @@ The user picks the engine per workspace. All engines conform to `AIEngineProtoco
 ## Monetization
 
 Freemium model via StoreKit 2 subscription (product ID: `tarsy_pro_monthly`):
-- **Free:** 1 workspace with all features
-- **Pro ($9/month):** unlimited workspaces
+- **Free:** 1 workspace, OpenClaw tab visible but Pro-gated (shows paywall)
+- **Pro ($9/month):** unlimited workspaces, full OpenClaw access
 
 Subscription status syncs between StoreKit and Supabase `profiles` table. Billing emails sent via `send-email` edge function on subscription state transitions.
 
@@ -182,7 +183,7 @@ When changing auth logic, always update BOTH platforms. Never add a login method
 - Prefer the existing `WSProtocol` packet system for new iOS↔macOS communication. Don't introduce alternative channels.
 - When adding a new packet action, add the `WSAction` case, handle it in `DaemonManager` (macOS side), and add the appropriate listener in the iOS view/service that needs it.
 - Binary data (video, screenshots) uses WebSocket binary frames, not text packets.
-- The relay server is stateless — it only forwards packets. All logic lives in the apps.
+- The relay server forwards packets with minimal logic (auth, rate limiting, action allowlists). Business logic lives in the apps.
 
 ### Database
 

@@ -30,12 +30,12 @@ struct ProfileView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         profileHeader
                         subscriptionSection
-                        settingsSection
                         agentPermissionsSection
                         voiceInputSection
                         legalSection
                         aboutSection
                         accountSection
+                        deleteAccountSection
                     }
                     .padding(16)
                 }
@@ -407,39 +407,49 @@ struct ProfileView: View {
                     .padding(.vertical, 12)
                     .background(TarsyTheme.backgroundSecondary)
                 }
-
-                Button(action: { showDeleteConfirmation = true }) {
-                    HStack(spacing: 12) {
-                        Image(systemName: "trash")
-                            .font(.system(size: 14))
-                            .foregroundColor(TarsyTheme.accentTerracotta)
-                            .frame(width: 28)
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Delete Account")
-                                .font(TarsyTheme.monoFontSmall)
-                                .foregroundColor(TarsyTheme.accentTerracotta)
-                            Text("permanently remove all data")
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(TarsyTheme.textSecondary)
-                        }
-
-                        Spacer()
-
-                        if isDeleting {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                                .tint(TarsyTheme.accentTerracotta)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(TarsyTheme.backgroundSecondary)
-                }
-                .disabled(isDeleting)
             }
             .cornerRadius(10)
         }
+    }
+
+    // MARK: - Delete Account (Danger Zone)
+
+    private var deleteAccountSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Danger Zone")
+
+            Button(action: { showDeleteConfirmation = true }) {
+                HStack(spacing: 12) {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14))
+                        .foregroundColor(TarsyTheme.accentTerracotta)
+                        .frame(width: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Delete Account")
+                            .font(TarsyTheme.monoFontSmall)
+                            .foregroundColor(TarsyTheme.accentTerracotta)
+                        Text("permanently remove all data")
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                    }
+
+                    Spacer()
+
+                    if isDeleting {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(TarsyTheme.accentTerracotta)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(TarsyTheme.backgroundSecondary)
+            }
+            .disabled(isDeleting)
+            .cornerRadius(10)
+        }
+        .padding(.top, 16)
         .padding(.bottom, 32)
     }
 
