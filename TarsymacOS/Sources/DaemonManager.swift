@@ -3330,53 +3330,74 @@ class DaemonManager: ObservableObject {
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let claudeConfigPath = NSHomeDirectory() + "/.claude.json"
-                guard let data = FileManager.default.contents(atPath: claudeConfigPath),
-                      let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                    Task {
-                        await self?.sendToClientOrRelay(
-                            WSPacket(action: .mcpListResult, payload: ["mcps": "[]", "success": "true"], id: packet.id),
-                            to: clientId
-                        )
-                    }
-                    continuation.resume()
-                    return
-                }
-
+                let home = FileManager.default.homeDirectoryForCurrentUser.path
+                    .replacingOccurrences(of: "/Library/Containers/com.tarsy.macos/Data", with: "")
                 var mcpEntries: [[String: String]] = []
 
-                // Global MCPs
-                if let globalMcps = config["mcpServers"] as? [String: Any] {
-                    for (name, mcpConfig) in globalMcps {
+                // 1. Claude Code — ~/.claude.json
+                self?.readMCPsFromJSON(
+                    path: "\(home)/.claude.json",
+                    engine: "claude",
+                    mcpKey: "mcpServers",
+                    workspacePath: workspacePath,
+                    projectsKey: "projects",
+                    into: &mcpEntries
+                )
+
+                // 2. Gemini CLI — ~/.gemini/settings.json
+                self?.readMCPsFromJSON(
+                    path: "\(home)/.gemini/settings.json",
+                    engine: "gemini",
+                    mcpKey: "mcpServers",
+                    into: &mcpEntries
+                )
+
+                // 3. Cursor — ~/.cursor/mcp.json
+                self?.readMCPsFromJSON(
+                    path: "\(home)/.cursor/mcp.json",
+                    engine: "cursor",
+                    mcpKey: "mcpServers",
+                    into: &mcpEntries
+                )
+
+                // 4. Windsurf — ~/.codeium/windsurf/mcp_config.json
+                self?.readMCPsFromJSON(
+                    path: "\(home)/.codeium/windsurf/mcp_config.json",
+                    engine: "windsurf",
+                    mcpKey: "mcpServers",
+                    into: &mcpEntries
+                )
+
+                // 5. Amp — ~/.config/amp/settings.json (mcpServers or amp.mcpServers)
+                self?.readMCPsFromJSON(
+                    path: "\(home)/.config/amp/settings.json",
+                    engine: "amp",
+                    mcpKey: "mcpServers",
+                    fallbackKey: "amp.mcpServers",
+                    into: &mcpEntries
+                )
+
+                // 6. Cline — VS Code globalStorage
+                self?.readMCPsFromJSON(
+                    path: "\(home)/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
+                    engine: "cline",
+                    mcpKey: "mcpServers",
+                    into: &mcpEntries
+                )
+
+                // 7. Copilot — VS Code mcp.json
+                let vscodeMcpPath = "\(home)/Library/Application Support/Code/User/mcp.json"
+                if let data = FileManager.default.contents(atPath: vscodeMcpPath),
+                   let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    // VS Code mcp.json uses "servers" or "mcpServers"
+                    let servers = (config["servers"] as? [String: Any]) ?? (config["mcpServers"] as? [String: Any]) ?? [:]
+                    for (name, mcpConfig) in servers {
                         let type = self?.mcpType(from: mcpConfig) ?? "unknown"
                         let command = self?.mcpCommand(from: mcpConfig) ?? ""
                         mcpEntries.append([
-                            "name": name,
-                            "scope": "global",
-                            "type": type,
-                            "command": command
+                            "name": name, "engine": "copilot", "scope": "global",
+                            "type": type, "command": command
                         ])
-                    }
-                }
-
-                // Project-specific MCPs
-                if let path = workspacePath,
-                   let projects = config["projects"] as? [String: Any] {
-                    let expandedPath = (path as NSString).expandingTildeInPath
-                    if let projectConfig = projects[expandedPath] as? [String: Any],
-                       let projectMcps = projectConfig["mcpServers"] as? [String: Any] {
-                        for (name, mcpConfig) in projectMcps {
-                            // Skip if already in global
-                            if mcpEntries.contains(where: { $0["name"] == name }) { continue }
-                            let type = self?.mcpType(from: mcpConfig) ?? "unknown"
-                            let command = self?.mcpCommand(from: mcpConfig) ?? ""
-                            mcpEntries.append([
-                                "name": name,
-                                "scope": "project",
-                                "type": type,
-                                "command": command
-                            ])
-                        }
                     }
                 }
 
@@ -3390,6 +3411,47 @@ class DaemonManager: ObservableObject {
                     )
                 }
                 continuation.resume()
+            }
+        }
+    }
+
+    /// Reads MCPs from a JSON config file with standard mcpServers structure.
+    private nonisolated func readMCPsFromJSON(
+        path: String,
+        engine: String,
+        mcpKey: String,
+        fallbackKey: String? = nil,
+        workspacePath: String? = nil,
+        projectsKey: String? = nil,
+        into entries: inout [[String: String]]
+    ) {
+        guard let data = FileManager.default.contents(atPath: path),
+              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+
+        let mcps = (config[mcpKey] as? [String: Any])
+            ?? (fallbackKey.flatMap { config[$0] as? [String: Any] })
+            ?? [:]
+
+        for (name, mcpConfig) in mcps {
+            entries.append([
+                "name": name, "engine": engine, "scope": "global",
+                "type": mcpType(from: mcpConfig), "command": mcpCommand(from: mcpConfig)
+            ])
+        }
+
+        // Project-specific MCPs (Claude Code style)
+        if let projectsKey, let wsPath = workspacePath,
+           let projects = config[projectsKey] as? [String: Any] {
+            let expanded = (wsPath as NSString).expandingTildeInPath
+            if let projConfig = projects[expanded] as? [String: Any],
+               let projMcps = projConfig[mcpKey] as? [String: Any] {
+                for (name, mcpConfig) in projMcps {
+                    if entries.contains(where: { $0["name"] == name && $0["engine"] == engine }) { continue }
+                    entries.append([
+                        "name": name, "engine": engine, "scope": "project",
+                        "type": mcpType(from: mcpConfig), "command": mcpCommand(from: mcpConfig)
+                    ])
+                }
             }
         }
     }

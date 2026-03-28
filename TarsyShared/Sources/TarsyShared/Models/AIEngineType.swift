@@ -109,4 +109,14 @@ public enum AIEngineType: String, Codable, Sendable, CaseIterable {
     public var usesDedicatedSession: Bool {
         self == .claude
     }
+
+    /// Whether this engine supports MCP (Model Context Protocol) servers.
+    public var supportsMCP: Bool {
+        switch self {
+        case .claude, .gemini, .cursor, .windsurf, .amp, .cline, .copilot:
+            return true
+        case .codex, .aider, .custom:
+            return false
+        }
+    }
 }

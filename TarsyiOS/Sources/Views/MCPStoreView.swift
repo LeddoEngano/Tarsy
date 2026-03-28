@@ -11,6 +11,31 @@ struct MCPStoreView: View {
     @State private var healthStatus: [String: String] = [:] // name -> status
     @State private var isLoading = true
 
+    /// MCPs grouped by engine type
+    private var mcpsByEngine: [AIEngineType: [MCPEntry]] {
+        Dictionary(grouping: mcps, by: { $0.engineType })
+    }
+
+    /// Engines that have MCPs configured (sorted by display name)
+    private var enginesWithMCPs: [AIEngineType] {
+        mcpsByEngine.keys.sorted { $0.displayName < $1.displayName }
+    }
+
+    /// Detected agents that support MCP but have none configured
+    private var enginesWithoutMCPs: [AIEngineType] {
+        let detected = connectionManager.detectedAgents.isEmpty ? [AIEngineType.claude] : connectionManager.detectedAgents
+        let withMCPs = Set(enginesWithMCPs)
+        return detected
+            .filter { $0.supportsMCP && !withMCPs.contains($0) }
+            .sorted { $0.displayName < $1.displayName }
+    }
+
+    /// Detected agents that don't support MCP
+    private var enginesNoSupport: [AIEngineType] {
+        let detected = connectionManager.detectedAgents.isEmpty ? [AIEngineType.claude] : connectionManager.detectedAgents
+        return detected.filter { !$0.supportsMCP }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -31,7 +56,7 @@ struct MCPStoreView: View {
                         Text("No MCPs configured")
                             .font(TarsyTheme.monoFont)
                             .foregroundColor(TarsyTheme.textSecondary)
-                        Text("Add MCPs to your ~/.claude.json\nand they'll appear here automatically")
+                        Text("Add MCPs to your agent configs\nand they'll appear here automatically")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(TarsyTheme.textSecondary.opacity(0.7))
                             .multilineTextAlignment(.center)
@@ -39,11 +64,24 @@ struct MCPStoreView: View {
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
-                            // Claude Code section
-                            engineSection(.claude, mcps: mcps)
+                            // Engines with MCPs configured
+                            ForEach(enginesWithMCPs, id: \.self) { engine in
+                                engineSection(engine, mcps: mcpsByEngine[engine] ?? [])
+                            }
 
-                            // Other engines placeholder
-                            otherEnginesSection
+                            // Engines without MCPs (but support them)
+                            if !enginesWithoutMCPs.isEmpty {
+                                ForEach(enginesWithoutMCPs, id: \.self) { engine in
+                                    emptyEngineRow(engine, label: "no MCPs configured")
+                                }
+                            }
+
+                            // Engines that don't support MCP
+                            if !enginesNoSupport.isEmpty {
+                                ForEach(enginesNoSupport, id: \.self) { engine in
+                                    emptyEngineRow(engine, label: "not supported")
+                                }
+                            }
                         }
                         .padding(16)
                     }
@@ -100,18 +138,15 @@ struct MCPStoreView: View {
 
     private func mcpRow(_ mcp: MCPEntry) -> some View {
         HStack(spacing: 12) {
-            // Health indicator
             Circle()
                 .fill(healthColor(for: mcp.name))
                 .frame(width: 8, height: 8)
 
-            // Icon
             Image(systemName: mcpIcon(mcp.name))
                 .font(.system(size: 15))
                 .foregroundColor(TarsyTheme.accentAmber)
                 .frame(width: 24)
 
-            // Name + details
             VStack(alignment: .leading, spacing: 2) {
                 Text(mcpDisplayName(mcp.name))
                     .font(.system(size: 13, design: .monospaced))
@@ -140,7 +175,6 @@ struct MCPStoreView: View {
 
             Spacer()
 
-            // Health status text
             Text(healthLabel(for: mcp.name))
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(healthColor(for: mcp.name))
@@ -150,26 +184,21 @@ struct MCPStoreView: View {
         .background(TarsyTheme.backgroundSecondary)
     }
 
-    private var otherEnginesSection: some View {
-        let otherEngines: [AIEngineType] = [.gemini, .codex, .aider, .cursor, .windsurf, .amp, .cline, .copilot]
-        return VStack(alignment: .leading, spacing: 8) {
-            ForEach(otherEngines, id: \.self) { engine in
-                HStack(spacing: 8) {
-                    AgentIcon(engineType: engine, size: 16)
-                    Text(engine.displayName)
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textSecondary)
-                    Spacer()
-                    Text("no MCP support")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(TarsyTheme.backgroundSecondary)
-                .cornerRadius(10)
-            }
+    private func emptyEngineRow(_ engine: AIEngineType, label: String) -> some View {
+        HStack(spacing: 8) {
+            AgentIcon(engineType: engine, size: 16)
+            Text(engine.displayName)
+                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .foregroundColor(TarsyTheme.textSecondary)
+            Spacer()
+            Text(label)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(TarsyTheme.backgroundSecondary)
+        .cornerRadius(10)
     }
 
     // MARK: - Actions
@@ -215,9 +244,9 @@ struct MCPStoreView: View {
 
     private func healthColor(for name: String) -> Color {
         switch healthStatus[name] {
-        case "healthy": return Color(red: 0.133, green: 0.773, blue: 0.369) // green-500
+        case "healthy": return Color(red: 0.133, green: 0.773, blue: 0.369)
         case "unreachable", "not_found": return TarsyTheme.accentTerracotta
-        default: return TarsyTheme.textSecondary.opacity(0.5) // checking
+        default: return TarsyTheme.textSecondary.opacity(0.5)
         }
     }
 
@@ -231,7 +260,6 @@ struct MCPStoreView: View {
     }
 
     private func mcpDisplayName(_ name: String) -> String {
-        // Clean up common MCP names
         let cleanNames: [String: String] = [
             "context7": "Context7",
             "chrome-devtools": "Chrome DevTools",
@@ -281,12 +309,18 @@ struct MCPStoreView: View {
 struct MCPEntry: Identifiable {
     let id = UUID()
     let name: String
+    let engine: String
     let scope: String
     let type: String
     let command: String
 
+    var engineType: AIEngineType {
+        AIEngineType(rawValue: engine) ?? .claude
+    }
+
     init(from dict: [String: String]) {
         self.name = dict["name"] ?? ""
+        self.engine = dict["engine"] ?? "claude"
         self.scope = dict["scope"] ?? "global"
         self.type = dict["type"] ?? "unknown"
         self.command = dict["command"] ?? ""
