@@ -36,10 +36,7 @@ struct WorkspaceView: View {
     @EnvironmentObject var workspaceService: WorkspaceService
 
     @State private var selectedTabIndex = 0
-    @State private var tabs: [TerminalTab] = [
-        TerminalTab(id: "openclaw", title: "OpenClaw", isFixed: true, type: .openclaw),
-        TerminalTab(id: "claude-1", title: "Claude Code", isFixed: false, type: .claude, sessionId: nil, engineType: .claude)
-    ]
+    @State private var tabs: [TerminalTab] = []
     @State private var messageText = ""
     @State private var isStreamActive = false
     @State private var isAgentThinking = false
@@ -226,6 +223,16 @@ struct WorkspaceView: View {
         .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .task {
+            // Initialize tabs based on workspace type
+            if tabs.isEmpty {
+                if workspace.isFullScreen {
+                    tabs.append(TerminalTab(id: "openclaw", title: "OpenClaw", isFixed: true, type: .openclaw))
+                }
+                tabs.append(TerminalTab(id: "claude-1", title: "Claude Code", isFixed: false, type: .claude, sessionId: nil, engineType: .claude))
+                if workspace.isFullScreen {
+                    selectedTabIndex = tabs.count - 1 // Select Claude tab, not OpenClaw
+                }
+            }
             chatService.switchTab(tabId: currentTab.id)
             await chatService.loadFromUltraContext(workspacePath: workspace.localPath, client: ultraContextClient)
             setupOutputHandler()
@@ -1595,11 +1602,6 @@ struct TabButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                if tab.isFixed {
-                    Image(systemName: "terminal")
-                        .font(.caption2)
-                }
-
                 switch tab.type {
                 case .claude:
                     AgentIcon(engineType: .claude, size: 12)
