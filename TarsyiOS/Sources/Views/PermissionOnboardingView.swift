@@ -56,17 +56,15 @@ struct PermissionOnboardingView: View {
                 // Continue button
                 Button {
                     // Apply global mode to all engines
-                    for engine in [AIEngineType.claude, .codex, .gemini, .aider] {
+                    for engine in AIEngineType.allCases where engine != .custom {
                         config.setMode(globalMode, for: engine)
                     }
                     config.save()
                     Task {
-                        let perms = [
-                            "claude": globalMode.rawValue,
-                            "codex": globalMode.rawValue,
-                            "gemini": globalMode.rawValue,
-                            "aider": globalMode.rawValue
-                        ]
+                        var perms: [String: String] = [:]
+                        for engine in AIEngineType.allCases where engine != .custom {
+                            perms[engine.rawValue] = globalMode.rawValue
+                        }
                         await profileService.updateAgentPermissions(perms)
                         await profileService.markOnboarded()
                     }

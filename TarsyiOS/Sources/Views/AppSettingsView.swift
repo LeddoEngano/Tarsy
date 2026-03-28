@@ -164,7 +164,7 @@ struct AppSettingsView: View {
                         sectionHeader("Agent Permissions")
 
                         VStack(spacing: 1) {
-                            ForEach([AIEngineType.claude, .codex, .gemini, .aider], id: \.self) { engine in
+                            ForEach(AIEngineType.allCases.filter { $0 != .custom }, id: \.self) { engine in
                                 HStack(spacing: 12) {
                                     Image(systemName: engine.iconName)
                                         .font(.system(size: 14))

@@ -8,6 +8,7 @@ struct ProfileView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var subscriptionManager: SubscriptionManager
     @EnvironmentObject var profileService: ProfileService
+    @EnvironmentObject var connectionManager: ConnectionManager
 
     @State private var apiKeys: [APIKeyEntry] = []
     @State private var editingProvider: AIEngineType?
@@ -30,6 +31,8 @@ struct ProfileView: View {
                         profileHeader
                         subscriptionSection
                         settingsSection
+                        agentPermissionsSection
+                        voiceInputSection
                         legalSection
                         aboutSection
                         accountSection
@@ -114,14 +117,20 @@ struct ProfileView: View {
                                 }
                             }
                     } else {
-                        Text(profileService.profile?.nameOrEmail ?? "")
-                            .font(.system(size: 15, weight: .semibold, design: .monospaced))
-                            .foregroundColor(TarsyTheme.textPrimary)
+                        if let name = profileService.profile?.displayName, !name.isEmpty {
+                            Text("hello, \(name)!")
+                                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                                .foregroundColor(TarsyTheme.textPrimary)
+                        } else {
+                            Text(profileService.profile?.email ?? "")
+                                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                                .foregroundColor(TarsyTheme.textPrimary)
+                        }
                     }
 
                     if let email = profileService.profile?.email {
                         Text(email)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                 }
@@ -271,12 +280,17 @@ struct ProfileView: View {
                 .font(.system(size: 11, design: .monospaced))
                 .foregroundColor(TarsyTheme.textSecondary)
                 .padding(.horizontal, 4)
+        }
+    }
 
-            // Agent Permissions
+    // MARK: - Agent Permissions
+
+    private var agentPermissionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
             sectionHeader("Agent Permissions")
 
             VStack(spacing: 1) {
-                ForEach([AIEngineType.claude, .codex, .gemini, .aider], id: \.self) { engine in
+                ForEach(connectionManager.detectedAgents.isEmpty ? [AIEngineType.claude] : connectionManager.detectedAgents, id: \.self) { engine in
                     HStack(spacing: 12) {
                         Image(systemName: engine.iconName)
                             .font(.system(size: 14))
@@ -326,8 +340,13 @@ struct ProfileView: View {
                 }
             }
             .cornerRadius(10)
+        }
+    }
 
-            // Voice Language
+    // MARK: - Voice Input
+
+    private var voiceInputSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
             sectionHeader("Voice Input")
 
             VStack(spacing: 1) {
@@ -344,8 +363,8 @@ struct ProfileView: View {
             sectionHeader("Legal")
 
             VStack(spacing: 1) {
-                linkRow("Terms of Use", url: "https://tarsy.app/terms")
-                linkRow("Privacy Policy", url: "https://tarsy.app/privacy")
+                linkRow("Terms of Use", url: "https://www.tarsy.dev/terms")
+                linkRow("Privacy Policy", url: "https://www.tarsy.dev/privacy")
             }
             .cornerRadius(10)
         }

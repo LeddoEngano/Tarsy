@@ -12,6 +12,7 @@ struct ContentView: View {
     @State private var sudoReason = ""
     @State private var sudoRequestId = ""
     @State private var showPermissionOnboarding = !AgentPermissionConfig.hasBeenConfigured
+    @State private var showNameOnboarding = false
 
     var body: some View {
         ZStack {
@@ -28,6 +29,12 @@ struct ContentView: View {
                 }
             }
         }
+        .fullScreenCover(isPresented: $showNameOnboarding) {
+            NameOnboardingView {
+                showNameOnboarding = false
+            }
+            .environmentObject(profileService)
+        }
         .fullScreenCover(isPresented: $showPermissionOnboarding) {
             PermissionOnboardingView {
                 showPermissionOnboarding = false
@@ -39,9 +46,7 @@ struct ContentView: View {
                 Task {
                     await AppDelegate.savePushTokenIfNeeded()
                     await profileService.loadProfile()
-                    if let profile = profileService.profile, profile.onboarded {
-                        showPermissionOnboarding = false
-                    }
+                    checkOnboardingState()
                     if !connectionManager.isConnected {
                         await autoConnect()
                     }
@@ -54,9 +59,7 @@ struct ContentView: View {
                     if profileService.profile == nil {
                         await profileService.loadProfile()
                     }
-                    if let profile = profileService.profile, profile.onboarded {
-                        showPermissionOnboarding = false
-                    }
+                    checkOnboardingState()
                     if !connectionManager.isConnected {
                         await autoConnect()
                     }
@@ -90,6 +93,17 @@ struct ContentView: View {
             }
         } message: {
             Text(sudoReason)
+        }
+    }
+
+    private func checkOnboardingState() {
+        if let profile = profileService.profile {
+            if profile.onboarded {
+                showPermissionOnboarding = false
+            }
+            if profile.displayName == nil || profile.displayName?.isEmpty == true {
+                showNameOnboarding = true
+            }
         }
     }
 
