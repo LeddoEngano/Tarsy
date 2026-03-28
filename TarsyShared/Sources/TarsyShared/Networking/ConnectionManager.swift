@@ -45,6 +45,9 @@ public class ConnectionManager: ObservableObject {
     private var pinnedFingerprint: String?
     private static let fingerprintKeychainService = "com.tarsy.ios.tls-pins"
 
+    /// E2E encryption for sensitive payloads (sudo password, API keys)
+    public let e2e = E2ECrypto()
+
     public init() {}
 
     /// Add a named listener for packets. Multiple listeners can coexist.
@@ -108,6 +111,7 @@ public class ConnectionManager: ObservableObject {
         isConnected = false
         isReconnecting = false
         connectionMode = .disconnected
+        e2e.reset()
     }
 
     public func send(_ packet: WSPacket) {
@@ -118,6 +122,19 @@ public class ConnectionManager: ObservableObject {
         print("[WS] Sending: \(packet.action.rawValue)")
 
         if connectionMode == .relay {
+            // Encrypt text packets for relay transit (E2E — relay can't read)
+            if e2e.isReady, packet.action != .auth, packet.action != .e2eEncrypted,
+               let encrypted = e2e.encryptBinary(data) {
+                let envelope = WSPacket(
+                    action: .e2eEncrypted,
+                    payload: ["data": encrypted.base64EncodedString()],
+                    id: packet.id
+                )
+                if let envelopeData = try? envelope.encode() {
+                    sendViaRelay(envelopeData)
+                    return
+                }
+            }
             sendViaRelay(data)
         } else {
             sendViaLAN(data)
@@ -156,7 +173,7 @@ public class ConnectionManager: ObservableObject {
                     print("[WS] LAN connected to \(host):\(port)")
                     self?.connectionMode = .lan
                     if let token = self?.authToken {
-                        self?.send(WSPacket(action: .auth, payload: ["token": token]))
+                        self?.send(WSPacket(action: .auth, payload: ["token": token, "e2ePublicKey": self?.e2e.publicKeyBase64 ?? ""]))
                     }
                     self?.receiveLANLoop()
                     self?.startPing()
@@ -219,7 +236,7 @@ public class ConnectionManager: ObservableObject {
                     self?.errorMessage = nil
                     self?.connectionMode = .lan
                     if let token = self?.authToken {
-                        self?.send(WSPacket(action: .auth, payload: ["token": token]))
+                        self?.send(WSPacket(action: .auth, payload: ["token": token, "e2ePublicKey": self?.e2e.publicKeyBase64 ?? ""]))
                     }
                     self?.receiveLANLoop()
                     self?.startPing()
@@ -254,16 +271,35 @@ public class ConnectionManager: ObservableObject {
                 }
 
                 if let data = content {
+                    // Enforce message size limit on LAN (relay has 4MB WebSocket limit)
+                    guard data.count <= 4 * 1024 * 1024 else {
+                        print("[WS] LAN message too large: \(data.count) bytes, dropping")
+                        self?.receiveLANLoop()
+                        return
+                    }
+
                     // Check for binary stream data (H.264 or screenshot)
                     let prefix = data.prefix(4)
                     let prefixStr = prefix.count == 4 ? String(data: prefix, encoding: .utf8) : nil
 
                     if prefixStr == "H264" {
-                        self?.onStreamFrameReceived?(data)
+                        // Try E2E decryption, fall back to unencrypted (LAN with TLS)
+                        let payload = Data(data.dropFirst(4))
+                        if self?.e2e.isReady == true, let decrypted = self?.e2e.decryptBinary(payload) {
+                            var frameData = Data("H264".utf8)
+                            frameData.append(decrypted)
+                            self?.onStreamFrameReceived?(frameData)
+                        } else {
+                            self?.onStreamFrameReceived?(data)
+                        }
                     } else if prefixStr == "SCRN" {
-                        self?.onScreenshotReceived?(Data(data.dropFirst(4)))
+                        let payload = Data(data.dropFirst(4))
+                        if self?.e2e.isReady == true, let decrypted = self?.e2e.decryptBinary(payload) {
+                            self?.onScreenshotReceived?(decrypted)
+                        } else {
+                            self?.onScreenshotReceived?(payload)
+                        }
                     } else if let packet = try? WSPacket.decode(from: data) {
-                        print("[WS] LAN received packet: \(packet.action.rawValue)")
                         self?.handlePacket(packet)
                     } else {
                         let raw = String(data: data, encoding: .utf8) ?? "<binary \(data.count)b>"
@@ -350,8 +386,24 @@ public class ConnectionManager: ObservableObject {
                         let prefix = data.prefix(4)
                         let prefixStr = prefix.count == 4 ? String(data: prefix, encoding: .utf8) : nil
 
-                        if prefixStr == "SCRN" {
-                            self?.onScreenshotReceived?(Data(data.dropFirst(4)))
+                        if prefixStr == "H264" {
+                            // Decrypt E2E-encrypted video frame (binary AES-GCM)
+                            let payload = Data(data.dropFirst(4))
+                            if let decrypted = self?.e2e.decryptBinary(payload) {
+                                var frameData = Data("H264".utf8)
+                                frameData.append(decrypted)
+                                self?.onStreamFrameReceived?(frameData)
+                            } else {
+                                // Fallback: try as unencrypted
+                                self?.onStreamFrameReceived?(data)
+                            }
+                        } else if prefixStr == "SCRN" {
+                            let payload = Data(data.dropFirst(4))
+                            if let decrypted = self?.e2e.decryptBinary(payload) {
+                                self?.onScreenshotReceived?(decrypted)
+                            } else {
+                                self?.onScreenshotReceived?(payload)
+                            }
                         } else {
                             self?.onStreamFrameReceived?(data)
                         }
@@ -380,9 +432,12 @@ public class ConnectionManager: ObservableObject {
             // Save TLS fingerprint from server for TOFU pinning
             if let fp = packet.payload?["fingerprint"], let h = host {
                 savePinnedFingerprint(fp, forHost: h)
-                print("[WS] Authenticated successfully (TLS fingerprint pinned)")
+            }
+            // Complete E2E key exchange
+            if let remoteKey = packet.payload?["e2ePublicKey"], e2e.completeKeyExchange(remotePublicKeyBase64: remoteKey) {
+                print("[WS] Authenticated successfully (TLS pinned, E2E ready)")
             } else {
-                print("[WS] Authenticated successfully")
+                print("[WS] Authenticated successfully (no E2E)")
             }
         case .authFail:
             isConnected = false
@@ -408,6 +463,16 @@ public class ConnectionManager: ObservableObject {
         case .sudoRequest:
             onSudoRequest?(packet)
             notifyListeners(packet)
+        case .e2eEncrypted:
+            // Unwrap E2E-encrypted text packet envelope
+            if let dataB64 = packet.payload?["data"],
+               let ciphertext = Data(base64Encoded: dataB64),
+               let decryptedData = e2e.decryptBinary(ciphertext),
+               let innerPacket = try? WSPacket.decode(from: decryptedData) {
+                handlePacket(innerPacket)
+            } else {
+                print("[WS] Failed to decrypt E2E text packet")
+            }
         case .error:
             let msg = packet.payload?["message"] ?? ""
             if !msg.contains("Unknown action") {
@@ -505,11 +570,10 @@ public class ConnectionManager: ObservableObject {
                 if fingerprint == pinned {
                     completion(true)
                 } else {
-                    // Fingerprint changed — Mac may have regenerated cert.
-                    // Accept the new cert (TOFU reset) and re-pin via authSuccess.
-                    // The auth token validation on the server side prevents MITM.
-                    print("[WS] TLS fingerprint changed — accepting new cert (will re-pin after auth)")
-                    completion(true)
+                    // Fingerprint changed — reject connection to prevent potential MITM.
+                    // Smart connect will automatically fall back to relay.
+                    print("[WS] TLS fingerprint changed — rejecting LAN connection, will fall back to relay")
+                    completion(false)
                 }
             } else {
                 // First connect (TOFU) — accept and pin later via authSuccess payload
