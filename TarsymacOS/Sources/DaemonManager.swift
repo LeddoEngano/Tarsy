@@ -33,16 +33,55 @@ class DaemonManager: ObservableObject {
     private var systemSleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var lastActiveClientId: String = "relay"
     private var detectedAgents: [AIEngineType] = []
+    private let e2e = E2ECrypto()
     private let agentTaskService = AgentTaskService()
     private var sessionTaskMap: [String: UUID] = [:] // sessionId -> agentTask.id
     let profileService = ProfileService()
+    private var machineSecret: String?
+
+    // MARK: - Machine Secret Keychain
+
+    private static let machineSecretService = "com.tarsy.macos.machine-secret"
+
+    private func loadMachineSecret() -> String? {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.machineSecretService,
+            kSecAttrAccount as String: "machine-secret",
+            kSecReturnData as String: true
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private func saveMachineSecret(_ secret: String) {
+        guard let data = secret.data(using: .utf8) else { return }
+        // Delete existing
+        let deleteQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.machineSecretService,
+            kSecAttrAccount as String: "machine-secret"
+        ]
+        SecItemDelete(deleteQuery as CFDictionary)
+        // Add new
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.machineSecretService,
+            kSecAttrAccount as String: "machine-secret",
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+        ]
+        SecItemAdd(addQuery as CFDictionary, nil)
+    }
 
     func start() async {
         // 0. Init orchestrator
         orchestrator = WorkspaceOrchestrator(terminalManager: terminalManager)
 
         // Wire up sudo password manager to send requests to iOS
-        SudoPasswordManager.shared.sendPacket = { [weak self] packet in
+        await SudoPasswordManager.shared.setSendPacket { [weak self] packet in
             guard let self else { return }
             await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
         }
@@ -230,6 +269,17 @@ class DaemonManager: ObservableObject {
                 Task { @MainActor in
                     self?.connectedClients = max(0, (self?.connectedClients ?? 1) - 1)
                 }
+            },
+            onAuthSuccess: { [weak self] authPacket in
+                // E2E key exchange: extract client's public key and return ours
+                var extra: [String: String] = [:]
+                if let clientKey = authPacket.payload?["e2ePublicKey"], !clientKey.isEmpty {
+                    if self?.e2e.completeKeyExchange(remotePublicKeyBase64: clientKey) == true {
+                        extra["e2ePublicKey"] = self?.e2e.publicKeyBase64 ?? ""
+                        print("[Daemon] E2E key exchange completed")
+                    }
+                }
+                return extra
             }
         )
 
@@ -278,15 +328,31 @@ class DaemonManager: ObservableObject {
             }
         )
 
-        await relayClient.connect(token: session.accessToken)
+        await relayClient.connect(token: session.accessToken, machineSecret: machineSecret)
         log("Connected to relay for remote access")
     }
 
     // Forward response to relay when clientId is "relay"
     func sendToClientOrRelay(_ packet: WSPacket, to clientId: String) async {
         if clientId == "relay" {
+            // Encrypt text packets for relay transit (E2E — relay can't read)
+            if e2e.isReady {
+                do {
+                    let jsonData = try packet.encode()
+                    if let encrypted = e2e.encryptBinary(jsonData) {
+                        let envelope = WSPacket(
+                            action: .e2eEncrypted,
+                            payload: ["data": encrypted.base64EncodedString()],
+                            id: packet.id
+                        )
+                        await relayClient.send(packet: envelope)
+                        return
+                    }
+                } catch {}
+            }
             await relayClient.send(packet: packet)
         } else {
+            // LAN: TLS protects the channel, no E2E needed for text
             await wsServer?.send(packet, to: clientId)
         }
     }
@@ -296,6 +362,17 @@ class DaemonManager: ObservableObject {
     private func handlePacket(clientId: String, packet: WSPacket) async {
         lastActiveClientId = clientId
         switch packet.action {
+        // E2E encrypted envelope — unwrap and re-dispatch
+        case .e2eEncrypted:
+            guard let dataB64 = packet.payload?["data"],
+                  let ciphertext = Data(base64Encoded: dataB64),
+                  let decryptedData = e2e.decryptBinary(ciphertext),
+                  let innerPacket = try? WSPacket.decode(from: decryptedData) else {
+                log("e2eEncrypted: failed to decrypt packet")
+                return
+            }
+            await handlePacket(clientId: clientId, packet: innerPacket)
+            return
         case .workspaceList:
             await handleWorkspaceList(clientId: clientId, packet: packet)
         case .workspaceScanRepos:
@@ -401,7 +478,23 @@ class DaemonManager: ObservableObject {
         case .sudoRequest:
             await handleSudoRequest(clientId: clientId, packet: packet)
         case .sudoResponse:
-            SudoPasswordManager.shared.handlePasswordResponse(packet: packet)
+            // Only accept E2E-encrypted passwords — never plaintext
+            guard let encrypted = packet.payload?["encryptedPassword"], !encrypted.isEmpty else {
+                // Empty payload = user cancelled, or unencrypted fallback (rejected)
+                if packet.payload?.isEmpty != false {
+                    // Cancellation — forward as empty response
+                    await SudoPasswordManager.shared.handlePasswordResponse(packet: packet)
+                } else {
+                    print("[Security] Rejected sudo response: password not E2E encrypted")
+                }
+                break
+            }
+            guard let plaintext = e2e.decrypt(encrypted) else {
+                print("[Security] Rejected sudo response: E2E decryption failed")
+                break
+            }
+            let decryptedPacket = WSPacket(action: .sudoResponse, payload: ["password": plaintext], id: packet.id)
+            await SudoPasswordManager.shared.handlePasswordResponse(packet: decryptedPacket)
         // Repo Analysis
         case .repoAnalyze:
             await handleRepoAnalyze(clientId: clientId, packet: packet)
@@ -419,6 +512,15 @@ class DaemonManager: ObservableObject {
                 ], id: packet.id),
                 to: clientId
             )
+        // Security
+        case .securityRotateSecret:
+            await rotateMachineSecret()
+            await sendToClientOrRelay(
+                WSPacket(action: .securityRotateResult, payload: ["status": "ok"], id: packet.id),
+                to: clientId
+            )
+        case .securityRotateResult, .securityFingerprintUpdate:
+            break // Handled on iOS side
         default:
             await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Unknown action: \(packet.action.rawValue)"]),
@@ -875,9 +977,23 @@ class DaemonManager: ObservableObject {
             }
             needsSudo = (rewrittenCmd != command)
 
-            // Source shell config + common version managers to ensure PATH has npm/node/pnpm/etc.
+            // Validate the command starts with an allowed dev server runner
+            let allowedRunners: Set<String> = ["npm", "pnpm", "yarn", "bun", "npx", "node", "deno", "python", "python3", "ruby", "cargo", "go", "make"]
             let cmdName = command.components(separatedBy: " ").first ?? command
-            let fullCommand = "echo \"[DEBUG] HOME=$HOME\"; echo \"[DEBUG] PATH=$PATH\"; ls -la $HOME/.nvm/nvm.sh 2>&1; export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\" && echo \"[DEBUG] nvm loaded\" || echo \"[DEBUG] nvm.sh not found or failed\"; echo \"[DEBUG] PATH after nvm=$PATH\"; which \(cmdName) 2>&1; \(rewrittenCmd)"
+            let baseCmdName = (cmdName as NSString).lastPathComponent  // Handle full paths like /usr/bin/npm
+            guard allowedRunners.contains(baseCmdName) else {
+                log("devServerStart: blocked disallowed command '\(baseCmdName)'")
+                await sendToClientOrRelay(
+                    WSPacket(action: .devServerStart, payload: ["status": "error", "error": "Command not allowed: \(baseCmdName)"], id: packet.id),
+                    to: clientId
+                )
+                return
+            }
+
+            // Source shell config + common version managers to ensure PATH has npm/node/pnpm/etc.
+            // Shell-escape cmdName with single quotes to prevent injection
+            let escapedCmdName = "'" + baseCmdName.replacingOccurrences(of: "'", with: "'\\''") + "'"
+            let fullCommand = "export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\"; which \(escapedCmdName) 2>&1; \(rewrittenCmd)"
 
             await terminalManager.sendInput(fullCommand, to: sessionId)
             log("devServerStart: running '\(command)' in \(expandedPath)\(needsSudo ? " (with sudo)" : "")")
@@ -1189,7 +1305,12 @@ class DaemonManager: ObservableObject {
     // MARK: - Dev Server Helpers
 
     private func openBrowserToUrl(_ urlString: String) async {
-        guard let url = URL(string: urlString) else { return }
+        guard let url = URL(string: urlString),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            log("openBrowserToUrl: blocked non-http URL '\(urlString)'")
+            return
+        }
         log("openBrowserToUrl: opening \(urlString)")
         NSWorkspace.shared.open(url)
     }
@@ -1330,16 +1451,22 @@ class DaemonManager: ObservableObject {
                         let sizeKB = jpegData.count / 1024
                         log("screenshot: captured \(sizeKB)KB JPEG from browser")
 
+                        // Encrypt screenshot if E2E is ready
+                        let screenshotPayload: Data
+                        if e2e.isReady, let encrypted = e2e.encryptBinary(jpegData) {
+                            screenshotPayload = encrypted
+                        } else {
+                            screenshotPayload = jpegData
+                        }
+
                         if isRelay {
                             var binaryData = Data("SCRN".utf8)
-                            binaryData.append(jpegData)
+                            binaryData.append(screenshotPayload)
                             await relayClient.sendBinary(binaryData)
                         } else {
-                            let base64 = jpegData.base64EncodedString()
-                            await sendToClientOrRelay(
-                                WSPacket(action: .screenshotResult, payload: ["data": base64, "size": "\(sizeKB)"], id: packet.id),
-                                to: clientId
-                            )
+                            var binaryData = Data("SCRN".utf8)
+                            binaryData.append(screenshotPayload)
+                            wsServer?.broadcastBinary(binaryData)
                         }
                         return
                     }
@@ -1574,10 +1701,20 @@ class DaemonManager: ObservableObject {
     private func setupEncoderFrameRelay(encoder: H264Encoder, isRelay: Bool, clientId: String) {
         let relay = self.relayClient
         let wsServer = self.wsServer
+        let e2eRef = self.e2e
         let sendInFlight = OSAllocatedUnfairLock(initialState: false)
         encoder.onEncodedFrame = { [weak encoder] encodedData in
+            // Encrypt frame data if E2E is ready (binary AES-GCM, no base64)
+            let framePayload: Data
+            if e2eRef.isReady, let encrypted = e2eRef.encryptBinary(encodedData) {
+                framePayload = encrypted
+            } else {
+                // Fallback to unencrypted only if E2E not established (e.g., LAN with TLS)
+                framePayload = encodedData
+            }
+
             var prefixedData = Data("H264".utf8)
-            prefixedData.append(encodedData)
+            prefixedData.append(framePayload)
 
             if isRelay {
                 let alreadyInFlight = sendInFlight.withLock { val -> Bool in
@@ -1734,9 +1871,79 @@ class DaemonManager: ObservableObject {
                 log("registerMachine: created machine \(result.id)")
             }
             lastError = nil
+
+            // Ensure machine has a relay secret (for role verification)
+            await ensureMachineSecret(userId: session.user.id, machineId: machineId!)
         } catch {
             log("registerMachine: FAILED — \(error)")
             lastError = "Register failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func ensureMachineSecret(userId: UUID, machineId: UUID) async {
+        // Try loading from Keychain first
+        if let existing = loadMachineSecret() {
+            self.machineSecret = existing
+            log("ensureMachineSecret: loaded from Keychain")
+
+            // Ensure it exists in Supabase too (idempotent upsert)
+            do {
+                try await supabase
+                    .from("machine_tokens")
+                    .upsert([
+                        "user_id": userId.uuidString,
+                        "machine_id": machineId.uuidString,
+                        "machine_secret": existing
+                    ], onConflict: "machine_id")
+                    .execute()
+            } catch {
+                log("ensureMachineSecret: Supabase sync failed — \(error)")
+            }
+            return
+        }
+
+        // Generate new secret
+        let secret = UUID().uuidString
+        saveMachineSecret(secret)
+        self.machineSecret = secret
+        log("ensureMachineSecret: generated new secret")
+
+        do {
+            try await supabase
+                .from("machine_tokens")
+                .insert([
+                    "user_id": userId.uuidString,
+                    "machine_id": machineId.uuidString,
+                    "machine_secret": secret
+                ])
+                .execute()
+            log("ensureMachineSecret: saved to Supabase")
+        } catch {
+            log("ensureMachineSecret: Supabase insert failed — \(error)")
+        }
+    }
+
+    func rotateMachineSecret() async {
+        guard let userId = ownerUserId, let mId = machineId else { return }
+        let newSecret = UUID().uuidString
+        saveMachineSecret(newSecret)
+        self.machineSecret = newSecret
+
+        do {
+            try await supabase
+                .from("machine_tokens")
+                .update(["machine_secret": newSecret, "rotated_at": ISO8601DateFormatter().string(from: Date())])
+                .eq("machine_id", value: mId.uuidString)
+                .eq("user_id", value: userId.uuidString)
+                .execute()
+            log("rotateMachineSecret: rotated successfully")
+
+            // Reconnect relay with new secret
+            if let token = try? await supabase.auth.session.accessToken {
+                await relayClient.connect(token: token, machineSecret: newSecret)
+            }
+        } catch {
+            log("rotateMachineSecret: failed — \(error)")
         }
     }
 
@@ -2140,6 +2347,18 @@ class DaemonManager: ObservableObject {
             let config = try ProjectWizardConfig.decode(from: configJson)
             let expandedPath = (config.suggestedPath as NSString).expandingTildeInPath
 
+            // Validate path is within the user's home directory
+            let homePath = NSHomeDirectory()
+            let resolvedPath = URL(fileURLWithPath: expandedPath).resolvingSymlinksInPath().path
+            guard resolvedPath.hasPrefix(homePath + "/") else {
+                log("wizardExecute: blocked path outside home dir: \(expandedPath)")
+                await sendToClientOrRelay(
+                    WSPacket(action: .wizardResult, payload: ["success": "false", "error": "Project path must be within your home directory"], id: packet.id),
+                    to: clientId
+                )
+                return
+            }
+
             log("wizardExecute: creating project '\(config.projectName)' at \(expandedPath)")
 
             // 1. Create directory
@@ -2375,10 +2594,24 @@ class DaemonManager: ObservableObject {
 
     // MARK: - Git Safety Net
 
-    private func handleGitCheckpoint(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"] else { return }
-        let message = packet.payload?["message"] ?? "checkpoint"
+    /// Extracts and validates a path from a git packet payload, ensuring it's in a registered workspace.
+    private func validatedGitPath(from packet: WSPacket, clientId: String, action: WSAction) async -> String? {
+        guard let path = packet.payload?["path"] else { return nil }
         let expandedPath = (path as NSString).expandingTildeInPath
+        guard isPathInRegisteredWorkspace(expandedPath) else {
+            log("git: path not in workspace — rejected: \(expandedPath)")
+            await sendToClientOrRelay(
+                WSPacket(action: action, payload: ["success": "false", "error": "Path not in workspace"], id: packet.id),
+                to: clientId
+            )
+            return nil
+        }
+        return expandedPath
+    }
+
+    private func handleGitCheckpoint(clientId: String, packet: WSPacket) async {
+        guard let expandedPath = await validatedGitPath(from: packet, clientId: clientId, action: .gitCheckpointResult) else { return }
+        let message = packet.payload?["message"] ?? "checkpoint"
 
         let result = await runGitCommand(["add", "-A"], at: expandedPath)
         guard result.success else {
@@ -2401,8 +2634,7 @@ class DaemonManager: ObservableObject {
     }
 
     private func handleGitDiff(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"] else { return }
-        let expandedPath = (path as NSString).expandingTildeInPath
+        guard let expandedPath = await validatedGitPath(from: packet, clientId: clientId, action: .gitDiffResult) else { return }
 
         // Get list of changed files with stats
         let statusResult = await runGitCommand(["status", "--porcelain"], at: expandedPath)
@@ -2421,8 +2653,7 @@ class DaemonManager: ObservableObject {
     }
 
     private func handleGitRollback(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"] else { return }
-        let expandedPath = (path as NSString).expandingTildeInPath
+        guard let expandedPath = await validatedGitPath(from: packet, clientId: clientId, action: .gitRollbackResult) else { return }
         let target = packet.payload?["target"] ?? "HEAD~1"
 
         // Validate target is a commit hash or HEAD~N pattern
@@ -2440,8 +2671,7 @@ class DaemonManager: ObservableObject {
     }
 
     private func handleGitHistory(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"] else { return }
-        let expandedPath = (path as NSString).expandingTildeInPath
+        guard let expandedPath = await validatedGitPath(from: packet, clientId: clientId, action: .gitHistoryResult) else { return }
         let limit = min(Int(packet.payload?["limit"] ?? "20") ?? 20, 500)
 
         let result = await runGitCommand([
@@ -2503,9 +2733,8 @@ class DaemonManager: ObservableObject {
     }
 
     private func handleGitFileDiff(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"],
-              let file = packet.payload?["file"] else { return }
-        let expandedPath = (path as NSString).expandingTildeInPath
+        guard let file = packet.payload?["file"] else { return }
+        guard let expandedPath = await validatedGitPath(from: packet, clientId: clientId, action: .gitFileDiffResult) else { return }
 
         // Try unstaged diff first
         let result = await runGitCommand(["diff", "-U3", "--", file], at: expandedPath)
@@ -2554,8 +2783,7 @@ class DaemonManager: ObservableObject {
     }
 
     private func handleGitBranches(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"] else { return }
-        let expandedPath = (path as NSString).expandingTildeInPath
+        guard let expandedPath = await validatedGitPath(from: packet, clientId: clientId, action: .gitBranchesResult) else { return }
 
         let current = await runGitCommand(["rev-parse", "--abbrev-ref", "HEAD"], at: expandedPath)
         let local = await runGitCommand(["branch", "--format=%(refname:short)"], at: expandedPath)
@@ -2586,9 +2814,8 @@ class DaemonManager: ObservableObject {
     }
 
     private func handleGitCheckout(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"],
-              let branch = packet.payload?["branch"] else { return }
-        let expandedPath = (path as NSString).expandingTildeInPath
+        guard let branch = packet.payload?["branch"] else { return }
+        guard let expandedPath = await validatedGitPath(from: packet, clientId: clientId, action: .gitCheckoutResult) else { return }
 
         guard !branch.hasPrefix("-") else {
             await sendToClientOrRelay(
@@ -2606,8 +2833,7 @@ class DaemonManager: ObservableObject {
     }
 
     private func handleGitPull(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"] else { return }
-        let expandedPath = (path as NSString).expandingTildeInPath
+        guard let expandedPath = await validatedGitPath(from: packet, clientId: clientId, action: .gitPullResult) else { return }
 
         let result = await runGitCommand(["pull"], at: expandedPath)
 
@@ -2625,6 +2851,16 @@ class DaemonManager: ObservableObject {
             return
         }
         let expandedPath = (path as NSString).expandingTildeInPath
+
+        guard isPathInRegisteredWorkspace(expandedPath) else {
+            log("fileTree: path not in workspace — rejected: \(expandedPath)")
+            await sendToClientOrRelay(
+                WSPacket(action: .fileTreeResult, payload: ["error": "Path not in workspace", "tree": "[]"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
         log("fileTree: scanning \(expandedPath)")
 
         // Scan using FileManager (no external process, no sandbox issues)
@@ -2714,6 +2950,15 @@ class DaemonManager: ObservableObject {
               let filePath = packet.payload?["file"] else { return }
         let expandedBase = (basePath as NSString).expandingTildeInPath
 
+        // Restrict file reads to registered workspaces only
+        guard isPathInRegisteredWorkspace(expandedBase) else {
+            await sendToClientOrRelay(
+                WSPacket(action: .fileReadResult, payload: ["success": "false", "error": "Path not in a registered workspace"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
         guard let fullPath = sanitizedPath(base: expandedBase, relative: filePath) else {
             await sendToClientOrRelay(
                 WSPacket(action: .fileReadResult, payload: ["success": "false", "error": "Invalid path"], id: packet.id),
@@ -2750,6 +2995,22 @@ class DaemonManager: ObservableObject {
                 to: clientId
             )
         }
+    }
+
+    /// Validates that a path is within a registered workspace directory.
+    /// Prevents access to arbitrary filesystem locations (e.g., ~/.ssh, /etc).
+    private func isPathInRegisteredWorkspace(_ path: String) -> Bool {
+        let expandedPath = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .resolvingSymlinksInPath().path
+        for workspace in activeWorkspaces {
+            guard let localPath = workspace.localPath else { continue }
+            let workspacePath = URL(fileURLWithPath: (localPath as NSString).expandingTildeInPath)
+                .resolvingSymlinksInPath().path
+            if expandedPath == workspacePath || expandedPath.hasPrefix(workspacePath + "/") {
+                return true
+            }
+        }
+        return false
     }
 
     /// Validates that a resolved file path stays within the expected base directory.
@@ -3076,12 +3337,14 @@ class DaemonManager: ObservableObject {
 
         var status = "unknown"
 
-        if type == "http", let url = packet.payload?["command"] {
-            // HTTP MCP — try to reach it
-            if let url = URL(string: url) {
+        if type == "http", let urlStr = packet.payload?["command"] {
+            // HTTP MCP — try to reach it (loopback only to prevent SSRF)
+            let allowedHosts: Set<String> = ["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"]
+            if let url = URL(string: urlStr), let host = url.host, allowedHosts.contains(host) {
                 let request = URLRequest(url: url, timeoutInterval: 5)
+                let session = URLSession(configuration: .default, delegate: LoopbackRedirectGuard(), delegateQueue: nil)
                 do {
-                    let (_, response) = try await URLSession.shared.data(for: request)
+                    let (_, response) = try await session.data(for: request)
                     if let http = response as? HTTPURLResponse, (200...499).contains(http.statusCode) {
                         status = "healthy"
                     } else {
@@ -3090,6 +3353,9 @@ class DaemonManager: ObservableObject {
                 } catch {
                     status = "unreachable"
                 }
+            } else {
+                log("mcpHealthCheck: blocked non-loopback URL '\(urlStr)'")
+                status = "blocked"
             }
         } else if type == "stdio" || type == "command" {
             // Stdio/command MCP — check if binary exists
