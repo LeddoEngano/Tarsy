@@ -83,19 +83,16 @@ struct PaginatedQuestionCard: View {
             Text(question.question)
                 .font(.system(size: isCompact ? 13 : 15, weight: .semibold))
                 .foregroundColor(TarsyTheme.textPrimary)
+                .lineLimit(2)
                 .padding(.horizontal, 16)
-                .padding(.top, isCompact ? 4 : 8)
-                .padding(.bottom, isCompact ? 6 : 12)
+                .padding(.top, isCompact ? 4 : 6)
+                .padding(.bottom, isCompact ? 6 : 8)
 
-            // Options (scrollable in landscape)
-            if isCompact {
-                ScrollView {
-                    optionsList(for: question)
-                }
-                .frame(maxHeight: 120)
-            } else {
+            // Options (scrollable)
+            ScrollView {
                 optionsList(for: question)
             }
+            .frame(maxHeight: isCompact ? 120 : 220)
 
             // Custom text input
             customInputField(for: question)
@@ -190,11 +187,12 @@ struct PaginatedQuestionCard: View {
                     .font(.system(size: isCompact ? 13 : 15))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .multilineTextAlignment(.leading)
+                    .lineLimit(2)
 
                 Spacer()
             }
             .padding(.horizontal, isCompact ? 12 : 16)
-            .padding(.vertical, isCompact ? 8 : 14)
+            .padding(.vertical, isCompact ? 8 : 10)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -236,11 +234,12 @@ struct PaginatedQuestionCard: View {
                     .font(.system(size: isCompact ? 13 : 15))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .multilineTextAlignment(.leading)
+                    .lineLimit(2)
 
                 Spacer()
             }
             .padding(.horizontal, isCompact ? 12 : 16)
-            .padding(.vertical, isCompact ? 6 : 10)
+            .padding(.vertical, isCompact ? 6 : 8)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

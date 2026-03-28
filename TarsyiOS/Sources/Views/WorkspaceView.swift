@@ -45,6 +45,7 @@ struct WorkspaceView: View {
     @State private var isAgentThinking = false
     @State private var agentActivity: String? = nil // Current tool use activity
     @StateObject private var chatService = ChatService()
+    private let ultraContextClient = UltraContextClient()
     @State private var showGitSheet = false
     @State private var showFileExplorer = false
     @State private var showMCPStore = false
@@ -56,7 +57,9 @@ struct WorkspaceView: View {
     @State private var engineModel = ""
     @State private var contextPercent: Double = 0
     @State private var currentBranch = ""
-    @State private var detectedAgents: [AIEngineType] = []
+    private var detectedAgents: [AIEngineType] {
+        connectionManager.detectedAgents.isEmpty ? [.claude] : connectionManager.detectedAgents
+    }
     @State private var viewMode: ViewMode = .browser
     @State private var showSessionPicker = false
     @State private var keyboardHeight: CGFloat = 0
@@ -223,12 +226,9 @@ struct WorkspaceView: View {
         .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .task {
-            await chatService.loadMessages(workspaceId: workspace.id, tabId: currentTab.id)
+            chatService.switchTab(tabId: currentTab.id)
+            await chatService.loadFromUltraContext(workspacePath: workspace.localPath, client: ultraContextClient)
             setupOutputHandler()
-            // If agentsDetected packet was missed (sent before listener), fallback to claude
-            if detectedAgents.isEmpty {
-                detectedAgents = [.claude]
-            }
             await waitForConnectionAndStartClaude()
         }
         .onDisappear {
@@ -291,9 +291,7 @@ struct WorkspaceView: View {
                             interactiveQuestions = restored.questions
                             engineModel = restored.engineModel
                             contextPercent = restored.contextPercent
-                            Task {
-                                await chatService.loadMessages(workspaceId: workspace.id, tabId: tab.id)
-                            }
+                            chatService.switchTab(tabId: tab.id)
                         },
                         onClose: tab.isFixed ? nil : {
                             closeTab(at: index)
@@ -319,14 +317,12 @@ struct WorkspaceView: View {
                     }
                 } else {
                     Menu {
-                        Menu {
+                        Section("New chat") {
                             ForEach(detectedAgents, id: \.self) { engine in
                                 Button(action: { addEngineTab(engine) }) {
                                     Label(engine.displayName, systemImage: engine.iconName)
                                 }
                             }
-                        } label: {
-                            Label("New chat", systemImage: "plus.bubble")
                         }
 
                         Button(action: { showSessionPicker = true }) {
@@ -356,24 +352,6 @@ struct WorkspaceView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    // Load older messages
-                    if chatService.hasMoreMessages {
-                        Button {
-                            Task { await chatService.loadOlderMessages() }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "arrow.up.circle")
-                                    .font(.system(size: 12))
-                                Text("load earlier messages")
-                                    .font(.system(size: 11, design: .monospaced))
-                            }
-                            .foregroundColor(TarsyTheme.textSecondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 8)
-                        }
-                        .id("load-more")
-                    }
-
                     ForEach(chatService.messages) { message in
                         MessageBubble(message: message)
                             .id(message.id)
@@ -506,8 +484,8 @@ struct WorkspaceView: View {
                 isAgentThinking = true
                 let engineType = currentTab.engineType?.rawValue ?? "claude"
                 connectionManager.send(WSPacket(
-                    action: .engineMessage,
-                    payload: ["sessionId": sessionId, "message": answerText, "engineType": engineType]
+                    action: .engineUserResponse,
+                    payload: ["sessionId": sessionId, "answer": answerText, "engineType": engineType]
                 ))
             }
         }
@@ -627,6 +605,14 @@ struct WorkspaceView: View {
                 .cornerRadius(20, corners: [.topLeft, .topRight])
                 .shadow(color: .black.opacity(0.4), radius: 16, y: -4)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+                .overlay(alignment: .bottomTrailing) {
+                    if !todoManager.isMinimized && !todoManager.items.isEmpty {
+                        VoiceTodoOverlay(todoManager: todoManager)
+                            .padding(.trailing, 16)
+                            .padding(.bottom, 130)
+                            .allowsHitTesting(true)
+                    }
+                }
             }
 
             // Floating question card (above chat)
@@ -690,40 +676,38 @@ struct WorkspaceView: View {
                 Divider().background(TarsyTheme.backgroundTertiary)
             }
 
-            // Chat area + floating question card
-            ZStack(alignment: .bottom) {
-                chatArea
+            chatArea
 
-                if let questions = interactiveQuestions {
-                    PaginatedQuestionCard(
-                        questions: questions,
-                        onSubmitAll: { answers in
-                            submitMultiQuestionAnswers(answers)
-                        },
-                        onDismiss: {
-                            withAnimation {
-                                interactiveQuestions = nil
-                            }
+            // Interactive question card
+            if let questions = interactiveQuestions {
+                PaginatedQuestionCard(
+                    questions: questions,
+                    onSubmitAll: { answers in
+                        submitMultiQuestionAnswers(answers)
+                    },
+                    onDismiss: {
+                        withAnimation {
+                            interactiveQuestions = nil
                         }
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 8)
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
-                }
-            }
-
-            // View mode switch (web/fullstack only) — fade out when input is focused
-            if workspace.stack == .web || workspace.stack == .fullstack {
-                viewModeSwitch
-                    .opacity(isInputFocused ? 0 : 1)
-                    .animation(isInputFocused ? .easeOut(duration: 0.12) : .easeIn(duration: 0.4), value: isInputFocused)
-                    .allowsHitTesting(!isInputFocused)
+                    }
+                )
+                .padding(.horizontal, 12)
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
             }
 
             // Input bar
             inputBar
-                .padding(.bottom, isInputFocused ? max(keyboardHeight - 34, 0) : 0)
+                .padding(.bottom, isInputFocused ? keyboardHeight : 0)
+        }
+        .ignoresSafeArea(edges: .bottom)
+        .overlay(alignment: .bottomTrailing) {
+            if !todoManager.isMinimized && !todoManager.items.isEmpty {
+                VoiceTodoOverlay(todoManager: todoManager)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 130)
+                    .allowsHitTesting(true)
+            }
         }
     }
 
@@ -789,8 +773,6 @@ struct WorkspaceView: View {
         )
         .background(TarsyTheme.backgroundSecondary.opacity(0.9))
         .cornerRadius(12)
-        .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
-        .padding(.horizontal, 12)
     }
 
     private var inputBar: some View {
@@ -812,16 +794,25 @@ struct WorkspaceView: View {
             // Input bar
             VStack(spacing: 0) {
                 // Text field
-                TextField("", text: $messageText, prompt: Text("send a command...").foregroundColor(TarsyTheme.textSecondary.opacity(0.35)), axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 16))
-                    .foregroundColor(TarsyTheme.textPrimary)
-                    .lineLimit(1...5)
-                    .padding(.horizontal, 16)
-                    .padding(.top, 14)
-                    .padding(.bottom, 8)
-                    .focused($isInputFocused)
-                    .onSubmit { sendMessage() }
+                ZStack(alignment: .topLeading) {
+                    if messageText.isEmpty {
+                        Text("send a command...")
+                            .font(.system(size: 16))
+                            .foregroundColor(TarsyTheme.textSecondary.opacity(0.35))
+                            .padding(.horizontal, 20)
+                            .padding(.top, 22)
+                    }
+                    TextEditor(text: $messageText)
+                        .font(.system(size: 16))
+                        .foregroundColor(TarsyTheme.textPrimary)
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 36, maxHeight: 200)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 14)
+                        .padding(.bottom, 8)
+                        .focused($isInputFocused)
+                }
 
                 // Action buttons row
                 HStack(spacing: 4) {
@@ -830,6 +821,12 @@ struct WorkspaceView: View {
                             .font(.system(size: 18, weight: .medium))
                             .foregroundColor(TarsyTheme.textSecondary)
                             .frame(width: 36, height: 36)
+                    }
+
+                    Spacer()
+
+                    if workspace.stack == .web || workspace.stack == .fullstack {
+                        viewModeSwitch
                     }
 
                     Spacer()
@@ -918,13 +915,6 @@ struct WorkspaceView: View {
                     .stroke(isRecording ? TarsyTheme.accentAmber : Color.clear, lineWidth: 1.5)
             )
             .if_iOS26GlassEffect()
-            .overlay(alignment: .bottomTrailing) {
-                if !todoManager.isMinimized && !todoManager.items.isEmpty {
-                    VoiceTodoOverlay(todoManager: todoManager)
-                        .padding(.trailing, 10)
-                        .padding(.bottom, 52)
-                }
-            }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
 
@@ -973,6 +963,11 @@ struct WorkspaceView: View {
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 6)
+
+            // Extra space for home indicator when safe area is ignored
+            if !isInputFocused {
+                Color.clear.frame(height: 20)
+            }
         }
         .background(TarsyTheme.backgroundPrimary)
         .confirmationDialog("Attach", isPresented: $showAttachmentPicker) {
@@ -1134,11 +1129,13 @@ struct WorkspaceView: View {
                     connectionManager.send(WSPacket(action: .engineMessage, payload: payload))
                 } else {
                     print("[Chat] Sending engineCreate type=\(engineType.rawValue) path=\(workspace.localPath)")
+                    let permConfig = AgentPermissionConfig.load()
                     var payload = [
                         "path": workspace.localPath,
                         "engineType": engineType.rawValue,
                         "aiContext": workspace.aiContext ?? "",
-                        "message": messageText
+                        "message": messageText,
+                        "permissionMode": permConfig.mode(for: engineType).rawValue
                     ]
                     if let images = imagesPayload { payload["images"] = images }
                     connectionManager.send(WSPacket(action: .engineCreate, payload: payload))
@@ -1198,9 +1195,19 @@ struct WorkspaceView: View {
         let tab = TerminalTab(id: uniqueId, title: title, isFixed: false, type: tabType, sessionId: nil, engineType: engineType)
         tabs.append(tab)
         selectedTabIndex = tabs.count - 1
-        Task {
-            await chatService.loadMessages(workspaceId: workspace.id, tabId: uniqueId)
-        }
+        chatService.switchTab(tabId: uniqueId)
+
+        // Connect to the agent immediately
+        let permConfig = AgentPermissionConfig.load()
+        connectionManager.send(WSPacket(
+            action: .engineCreate,
+            payload: [
+                "path": workspace.localPath,
+                "engineType": engineType.rawValue,
+                "aiContext": workspace.aiContext ?? "",
+                "permissionMode": permConfig.mode(for: engineType).rawValue
+            ]
+        ))
     }
 
     private func continueSessionInTab(_ session: UltraContextSession, engineType: AIEngineType? = nil) {
@@ -1240,9 +1247,23 @@ struct WorkspaceView: View {
                 connectionManager.send(WSPacket(action: .terminalClose, payload: ["sessionId": sessionId]))
             }
         }
+        let wasSelected = selectedTabIndex == index
         tabs.remove(at: index)
         if selectedTabIndex >= tabs.count {
             selectedTabIndex = max(0, tabs.count - 1)
+        } else if index < selectedTabIndex {
+            selectedTabIndex -= 1
+        }
+        if wasSelected, !tabs.isEmpty {
+            let newTab = tabs[selectedTabIndex]
+            let restored = tabStates[newTab.id] ?? TabState()
+            isAgentThinking = restored.isThinking
+            agentActivity = restored.activity
+            interactiveOptions = restored.options
+            interactiveQuestions = restored.questions
+            engineModel = restored.engineModel
+            contextPercent = restored.contextPercent
+            chatService.switchTab(tabId: newTab.id)
         }
     }
 
@@ -1258,7 +1279,7 @@ struct WorkspaceView: View {
                     if isActiveTabSession(packet) {
                         isAgentThinking = false
                         agentActivity = nil
-                        await chatService.saveLastAssistantMessage()
+
                     } else {
                         updateBackgroundTabState(sessionId: sid) { $0.isThinking = false; $0.activity = nil }
                     }
@@ -1282,7 +1303,7 @@ struct WorkspaceView: View {
                     if isActiveTabSession(packet) {
                         isAgentThinking = false
                         agentActivity = nil
-                        await chatService.saveLastAssistantMessage()
+
                     } else {
                         updateBackgroundTabState(sessionId: eSid) { $0.isThinking = false; $0.activity = nil }
                     }
@@ -1312,7 +1333,7 @@ struct WorkspaceView: View {
                         chatService.addAssistantChunk(workspaceId: workspace.id, tabId: "openclaw", content: output)
                     }
                 case .openclawComplete:
-                    await chatService.saveLastAssistantMessage()
+                    break
 
                 // Terminal
                 case .terminalOutput:
@@ -1345,10 +1366,7 @@ struct WorkspaceView: View {
 
                 // Agent detection
                 case .agentsDetected:
-                    if let agentsStr = packet.payload?["agents"] {
-                        let types = agentsStr.split(separator: ",").compactMap { AIEngineType(rawValue: String($0)) }
-                        detectedAgents = types
-                    }
+                    break // handled by ConnectionManager.detectedAgents
 
                 // Branch update
                 case .gitBranchesResult:

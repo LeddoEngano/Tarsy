@@ -107,10 +107,10 @@ struct PaywallView: View {
 
                 // Legal
                 HStack(spacing: 16) {
-                    Link("Terms", destination: URL(string: "https://tarsy.app/terms")!)
+                    Link("Terms", destination: URL(string: "https://www.tarsy.dev/terms")!)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
-                    Link("Privacy", destination: URL(string: "https://tarsy.app/privacy")!)
+                    Link("Privacy", destination: URL(string: "https://www.tarsy.dev/privacy")!)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
                 }
