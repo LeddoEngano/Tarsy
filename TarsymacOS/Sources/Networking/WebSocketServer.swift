@@ -31,19 +31,49 @@ actor WebSocketServer {
         self.onClientDisconnected = onDisconnect
     }
 
-    func start() throws {
+    func start() async throws {
+        // Kill any lingering process on our port before binding
+        killProcessOnPort(port)
+
         let parameters = NWParameters.tcp
         let wsOptions = NWProtocolWebSocket.Options()
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
 
-        listener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
-        listener?.newConnectionHandler = { [weak self] connection in
-            Task {
-                await self?.handleNewConnection(connection)
+        let newListener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
+
+        // Use a continuation to wait for the listener to actually start or fail
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            var resumed = false
+
+            newListener.stateUpdateHandler = { state in
+                guard !resumed else { return }
+                switch state {
+                case .ready:
+                    resumed = true
+                    print("[WSServer] Listening on port \(self.port)")
+                    continuation.resume()
+                case .failed(let error):
+                    resumed = true
+                    print("[WSServer] Failed to start on port \(self.port): \(error)")
+                    continuation.resume(throwing: error)
+                case .cancelled:
+                    resumed = true
+                    continuation.resume(throwing: NWError.posix(.ECANCELED))
+                default:
+                    break
+                }
             }
+
+            newListener.newConnectionHandler = { [weak self] connection in
+                Task {
+                    await self?.handleNewConnection(connection)
+                }
+            }
+
+            newListener.start(queue: .global(qos: .userInitiated))
         }
-        listener?.start(queue: .global(qos: .userInitiated))
-        print("[WSServer] Listening on port \(port)")
+
+        self.listener = newListener
     }
 
     func stop() {
@@ -65,6 +95,7 @@ actor WebSocketServer {
     }
 
     func broadcast(_ packet: WSPacket) {
+        print("[WSServer] Broadcasting \(packet.action.rawValue) to \(connections.count) clients: \(Array(connections.keys))")
         for clientId in connections.keys {
             send(packet, to: clientId)
         }
@@ -163,5 +194,36 @@ actor WebSocketServer {
         connections.removeValue(forKey: clientId)
         onClientDisconnected?(clientId)
         print("[WSServer] Client disconnected: \(clientId)")
+    }
+
+    // MARK: - Port Cleanup
+
+    /// Kills any process currently listening on the given port so we can bind to it.
+    private nonisolated func killProcessOnPort(_ port: UInt16) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        process.arguments = ["-ti", "tcp:\(port)"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !output.isEmpty else { return }
+            // Kill each PID found (except our own)
+            let myPid = ProcessInfo.processInfo.processIdentifier
+            for pidStr in output.components(separatedBy: "\n") {
+                if let pid = Int32(pidStr.trimmingCharacters(in: .whitespaces)), pid != myPid {
+                    print("[WSServer] Killing stale process \(pid) on port \(port)")
+                    kill(pid, SIGTERM)
+                }
+            }
+            // Give it a moment to release the port
+            Thread.sleep(forTimeInterval: 0.3)
+        } catch {
+            // Silently ignore — lsof may not find anything
+        }
     }
 }

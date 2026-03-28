@@ -72,6 +72,19 @@ class DaemonManager: ObservableObject {
         detectedAgents = AgentDetector.detectInstalledAgents()
         log("Detected agents: \(detectedAgents.map(\.rawValue))")
 
+        // Broadcast to any clients that connected before detection finished
+        if !detectedAgents.isEmpty {
+            log("Broadcasting agentsDetected to all clients: \(detectedAgents.map(\.rawValue))")
+            let agentsPacket = WSPacket(
+                action: .agentsDetected,
+                payload: ["agents": detectedAgents.map(\.rawValue).joined(separator: ",")]
+            )
+            await wsServer?.broadcast(agentsPacket)
+            await relayClient.send(packet: agentsPacket)
+        } else {
+            log("No agents detected, nothing to broadcast")
+        }
+
         // 8. UltraContext — watch Claude Code session files + sync via proxy
         Task { await SessionFileWatcher.shared.start() }
         log("UltraContext session watcher started")
@@ -199,12 +212,17 @@ class DaemonManager: ObservableObject {
                 Task { @MainActor in
                     self?.connectedClients += 1
                     // Send detected agents to the newly connected client
-                    if let agents = self?.detectedAgents, !agents.isEmpty {
+                    let agents = self?.detectedAgents ?? []
+                    print("[Daemon] onConnect \(clientId): detectedAgents=\(agents.map(\.rawValue))")
+                    if !agents.isEmpty {
                         let packet = WSPacket(
                             action: .agentsDetected,
                             payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
                         )
                         await self?.sendToClientOrRelay(packet, to: clientId)
+                        print("[Daemon] Sent agentsDetected to \(clientId)")
+                    } else {
+                        print("[Daemon] No agents detected yet, skipping send to \(clientId)")
                     }
                 }
             },
@@ -1895,6 +1913,14 @@ class DaemonManager: ObservableObject {
                             to: clientId
                         )
                         await UltraContextSync.shared.engineCompleted(sessionId: sid, summary: message)
+                    }
+                },
+                onAskUser: { [weak self] questionsJson, _ in
+                    Task {
+                        await self?.sendToClientOrRelay(
+                            WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": engineTypeRaw]),
+                            to: clientId
+                        )
                     }
                 }
             )

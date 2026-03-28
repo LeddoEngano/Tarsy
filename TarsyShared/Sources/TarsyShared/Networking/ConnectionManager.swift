@@ -14,6 +14,7 @@ public class ConnectionManager: ObservableObject {
     @Published public var latency: TimeInterval = 0
     @Published public var errorMessage: String?
     @Published public var connectionMode: ConnectionMode = .disconnected
+    @Published public var detectedAgents: [AIEngineType] = []
 
     // LAN connection (Network.framework)
     private var connection: NWConnection?
@@ -266,7 +267,11 @@ public class ConnectionManager: ObservableObject {
                     } else if prefixStr == "SCRN" {
                         self?.onScreenshotReceived?(Data(data.dropFirst(4)))
                     } else if let packet = try? WSPacket.decode(from: data) {
+                        print("[WS] LAN received packet: \(packet.action.rawValue)")
                         self?.handlePacket(packet)
+                    } else {
+                        let raw = String(data: data, encoding: .utf8) ?? "<binary \(data.count)b>"
+                        print("[WS] LAN failed to decode: \(raw.prefix(200))")
                     }
                 }
 
@@ -389,6 +394,15 @@ public class ConnectionManager: ObservableObject {
             if let pingTime = lastPingTime {
                 latency = Date().timeIntervalSince(pingTime)
             }
+        case .agentsDetected:
+            if let csv = packet.payload?["agents"] {
+                let parsed = csv.split(separator: ",").compactMap { AIEngineType(rawValue: String($0)) }
+                print("[WS] agentsDetected payload: '\(csv)' -> parsed \(parsed.map(\.rawValue))")
+                detectedAgents = parsed
+            } else {
+                print("[WS] agentsDetected packet with no 'agents' payload: \(packet.payload ?? [:])")
+            }
+            notifyListeners(packet)
         case .sudoRequest:
             onSudoRequest?(packet)
             notifyListeners(packet)
