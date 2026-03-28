@@ -549,7 +549,7 @@ struct OnboardingWindow: View {
             VStack(spacing: 8) {
                 statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "signed in as \(authManager.currentUser?.email ?? "...")")
                 statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "relay connected (remote access ready)")
-                statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "websocket server on port \(TarsyConfig.websocketPort)")
+                statusRow(icon: "lock.fill", color: "7a8b6f", text: "TLS encrypted on port \(TarsyConfig.websocketPort)")
                 statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "H.264 streaming ready")
             }
 

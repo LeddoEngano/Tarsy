@@ -59,7 +59,7 @@ WebSocket relay at `relay/`. Bridges iOS clients with macOS machines over the in
 
 Auth, database, edge functions, and realtime at `supabase/`.
 
-**Tables:** `machines`, `workspaces`, `chat_messages`, `push_tokens`, `push_notifications`, `agent_tasks`, `profiles`
+**Tables:** `machines`, `workspaces`, `push_tokens`, `push_notifications`, `agent_tasks`, `profiles`
 
 **Edge Functions:**
 - `send-push` — APNs delivery triggered by webhook on `push_notifications` INSERT. Requires: `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY`, `APNS_BUNDLE_ID`

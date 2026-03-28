@@ -968,16 +968,14 @@ struct InteractiveStreamView: View {
         // Persist voice message to chat history
         onVoiceMessage?(transcription)
 
-        // Append voice directive so the agent acts immediately
+        // Prepend voice directive so system instructions come before user input (prevents prompt injection)
         let voiceDirective = """
-
-
         [SYSTEM: This is a voice command from a mobile device in fullscreen mode. The user CANNOT type text responses — they can only interact through structured UI buttons. Therefore:
         1. EXECUTE the request immediately. Do not ask for clarification.
         2. If you MUST ask something (destructive action, genuine ambiguity), you MUST use the AskUserQuestionTool with clear options. NEVER ask questions as plain text — the user cannot reply to plain text.
-        3. Make reasonable assumptions and proceed. The user will correct you if needed.]
+        3. Make reasonable assumptions and proceed.]
         """
-        let fullMessage = transcription + voiceDirective
+        let fullMessage = voiceDirective + "\n\n<user-voice-input>\n" + transcription + "\n</user-voice-input>"
 
         if let sessionId = engineSessionId {
             connectionManager.send(WSPacket(

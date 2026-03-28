@@ -838,14 +838,12 @@ struct FullscreenWebBrowser: View {
         onVoiceMessage?(transcription)
 
         let voiceDirective = """
-
-
         [SYSTEM: This is a voice command from a mobile device in fullscreen mode. The user CANNOT type text responses — they can only interact through structured UI buttons. Therefore:
         1. EXECUTE the request immediately. Do not ask for clarification.
         2. If you MUST ask something (destructive action, genuine ambiguity), you MUST use the AskUserQuestionTool with clear options. NEVER ask questions as plain text — the user cannot reply to plain text.
-        3. Make reasonable assumptions and proceed. The user will correct you if needed.]
+        3. Make reasonable assumptions and proceed.]
         """
-        let fullMessage = transcription + voiceDirective
+        let fullMessage = voiceDirective + "\n\n<user-voice-input>\n" + transcription + "\n</user-voice-input>"
 
         if let sessionId = engineSessionId {
             connectionManager.send(WSPacket(
@@ -909,6 +907,53 @@ struct WebViewContainer: UIViewRepresentable {
     var webViewRef: WebViewRef?
     @Binding var isLoading: Bool
 
+    // Content Security Policy rule list JSON that blocks external network requests.
+    // Order matters: allow rules for localhost patterns come first, then a blanket block rule.
+    private static let cspRuleListJSON = """
+    [
+        {
+            "trigger": { "url-filter": ".*", "if-domain": ["*localhost", "*127.0.0.1", "*0.0.0.0", "*[::1]"] },
+            "action": { "type": "ignore-previous-rules" }
+        },
+        {
+            "trigger": { "url-filter": "^tarsy-http" },
+            "action": { "type": "ignore-previous-rules" }
+        },
+        {
+            "trigger": { "url-filter": "^https?://localhost" },
+            "action": { "type": "ignore-previous-rules" }
+        },
+        {
+            "trigger": { "url-filter": "^https?://127\\\\.0\\\\.0\\\\.1" },
+            "action": { "type": "ignore-previous-rules" }
+        },
+        {
+            "trigger": { "url-filter": "^https?://0\\\\.0\\\\.0\\\\.0" },
+            "action": { "type": "ignore-previous-rules" }
+        },
+        {
+            "trigger": { "url-filter": "^https?://\\\\[::1\\\\]" },
+            "action": { "type": "ignore-previous-rules" }
+        },
+        {
+            "trigger": { "url-filter": "^https?://192\\\\.168\\\\." },
+            "action": { "type": "ignore-previous-rules" }
+        },
+        {
+            "trigger": { "url-filter": "^https?://10\\\\." },
+            "action": { "type": "ignore-previous-rules" }
+        },
+        {
+            "trigger": { "url-filter": "^https?://172\\\\.(1[6-9]|2[0-9]|3[0-1])\\\\." },
+            "action": { "type": "ignore-previous-rules" }
+        },
+        {
+            "trigger": { "url-filter": ".*" },
+            "action": { "type": "block" }
+        }
+    ]
+    """
+
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
@@ -924,10 +969,33 @@ struct WebViewContainer: UIViewRepresentable {
         webView.backgroundColor = UIColor(TarsyTheme.backgroundSecondary)
         webView.scrollView.backgroundColor = UIColor(TarsyTheme.backgroundSecondary)
         webView.navigationDelegate = context.coordinator
-        webView.load(URLRequest(url: url))
         context.coordinator.webView = webView
         webViewRef?.webView = webView
+
+        // Compile and attach content security rules, then load the URL
+        Self.compileContentRules { ruleList in
+            if let ruleList = ruleList {
+                webView.configuration.userContentController.add(ruleList)
+            }
+            webView.load(URLRequest(url: url))
+        }
+
         return webView
+    }
+
+    /// Compiles the CSP content rule list using WKContentRuleListStore.
+    private static func compileContentRules(completion: @escaping (WKContentRuleList?) -> Void) {
+        WKContentRuleListStore.default().compileContentRuleList(
+            forIdentifier: "TarsyCSPBlockExternal",
+            encodedContentRuleList: cspRuleListJSON
+        ) { ruleList, error in
+            if let error = error {
+                print("[WebBrowser] CSP rule compilation error: \(error.localizedDescription)")
+            }
+            DispatchQueue.main.async {
+                completion(ruleList)
+            }
+        }
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {}

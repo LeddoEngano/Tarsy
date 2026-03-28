@@ -50,7 +50,8 @@ final class TLSCertificateManager {
         let query: [String: Any] = [
             kSecClass as String: kSecClassIdentity,
             kSecAttrLabel as String: keychainLabel,
-            kSecReturnRef as String: true
+            kSecReturnRef as String: true,
+            kSecUseDataProtectionKeychain as String: true
         ]
 
         var result: CFTypeRef?
@@ -72,10 +73,12 @@ final class TLSCertificateManager {
             kSecAttrKeySizeInBits as String: 2048,
             kSecAttrLabel as String: keychainLabel,
             kSecAttrApplicationTag as String: keychainTag,
+            kSecUseDataProtectionKeychain as String: true,
             kSecPrivateKeyAttrs as String: [
                 kSecAttrIsPermanent as String: true,
                 kSecAttrLabel as String: keychainLabel,
-                kSecAttrApplicationTag as String: keychainTag
+                kSecAttrApplicationTag as String: keychainTag,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
             ] as [String: Any]
         ]
 
@@ -101,11 +104,12 @@ final class TLSCertificateManager {
             return nil
         }
 
-        // 3. Store certificate in Keychain
+        // 3. Store certificate in Keychain (data protection keychain — no password prompt)
         let addCertQuery: [String: Any] = [
             kSecClass as String: kSecClassCertificate,
             kSecValueRef as String: certificate,
-            kSecAttrLabel as String: keychainLabel
+            kSecAttrLabel as String: keychainLabel,
+            kSecUseDataProtectionKeychain as String: true
         ]
 
         let addStatus = SecItemAdd(addCertQuery as CFDictionary, nil)
@@ -194,9 +198,9 @@ final class TLSCertificateManager {
     /// Deletes the stored identity from Keychain (for testing/reset).
     func deleteIdentity() {
         let queries: [[String: Any]] = [
-            [kSecClass as String: kSecClassIdentity, kSecAttrLabel as String: keychainLabel],
-            [kSecClass as String: kSecClassCertificate, kSecAttrLabel as String: keychainLabel],
-            [kSecClass as String: kSecClassKey, kSecAttrLabel as String: keychainLabel]
+            [kSecClass as String: kSecClassIdentity, kSecAttrLabel as String: keychainLabel, kSecUseDataProtectionKeychain as String: true],
+            [kSecClass as String: kSecClassCertificate, kSecAttrLabel as String: keychainLabel, kSecUseDataProtectionKeychain as String: true],
+            [kSecClass as String: kSecClassKey, kSecAttrLabel as String: keychainLabel, kSecUseDataProtectionKeychain as String: true]
         ]
         for query in queries {
             SecItemDelete(query as CFDictionary)

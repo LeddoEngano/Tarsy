@@ -140,15 +140,55 @@ class SubscriptionManager: ObservableObject {
         }
     }
 
+    /// Validates the latest transaction server-side via the verify-receipt edge function.
+    /// The server determines subscription status — the client does not tell the server its own status.
     private func syncWithProfile() async {
-        let status: String
-        if isPro {
-            status = "active"
-        } else if expirationDate != nil {
-            status = "cancelled"
-        } else {
-            status = "inactive"
+        // Find the latest verified transaction to send to the server
+        for await result in Transaction.currentEntitlements {
+            guard let transaction = try? result.payloadValue,
+                  transaction.productID == Self.proProductId else { continue }
+
+            // Get the JWS representation for server-side validation
+            let jwsRepresentation = result.jwsRepresentation
+            await verifyOnServer(jwsRepresentation: jwsRepresentation)
+            return
         }
-        await profileService?.updateSubscription(isPro: isPro, status: status, endDate: expirationDate)
+
+        // No active entitlement — tell server with empty transaction
+        await verifyOnServer(jwsRepresentation: "")
     }
+
+    /// Send signed transaction to server for validation
+    private func verifyOnServer(jwsRepresentation: String) async {
+        do {
+            let session = try await supabase.auth.session
+            let url = URL(string: "\(TarsyConfig.supabaseURL.absoluteString)/functions/v1/verify-receipt")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: [
+                "signedTransactionInfo": jwsRepresentation
+            ])
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let httpResponse = response as? HTTPURLResponse
+
+            if httpResponse?.statusCode == 200,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                let serverIsPro = json["isPro"] as? Bool ?? false
+                let serverEndDate = (json["expirationDate"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) }
+
+                isPro = serverIsPro
+                expirationDate = serverEndDate
+                profileService?.profile?.isPro = serverIsPro
+                print("[Subscription] Server verified: isPro=\(serverIsPro)")
+            } else {
+                print("[Subscription] Server verification failed: HTTP \(httpResponse?.statusCode ?? 0)")
+            }
+        } catch {
+            print("[Subscription] Server verification error: \(error)")
+        }
+    }
+
 }
