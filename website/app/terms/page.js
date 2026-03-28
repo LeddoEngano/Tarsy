@@ -75,7 +75,8 @@ export default function Terms() {
         Sign in with Apple, GitHub OAuth, or email and password. You agree to:
       </p>
       <ul>
-        <li>Provide accurate, current, and complete registration information.</li>
+        <li>Provide accurate, current, and complete registration information,
+          including the display name you choose during onboarding.</li>
         <li>
           Maintain the confidentiality and security of your account credentials.
         </li>

@@ -31,11 +31,11 @@ struct SettingsView: View {
 
                     // Legal links
                     HStack(spacing: 16) {
-                        if let termsURL = URL(string: "https://tarsy.app/terms") {
+                        if let termsURL = URL(string: "https://www.tarsy.dev/terms") {
                             Link("Terms of Use", destination: termsURL)
                                 .font(.system(size: 11, design: .monospaced))
                         }
-                        if let privacyURL = URL(string: "https://tarsy.app/privacy") {
+                        if let privacyURL = URL(string: "https://www.tarsy.dev/privacy") {
                             Link("Privacy Policy", destination: privacyURL)
                                 .font(.system(size: 11, design: .monospaced))
                         }

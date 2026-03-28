@@ -39,7 +39,9 @@ export default function Privacy() {
         </li>
         <li>
           <strong>Display name</strong> and <strong>avatar URL</strong>{" "}
-          (obtained from your Apple ID or GitHub profile, or set manually)
+          (obtained from your Apple ID or GitHub profile, or provided by you
+          during onboarding when we ask how you would like to be called — used
+          solely to personalize your in-app experience)
         </li>
         <li>
           <strong>Authentication credentials</strong> — passwords are hashed
