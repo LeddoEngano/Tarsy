@@ -66,6 +66,7 @@ targets:
     dependencies:
       - package: TarsyShared
       - target: TarsyWidgetExtension
+        embed: true
   TarsyWidgetExtension:
     type: app-extension
     platform: iOS
