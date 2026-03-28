@@ -37,36 +37,47 @@ class RepoAnalyzer {
         if let packageJson = readJSON(at: "\(expandedPath)/package.json") {
             language = fm.fileExists(atPath: "\(expandedPath)/tsconfig.json") ? "TypeScript" : "JavaScript"
 
+            // Merge dependencies + devDependencies for framework detection
+            var allDeps: [String: Any] = [:]
             if let deps = packageJson["dependencies"] as? [String: Any] {
-                if deps["next"] != nil {
+                allDeps.merge(deps) { current, _ in current }
+            }
+            if let devDeps = packageJson["devDependencies"] as? [String: Any] {
+                allDeps.merge(devDeps) { current, _ in current }
+            }
+
+            if !allDeps.isEmpty {
+                if allDeps["next"] != nil {
                     framework = "Next.js"
                     stack = "web"
-                } else if deps["nuxt"] != nil {
+                } else if allDeps["nuxt"] != nil {
                     framework = "Nuxt"
                     stack = "web"
-                } else if deps["react"] != nil {
-                    framework = deps["vite"] != nil ? "React + Vite" : "React"
+                } else if allDeps["react"] != nil {
+                    framework = allDeps["vite"] != nil ? "React + Vite" : "React"
                     stack = "web"
-                } else if deps["vue"] != nil {
+                } else if allDeps["vue"] != nil {
                     framework = "Vue"
                     stack = "web"
-                } else if deps["express"] != nil || deps["fastify"] != nil || deps["koa"] != nil {
-                    framework = deps["express"] != nil ? "Express" : (deps["fastify"] != nil ? "Fastify" : "Koa")
+                } else if allDeps["express"] != nil || allDeps["fastify"] != nil || allDeps["koa"] != nil {
+                    framework = allDeps["express"] != nil ? "Express" : (allDeps["fastify"] != nil ? "Fastify" : "Koa")
                     stack = "backend"
-                } else if deps["react-native"] != nil || deps["expo"] != nil {
-                    framework = deps["expo"] != nil ? "Expo" : "React Native"
+                } else if allDeps["react-native"] != nil || allDeps["expo"] != nil {
+                    framework = allDeps["expo"] != nil ? "Expo" : "React Native"
                     stack = "mobile"
                 }
             }
 
+            // Detect package manager from lock files
+            let runner = detectPackageRunner(at: expandedPath)
+
             // Extract scripts for suggested command
             if let scriptMap = packageJson["scripts"] as? [String: String] {
                 scripts = scriptMap
-                // Suggest dev command
                 if scriptMap["dev"] != nil {
-                    suggestedCommand = "npm run dev"
+                    suggestedCommand = "\(runner) run dev"
                 } else if scriptMap["start"] != nil {
-                    suggestedCommand = "npm start"
+                    suggestedCommand = runner == "npm" ? "npm start" : "\(runner) run start"
                 }
             }
         }
@@ -178,6 +189,14 @@ class RepoAnalyzer {
             return nil
         }
         return json
+    }
+
+    private func detectPackageRunner(at path: String) -> String {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: "\(path)/bun.lockb") || fm.fileExists(atPath: "\(path)/bun.lock") { return "bun" }
+        if fm.fileExists(atPath: "\(path)/pnpm-lock.yaml") { return "pnpm" }
+        if fm.fileExists(atPath: "\(path)/yarn.lock") { return "yarn" }
+        return "npm"
     }
 
     private func readFileString(at path: String) -> String? {
