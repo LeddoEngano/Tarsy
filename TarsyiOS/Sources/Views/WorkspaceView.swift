@@ -98,19 +98,34 @@ struct WorkspaceView: View {
         tabStates[tabId] = state
     }
 
+    private var safeTabIndex: Int {
+        guard !tabs.isEmpty else { return 0 }
+        return min(selectedTabIndex, tabs.count - 1)
+    }
+
     private var currentTab: TerminalTab {
-        tabs[selectedTabIndex]
+        guard !tabs.isEmpty else {
+            return TerminalTab(id: "empty", title: "", isFixed: false, type: .claude)
+        }
+        return tabs[safeTabIndex]
     }
 
     private var activeSessionIdBinding: Binding<String?> {
         Binding(
-            get: { tabs[selectedTabIndex].sessionId },
-            set: { tabs[selectedTabIndex].sessionId = $0 }
+            get: {
+                guard !tabs.isEmpty else { return nil }
+                return tabs[safeTabIndex].sessionId
+            },
+            set: {
+                guard !tabs.isEmpty else { return }
+                tabs[safeTabIndex].sessionId = $0
+            }
         )
     }
 
     private func handleSessionCreated(_ sessionId: String) {
-        tabs[selectedTabIndex].sessionId = sessionId
+        guard !tabs.isEmpty else { return }
+        tabs[safeTabIndex].sessionId = sessionId
     }
 
     @FocusState private var isInputFocused: Bool
@@ -289,7 +304,8 @@ struct WorkspaceView: View {
                         isSelected: selectedTabIndex == index,
                         action: {
                             // Save current tab state
-                            let currentTab = tabs[selectedTabIndex]
+                            guard !tabs.isEmpty else { return }
+                            let currentTab = tabs[safeTabIndex]
                             tabStates[currentTab.id] = TabState(
                                 isThinking: isAgentThinking,
                                 activity: agentActivity,
@@ -1334,8 +1350,8 @@ struct WorkspaceView: View {
                     }
                     todoManager.markCompleted(sessionId: sid)
                 case .claudeCreate:
-                    if let sessionId = packet.payload?["sessionId"] {
-                        tabs[selectedTabIndex].sessionId = sessionId
+                    if let sessionId = packet.payload?["sessionId"], !tabs.isEmpty {
+                        tabs[safeTabIndex].sessionId = sessionId
                         for i in todoManager.items.indices where todoManager.items[i].sessionId == "pending" {
                             todoManager.items[i].sessionId = sessionId
                         }
@@ -1363,8 +1379,8 @@ struct WorkspaceView: View {
                         LiveActivityManager.shared.endActivity(workspaceId: workspace.id.uuidString, tabId: currentTab.id)
                     }
                 case .engineCreate:
-                    if let sessionId = packet.payload?["sessionId"] {
-                        tabs[selectedTabIndex].sessionId = sessionId
+                    if let sessionId = packet.payload?["sessionId"], !tabs.isEmpty {
+                        tabs[safeTabIndex].sessionId = sessionId
                         // Update pending todo items with real sessionId
                         for i in todoManager.items.indices where todoManager.items[i].sessionId == "pending" {
                             todoManager.items[i].sessionId = sessionId

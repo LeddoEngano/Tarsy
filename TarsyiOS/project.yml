@@ -64,6 +64,7 @@ targets:
         DEVELOPMENT_TEAM: "J2M334NJ3L"
         CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_STYLE: "Automatic"
+        CODE_SIGN_ALLOW_ENTITLEMENTS_MODIFICATION: "YES"
     dependencies:
       - package: TarsyShared
       - target: TarsyWidgetExtension

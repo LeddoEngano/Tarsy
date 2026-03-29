@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { Resend } from "resend";
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const RESEND_FROM = process.env.RESEND_FROM_EMAIL || "Tarsy <no-reply@tarsy.app>";
-const CONTACT_RECIPIENT = process.env.CONTACT_EMAIL || "support@tarsy.app";
+const RESEND_FROM = process.env.RESEND_FROM_EMAIL || "Tarsy <noreply@tarsy.dev>";
+const CONTACT_RECIPIENT = process.env.CONTACT_EMAIL || "support@tarsy.dev";
 
 const SUBJECT_LABELS = {
   general: "General Inquiry",

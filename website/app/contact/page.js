@@ -194,7 +194,7 @@ export default function Contact() {
       <div className={styles.altContact}>
         <p>
           Or email us directly at{" "}
-          <a href="mailto:support@tarsy.app">support@tarsy.app</a>
+          <a href="mailto:support@tarsy.dev">support@tarsy.dev</a>
         </p>
       </div>
     </div>
