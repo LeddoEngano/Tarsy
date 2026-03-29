@@ -24,12 +24,12 @@ targets:
       properties:
         CFBundleDisplayName: Tarsy
         CFBundleName: Tarsy
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"
         CFBundleIconName: AppIcon
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities:
-          - armv7
+          - arm64
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
         UISupportedInterfaceOrientations~ipad:
@@ -49,6 +49,7 @@ targets:
           - CFBundleURLSchemes:
               - com.tarsy.ios
         NSSupportsLiveActivities: true
+        ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     entitlements:
@@ -56,7 +57,7 @@ targets:
       properties:
         com.apple.developer.applesignin:
           - Default
-        aps-environment: development
+        aps-environment: production
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tarsy.ios
@@ -81,7 +82,7 @@ targets:
       properties:
         CFBundleDisplayName: Tarsy Widgets
         CFBundleName: TarsyWidgets
-        CFBundleShortVersionString: "0.1.0"
+        CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension

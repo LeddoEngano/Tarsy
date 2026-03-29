@@ -14,12 +14,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
 
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, error in
-            if let error = error {
-                print("[Push] Authorization error: \(error.localizedDescription)")
-                return
-            }
-            if granted {
+        // Register for remote notifications if already authorized (returning users)
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            if settings.authorizationStatus == .authorized {
                 DispatchQueue.main.async {
                     application.registerForRemoteNotifications()
                 }

@@ -18,6 +18,7 @@ struct DashboardView: View {
     @State private var showAIWizard = false
     @State private var deepLinkWorkspace: Workspace?
     @State private var isDeepLinkActive = false
+    @State private var hasFetchedMachines = false
 
     var body: some View {
         NavigationStack {
@@ -31,12 +32,21 @@ struct DashboardView: View {
 
                         if machineService.machines.count > 1 {
                             machinePicker
-                        } else {
+                        } else if !machineService.machines.isEmpty {
                             HStack(spacing: 4) {
                                 Circle()
                                     .fill(machineService.isOnline ? TarsyTheme.statusRunning : TarsyTheme.statusError)
                                     .frame(width: 6, height: 6)
                                 Text(machineService.isOnline ? "mac online" : "mac offline")
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(TarsyTheme.textSecondary)
+                            }
+                        } else if hasFetchedMachines {
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(TarsyTheme.statusIdle)
+                                    .frame(width: 6, height: 6)
+                                Text("no mac connected")
                                     .font(.system(size: 10, design: .monospaced))
                                     .foregroundColor(TarsyTheme.textSecondary)
                             }
@@ -46,35 +56,37 @@ struct DashboardView: View {
                     Spacer()
 
                     HStack(spacing: 16) {
-                        if !workspaceService.workspaces.isEmpty {
-                            Button(action: { showQuickDispatch = true }) {
-                                Image(systemName: "bolt.fill")
+                        if !machineService.machines.isEmpty {
+                            if !workspaceService.workspaces.isEmpty {
+                                Button(action: { showQuickDispatch = true }) {
+                                    Image(systemName: "bolt.fill")
+                                        .foregroundColor(TarsyTheme.accentAmber)
+                                }
+                            }
+                            Button(action: {
+                                if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
+                                    showAIWizard = true
+                                } else {
+                                    showPaywall = true
+                                }
+                            }) {
+                                Image(systemName: "wand.and.stars")
                                     .foregroundColor(TarsyTheme.accentAmber)
                             }
-                        }
-                        Button(action: {
-                            if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
-                                showAIWizard = true
-                            } else {
-                                showPaywall = true
+                            Button(action: {
+                                if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
+                                    showNewWorkspace = true
+                                } else {
+                                    showPaywall = true
+                                }
+                            }) {
+                                Image(systemName: "plus")
+                                    .foregroundColor(TarsyTheme.accentAmber)
                             }
-                        }) {
-                            Image(systemName: "wand.and.stars")
-                                .foregroundColor(TarsyTheme.accentAmber)
-                        }
-                        Button(action: {
-                            if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
-                                showNewWorkspace = true
-                            } else {
-                                showPaywall = true
+                            Button(action: { showActiveSessions = true }) {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                                    .foregroundColor(TarsyTheme.textSecondary)
                             }
-                        }) {
-                            Image(systemName: "plus")
-                                .foregroundColor(TarsyTheme.accentAmber)
-                        }
-                        Button(action: { showActiveSessions = true }) {
-                            Image(systemName: "bubble.left.and.bubble.right")
-                                .foregroundColor(TarsyTheme.textSecondary)
                         }
                         Button(action: { showProfile = true }) {
                             if let avatarUrlStr = profileService.profile?.avatarUrl, let url = URL(string: avatarUrlStr) {
@@ -104,24 +116,28 @@ struct DashboardView: View {
                     TarsyTheme.backgroundPrimary
                         .ignoresSafeArea()
 
-                    if !taskService.activeTasks.isEmpty {
-                        activeTasksSection
-                            .padding(.horizontal, 16)
-                            .padding(.top, 12)
-                    }
-
-                    if workspaceService.isLoading && workspaceService.workspaces.isEmpty {
-                        VStack(spacing: 12) {
-                            ProgressView()
-                                .tint(TarsyTheme.accentAmber)
-                            Text("loading workspaces...")
-                                .font(TarsyTheme.monoFontSmall)
-                                .foregroundColor(TarsyTheme.textSecondary)
-                        }
-                    } else if filteredWorkspaces.isEmpty {
-                        emptyState
+                    if machineService.machines.isEmpty && hasFetchedMachines {
+                        machineSetupGuide
                     } else {
-                        workspaceList
+                        if !taskService.activeTasks.isEmpty {
+                            activeTasksSection
+                                .padding(.horizontal, 16)
+                                .padding(.top, 12)
+                        }
+
+                        if workspaceService.isLoading && workspaceService.workspaces.isEmpty {
+                            VStack(spacing: 12) {
+                                ProgressView()
+                                    .tint(TarsyTheme.accentAmber)
+                                Text("loading workspaces...")
+                                    .font(TarsyTheme.monoFontSmall)
+                                    .foregroundColor(TarsyTheme.textSecondary)
+                            }
+                        } else if filteredWorkspaces.isEmpty {
+                            emptyState
+                        } else {
+                            workspaceList
+                        }
                     }
                 }
             }
@@ -152,6 +168,7 @@ struct DashboardView: View {
         }
         .task {
             await machineService.fetchMachine()
+            hasFetchedMachines = true
             await workspaceService.fetchWorkspaces()
             await taskService.loadActiveTasks()
             await taskService.cleanupOldTasks()
@@ -165,6 +182,156 @@ struct DashboardView: View {
             deepLinkRouter.pendingWorkspaceId = nil
         }
     }
+
+    // MARK: - Machine Setup Guide
+
+    private var machineSetupGuide: some View {
+        ScrollView {
+            VStack(spacing: 32) {
+                Spacer().frame(height: 24)
+
+                // Header
+                VStack(spacing: 12) {
+                    Image(systemName: "desktopcomputer")
+                        .font(.system(size: 48))
+                        .foregroundColor(TarsyTheme.accentAmber)
+
+                    Text("connect your mac")
+                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textPrimary)
+
+                    Text("tarsy needs a companion app running\non your mac to get started")
+                        .font(TarsyTheme.monoFontSmall)
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                // Steps
+                VStack(spacing: 0) {
+                    setupStep(
+                        number: "1",
+                        icon: "arrow.down.circle",
+                        title: "download tarsy for mac",
+                        description: "get the companion app from tarsy.dev",
+                        isLast: false
+                    )
+
+                    setupStep(
+                        number: "2",
+                        icon: "person.badge.key",
+                        title: "sign in with the same account",
+                        description: "use the same login method you used here",
+                        isLast: false
+                    )
+
+                    setupStep(
+                        number: "3",
+                        icon: "checkmark.shield",
+                        title: "grant permissions",
+                        description: "screen recording, accessibility, and file access",
+                        isLast: false
+                    )
+
+                    setupStep(
+                        number: "4",
+                        icon: "wifi",
+                        title: "your mac appears here",
+                        description: "automatic — works on the same network or remotely",
+                        isLast: true
+                    )
+                }
+                .padding(16)
+                .background(TarsyTheme.backgroundSecondary)
+                .cornerRadius(12)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(TarsyTheme.backgroundTertiary, lineWidth: 1)
+                )
+                .padding(.horizontal, 16)
+
+                // Download button
+                Link(destination: URL(string: "https://tarsy.dev")!) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "arrow.down.to.line")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("download for mac")
+                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    }
+                    .foregroundColor(TarsyTheme.backgroundPrimary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(TarsyTheme.accentAmber)
+                    .cornerRadius(10)
+                }
+                .padding(.horizontal, 16)
+
+                // Refresh hint
+                Button(action: {
+                    Task {
+                        await machineService.fetchMachine()
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11))
+                        Text("already installed? tap to refresh")
+                            .font(.system(size: 11, design: .monospaced))
+                    }
+                    .foregroundColor(TarsyTheme.textSecondary)
+                }
+
+                Spacer()
+            }
+        }
+        .refreshable {
+            await machineService.fetchMachine()
+        }
+    }
+
+    private func setupStep(number: String, icon: String, title: String, description: String, isLast: Bool) -> some View {
+        HStack(alignment: .top, spacing: 14) {
+            // Left: number circle + connector line
+            VStack(spacing: 0) {
+                ZStack {
+                    Circle()
+                        .fill(TarsyTheme.accentAmber.opacity(0.15))
+                        .frame(width: 32, height: 32)
+                    Text(number)
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .foregroundColor(TarsyTheme.accentAmber)
+                }
+
+                if !isLast {
+                    Rectangle()
+                        .fill(TarsyTheme.backgroundTertiary)
+                        .frame(width: 1)
+                        .frame(maxHeight: .infinity)
+                }
+            }
+            .frame(width: 32)
+
+            // Right: content
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .font(.system(size: 12))
+                        .foregroundColor(TarsyTheme.accentAmber)
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textPrimary)
+                }
+
+                Text(description)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textSecondary)
+            }
+            .padding(.bottom, isLast ? 0 : 20)
+
+            Spacer()
+        }
+    }
+
+    // MARK: - Empty State (no workspaces)
 
     private var emptyState: some View {
         VStack(spacing: 16) {

@@ -237,6 +237,36 @@ struct OnboardingWindow: View {
             }
             .frame(maxWidth: 300)
 
+            // Legal links
+            HStack(spacing: 0) {
+                Text("by signing in, you agree to our ")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Color(hex: "6b6b6b"))
+
+                Button("Terms") {
+                    if let url = URL(string: "https://www.tarsy.dev/terms") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(Color(hex: "d4a574"))
+                .buttonStyle(.plain)
+
+                Text(" and ")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Color(hex: "6b6b6b"))
+
+                Button("Privacy Policy") {
+                    if let url = URL(string: "https://www.tarsy.dev/privacy") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(Color(hex: "d4a574"))
+                .buttonStyle(.plain)
+            }
+            .padding(.top, 8)
+
             Spacer()
         }
     }

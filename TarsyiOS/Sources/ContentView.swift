@@ -14,6 +14,8 @@ struct ContentView: View {
     @State private var sudoRequestId = ""
     @State private var showPermissionOnboarding = !AgentPermissionConfig.hasBeenConfigured
     @State private var showNameOnboarding = false
+    @State private var showNotificationPrimer = false
+    @AppStorage("hasSeenNotificationPrimer") private var hasSeenNotificationPrimer = false
 
     var body: some View {
         ZStack {
@@ -39,6 +41,15 @@ struct ContentView: View {
         .fullScreenCover(isPresented: $showPermissionOnboarding) {
             PermissionOnboardingView {
                 showPermissionOnboarding = false
+                if !hasSeenNotificationPrimer {
+                    showNotificationPrimer = true
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showNotificationPrimer) {
+            NotificationPrimerView {
+                hasSeenNotificationPrimer = true
+                showNotificationPrimer = false
             }
         }
         .preferredColorScheme(.dark)
