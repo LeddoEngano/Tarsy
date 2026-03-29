@@ -1,6 +1,6 @@
 // Supabase Edge Function: ultracontext-proxy
 // Proxies requests to UltraContext API with server-side API key.
-// Deploy with: supabase functions deploy ultracontext-proxy
+// Deploy with: supabase functions deploy ultracontext-proxy --no-verify-jwt
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -11,6 +11,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CTX_ID_REGEX = /^ctx_[0-9a-f]{16,64}$/i;
 
 async function authenticateUser(req: Request): Promise<{ userId: string } | Response> {
   const authHeader = req.headers.get("Authorization");
@@ -30,9 +31,10 @@ async function authenticateUser(req: Request): Promise<{ userId: string } | Resp
   return { userId: user.id };
 }
 
-/** Validate a context ID is a valid UUID to prevent path traversal in API URLs */
+/** Validate a context ID to prevent path traversal in API URLs.
+ *  Accepts both UUID format and UltraContext's ctx_ prefixed hex IDs. */
 function isValidId(id: unknown): id is string {
-  return typeof id === "string" && UUID_REGEX.test(id);
+  return typeof id === "string" && (UUID_REGEX.test(id) || CTX_ID_REGEX.test(id));
 }
 
 // Extract readable text from UltraContext message content.
@@ -52,13 +54,15 @@ function extractText(content: any): string {
   return "";
 }
 
-/** Fetch all contexts and return only those owned by the given user */
-async function fetchUserContexts(userId: string): Promise<any[]> {
-  const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts`, {
+/** Fetch contexts owned by the given user (server-side filtered + client-side defense-in-depth) */
+async function fetchUserContexts(userId: string, limit = 100): Promise<any[]> {
+  const url = `${ULTRACONTEXT_BASE_URL}/contexts?user_id=${encodeURIComponent(userId)}&limit=${limit}`;
+  const res = await fetch(url, {
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
   });
   const raw = await res.json();
   const all = raw?.data ?? raw ?? [];
+  // Defense-in-depth: re-filter client-side in case upstream doesn't honor the query param
   return all.filter((ctx: any) => ctx.metadata?.user_id === userId);
 }
 
@@ -82,6 +86,7 @@ serve(async (req) => {
       const metadata: Record<string, string> = { user_id: userId };
       if (payload.project_path) metadata.project_path = payload.project_path;
       if (payload.engine_type) metadata.source = payload.engine_type;
+      if (payload.workspace_id) metadata.workspace_id = payload.workspace_id;
 
       const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts`, {
         method: "POST",
@@ -150,6 +155,7 @@ serve(async (req) => {
               message_count: messageCount,
               project_path: ctx.metadata?.project_path ?? null,
               engine_type: ctx.metadata?.source ?? null,
+              workspace_id: ctx.metadata?.workspace_id ?? null,
               created_at: ctx.created_at,
             };
           } catch {
@@ -159,6 +165,7 @@ serve(async (req) => {
               message_count: 0,
               project_path: ctx.metadata?.project_path ?? null,
               engine_type: ctx.metadata?.source ?? null,
+              workspace_id: ctx.metadata?.workspace_id ?? null,
               created_at: ctx.created_at,
             };
           }
@@ -202,10 +209,14 @@ serve(async (req) => {
       if (!(await isOwnedByUser(payload.id, userId))) {
         return new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
       }
+      const role = payload.role;
+      if (!role || !["user", "assistant", "system"].includes(role)) {
+        return new Response(JSON.stringify({ error: "Invalid role" }), { status: 400, headers: { "Content-Type": "application/json" } });
+      }
       const res = await fetch(`${ULTRACONTEXT_BASE_URL}/contexts/${payload.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
-        body: JSON.stringify({ role: payload.role, content: payload.content }),
+        body: JSON.stringify({ role, content: payload.content }),
       });
       const data = await res.text();
       return new Response(data, { status: res.status, headers: { "Content-Type": "application/json" } });

@@ -42,10 +42,11 @@ actor UltraContextSync {
         let id: String
     }
 
-    private func createContext(projectPath: String? = nil, engineType: String? = nil) async throws -> String {
+    private func createContext(projectPath: String? = nil, engineType: String? = nil, workspaceId: String? = nil) async throws -> String {
         var payload = ["action": "create"]
         if let p = projectPath { payload["project_path"] = p }
         if let e = engineType { payload["engine_type"] = e }
+        if let w = workspaceId { payload["workspace_id"] = w }
         let data = try await post(payload)
         let decoded = try JSONDecoder().decode(CreateContextResponse.self, from: data)
         return decoded.id
@@ -63,11 +64,11 @@ actor UltraContextSync {
     // MARK: - Engine lifecycle
 
     /// Stores engine info for lazy context creation (only on first real message)
-    private var pendingEngines: [String: (engineType: String, workspacePath: String)] = [:]
+    private var pendingEngines: [String: (engineType: String, workspacePath: String, workspaceId: String?)] = [:]
 
-    func engineStarted(sessionId: String, engineType: String, workspacePath: String) async {
+    func engineStarted(sessionId: String, engineType: String, workspacePath: String, workspaceId: String? = nil) async {
         // Don't create context yet — wait for the first real message
-        pendingEngines[sessionId] = (engineType, workspacePath)
+        pendingEngines[sessionId] = (engineType, workspacePath, workspaceId)
     }
 
     /// Ensures a context exists for this session, creating lazily if needed
@@ -75,7 +76,7 @@ actor UltraContextSync {
         if let ctxId = contextMap[sessionId] { return ctxId }
         guard let info = pendingEngines.removeValue(forKey: sessionId) else { return nil }
         do {
-            let ctxId = try await createContext(projectPath: info.workspacePath, engineType: info.engineType)
+            let ctxId = try await createContext(projectPath: info.workspacePath, engineType: info.engineType, workspaceId: info.workspaceId)
             contextMap[sessionId] = ctxId
             return ctxId
         } catch {

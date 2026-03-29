@@ -163,6 +163,13 @@ actor SessionFileWatcher {
         }
     }
 
+    /// Sessions already managed by UltraContextSync (via Tarsy engine lifecycle) — skip to avoid duplicates
+    private var managedSessions: Set<String> = []
+
+    func markSessionManaged(_ sessionId: String) {
+        managedSessions.insert(sessionId)
+    }
+
     private func processLine(_ line: String) async {
         guard let data = line.data(using: .utf8),
               let parsed = try? JSONDecoder().decode(SessionLine.self, from: data),
@@ -171,6 +178,9 @@ actor SessionFileWatcher {
               let content = parsed.message?.content?.text,
               !content.isEmpty else { return }
 
+        // Skip sessions already managed by UltraContextSync (started via Tarsy)
+        if managedSessions.contains(sessionId) { return }
+
         // Only sync user and assistant messages
         guard role == "user" || role == "assistant" else { return }
 
@@ -178,8 +188,9 @@ actor SessionFileWatcher {
         let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.count > 5 else { return }
 
-        // Ensure we have an UltraContext context for this session
+        // Only create context on first real USER message (avoids "Untitled session")
         if sessionContextMap[sessionId] == nil {
+            guard role == "user" else { return }
             do {
                 let ctxId = try await createContext(sessionId: sessionId, cwd: parsed.cwd)
                 sessionContextMap[sessionId] = ctxId
@@ -224,10 +235,11 @@ actor SessionFileWatcher {
     private struct CreateResponse: Decodable { let id: String }
 
     private func createContext(sessionId: String, cwd: String?) async throws -> String {
-        let data = try await post(["action": "create"])
+        var payload = ["action": "create"]
+        if let cwd = cwd { payload["project_path"] = cwd }
+        payload["engine_type"] = "claude"
+        let data = try await post(payload)
         let decoded = try JSONDecoder().decode(CreateResponse.self, from: data)
-        let project = cwd?.components(separatedBy: "/").last ?? "unknown"
-        try await appendMessage(contextId: decoded.id, role: "user", content: "[session:\(sessionId.prefix(8))] Project: \(project)")
         print("[SessionWatcher] Created context \(decoded.id) for session \(sessionId.prefix(8))")
         return decoded.id
     }

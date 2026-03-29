@@ -22,6 +22,7 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
     public let hasImage: Bool
     public let projectPath: String?
     public let engineType: String?
+    public let workspaceId: String?
     public let messageCount: Int?
 
     enum CodingKeys: String, CodingKey {
@@ -31,13 +32,14 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
         case updatedAt = "updated_at"
         case projectPath = "project_path"
         case engineType = "engine_type"
+        case workspaceId = "workspace_id"
         case messageCount = "message_count"
     }
 
     public init(id: String, messages: [UltraContextMessage] = [], version: Int? = nil,
                 createdAt: String? = nil, updatedAt: String? = nil, title: String? = nil,
                 hasImage: Bool = false, projectPath: String? = nil, engineType: String? = nil,
-                messageCount: Int? = nil) {
+                workspaceId: String? = nil, messageCount: Int? = nil) {
         self.id = id
         self.messages = messages
         self.version = version
@@ -47,6 +49,7 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
         self.hasImage = hasImage
         self.projectPath = projectPath
         self.engineType = engineType
+        self.workspaceId = workspaceId
         self.messageCount = messageCount
     }
 
@@ -61,6 +64,7 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
         hasImage = (try? container.decode(Bool.self, forKey: .hasImage)) ?? false
         projectPath = try? container.decode(String.self, forKey: .projectPath)
         engineType = try? container.decode(String.self, forKey: .engineType)
+        workspaceId = try? container.decode(String.self, forKey: .workspaceId)
         messageCount = try? container.decode(Int.self, forKey: .messageCount)
     }
 

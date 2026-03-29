@@ -9,6 +9,7 @@ import IOKit.pwr_mgt
 class DaemonManager: ObservableObject {
     @Published var isRunning = false
     @Published var activeWorkspaces: [Workspace] = []
+    private var registeredWorkspacePaths: Set<String> = []
     @Published var connectedClients = 0
     @Published var tailscaleStatus: String = "checking..."
     @Published var tailscaleIP: String?
@@ -503,12 +504,11 @@ class DaemonManager: ObservableObject {
                 if packet.payload?.isEmpty != false {
                     // Cancellation — forward as empty response
                     await SudoPasswordManager.shared.handlePasswordResponse(packet: packet)
-                } else {
-                    }
+                }
                 break
             }
             guard let plaintext = e2e.decrypt(encrypted) else {
-                    break
+                break
             }
             let decryptedPacket = WSPacket(action: .sudoResponse, payload: ["password": plaintext], id: packet.id)
             await SudoPasswordManager.shared.handlePasswordResponse(packet: decryptedPacket)
@@ -608,6 +608,7 @@ class DaemonManager: ObservableObject {
 
         // If dev command needs sudo, ask for password before starting
         let expandedPath = (path as NSString).expandingTildeInPath
+        registeredWorkspacePaths.insert(URL(fileURLWithPath: expandedPath).resolvingSymlinksInPath().path)
         if let cmd = devCmd {
             guard let rewritten = await SudoPasswordManager.shared.rewriteCommandIfSudo(cmd, workingDirectory: expandedPath) else {
                 log("workspaceStart: sudo password cancelled")
@@ -1466,88 +1467,15 @@ class DaemonManager: ObservableObject {
     // MARK: - Screenshot Transfer
 
     private func handleScreenshotRequest(clientId: String, packet: WSPacket) async {
-        let stack = packet.payload?["stack"] ?? "mobile"
+        let isRelay = clientId == "relay"
+        let quality: CGFloat = isRelay ? 0.5 : 0.7
 
-        // For web/fullstack: capture from current stream frame
-        if stack == "web" || stack == "fullstack" {
-            log("screenshot: capturing browser window")
-            if let window = screenCapture.selectedWindow {
-                let image = CGWindowListCreateImage(
-                    window.frame,
-                    .optionIncludingWindow,
-                    window.windowID,
-                    [.boundsIgnoreFraming, .bestResolution]
-                )
-                if let image {
-                    let bitmap = NSBitmapImageRep(cgImage: image)
-                    let isRelay = clientId == "relay"
-                    let quality: NSNumber = isRelay ? 0.5 : 0.7
-                    if let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality]) {
-                        let sizeKB = jpegData.count / 1024
-                        log("screenshot: captured \(sizeKB)KB JPEG from browser")
-
-                        // Encrypt screenshot if E2E is ready
-                        let screenshotPayload: Data
-                        if e2e.isReady, let encrypted = e2e.encryptBinary(jpegData) {
-                            screenshotPayload = encrypted
-                        } else {
-                            screenshotPayload = jpegData
-                        }
-
-                        if isRelay {
-                            var binaryData = Data("SCRN".utf8)
-                            binaryData.append(screenshotPayload)
-                            await relayClient.sendBinary(binaryData)
-                        } else {
-                            var binaryData = Data("SCRN".utf8)
-                            binaryData.append(screenshotPayload)
-                            await wsServer?.broadcastBinary(binaryData)
-                        }
-                        return
-                    }
-                }
-            }
-            log("screenshot: browser capture failed, falling back to simctl")
-        }
-
-        // Mobile: use simctl
-        let udid = packet.payload?["udid"] ?? "booted"
-        let tmpPath = NSTemporaryDirectory() + "tarsy_screenshot_\(UUID().uuidString).png"
-
-        log("screenshot: capturing simulator \(udid)")
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
-        process.arguments = ["simctl", "io", udid, "screenshot", tmpPath]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            guard process.terminationStatus == 0,
-                  let imageData = try? Data(contentsOf: URL(fileURLWithPath: tmpPath)),
-                  let nsImage = NSImage(data: imageData) else {
-                await sendToClientOrRelay(
-                    WSPacket(action: .error, payload: ["message": "Screenshot failed"], id: packet.id),
-                    to: clientId
-                )
-                return
-            }
-
-            // Convert to JPEG for smaller transfer
-            guard let tiffData = nsImage.tiffRepresentation,
-                  let bitmap = NSBitmapImageRep(data: tiffData),
-                  let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {
-                return
-            }
-
-            // Send as base64
-            let base64 = jpegData.base64EncodedString()
+        // Primary: capture from the active stream (works for ALL stacks)
+        if screenCapture.isCapturing, let jpegData = screenCapture.captureScreenshot(quality: quality) {
             let sizeKB = jpegData.count / 1024
-            log("screenshot: captured \(sizeKB)KB JPEG, sending to iOS")
+            log("screenshot: captured \(sizeKB)KB JPEG from stream")
 
+            let base64 = jpegData.base64EncodedString()
             await sendToClientOrRelay(
                 WSPacket(action: .screenshotResult, payload: [
                     "data": base64,
@@ -1555,17 +1483,43 @@ class DaemonManager: ObservableObject {
                 ], id: packet.id),
                 to: clientId
             )
-
-            // Cleanup
-            try? FileManager.default.removeItem(atPath: tmpPath)
-
-        } catch {
-            log("screenshot: FAILED — \(error)")
-            await sendToClientOrRelay(
-                WSPacket(action: .error, payload: ["message": "Screenshot error: \(error.localizedDescription)"], id: packet.id),
-                to: clientId
-            )
+            return
         }
+
+        // Fallback: CGWindowListCreateImage from selectedWindow
+        if let window = screenCapture.selectedWindow {
+            let image = CGWindowListCreateImage(
+                window.frame,
+                .optionIncludingWindow,
+                window.windowID,
+                [.boundsIgnoreFraming, .bestResolution]
+            )
+            if let image {
+                let bitmap = NSBitmapImageRep(cgImage: image)
+                if let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality as NSNumber]) {
+                    let sizeKB = jpegData.count / 1024
+                    log("screenshot: captured \(sizeKB)KB JPEG from window")
+
+                    let base64 = jpegData.base64EncodedString()
+                    await sendToClientOrRelay(
+                        WSPacket(action: .screenshotResult, payload: [
+                            "data": base64,
+                            "size": "\(sizeKB)"
+                        ], id: packet.id),
+                        to: clientId
+                    )
+                    return
+                }
+            }
+        }
+
+        log("screenshot: no active stream or window available")
+        await sendToClientOrRelay(
+            WSPacket(action: .screenshotResult, payload: [
+                "error": "No active stream to capture screenshot"
+            ], id: packet.id),
+            to: clientId
+        )
     }
 
     // MARK: - Stream
@@ -2064,6 +2018,8 @@ class DaemonManager: ObservableObject {
         }()
         let sid = UUID().uuidString
         let workspaceName = path.components(separatedBy: "/").last ?? "workspace"
+        let expandedEnginePath = (path as NSString).expandingTildeInPath
+        registeredWorkspacePaths.insert(URL(fileURLWithPath: expandedEnginePath).resolvingSymlinksInPath().path)
 
         log("engineCreate: type=\(engineType.displayName), path=\(path), sid=\(sid), permissionMode=\(permissionMode.rawValue)")
 
@@ -2141,7 +2097,12 @@ class DaemonManager: ObservableObject {
                     to: clientId
                 )
 
-                await UltraContextSync.shared.engineStarted(sessionId: sid, engineType: "claude", workspacePath: path)
+                await UltraContextSync.shared.engineStarted(sessionId: sid, engineType: "claude", workspacePath: path, workspaceId: wsIdStr)
+
+                // Mark Claude's internal session as managed to avoid duplicate UltraContext entries
+                await terminalManager.setClaudeSessionIdHandler(sessionId: sid) { claudeSessionId in
+                    Task { await SessionFileWatcher.shared.markSessionManaged(claudeSessionId) }
+                }
 
                 if let msg = initialMessage, !msg.isEmpty {
                     let imagesJson = packet.payload?["images"]
@@ -2202,7 +2163,7 @@ class DaemonManager: ObservableObject {
                 }
             )
 
-            await UltraContextSync.shared.engineStarted(sessionId: sid, engineType: engineTypeRaw, workspacePath: path)
+            await UltraContextSync.shared.engineStarted(sessionId: sid, engineType: engineTypeRaw, workspacePath: path, workspaceId: wsIdStr)
 
             await sendToClientOrRelay(
                 WSPacket(action: .engineCreate, payload: ["sessionId": sid, "engineType": engineTypeRaw], id: packet.id),
@@ -3063,6 +3024,13 @@ class DaemonManager: ObservableObject {
     private func isPathInRegisteredWorkspace(_ path: String) -> Bool {
         let expandedPath = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
             .resolvingSymlinksInPath().path
+        // Check registered paths from engineCreate/workspaceStart
+        for workspacePath in registeredWorkspacePaths {
+            if expandedPath == workspacePath || expandedPath.hasPrefix(workspacePath + "/") {
+                return true
+            }
+        }
+        // Fallback: check activeWorkspaces
         for workspace in activeWorkspaces {
             let localPath = workspace.localPath
             let workspacePath = URL(fileURLWithPath: (localPath as NSString).expandingTildeInPath)

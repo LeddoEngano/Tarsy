@@ -15,7 +15,8 @@ actor ClaudeCodeSession: AIEngine {
     private var onOutput: (@Sendable (String) -> Void)?
     private var onComplete: (@Sendable (String) -> Void)?
     private var onAskUser: (@Sendable (String, [String]) -> Void)?
-    private var onStatusUpdate: (@Sendable (String, Int, Int) -> Void)? // model, cumulativeInputTokens, cumulativeOutputTokens
+    private var onStatusUpdate: (@Sendable (String, Int, Int) -> Void)?
+    private var onSessionId: (@Sendable (String) -> Void)? // model, cumulativeInputTokens, cumulativeOutputTokens
     private var pendingAskUser = false // Track if last turn ended with AskUserQuestion
     private var cumulativeInputTokens: Int = 0
     private var cumulativeOutputTokens: Int = 0
@@ -42,6 +43,10 @@ actor ClaudeCodeSession: AIEngine {
 
     func setStatusHandler(_ handler: @escaping @Sendable (String, Int, Int) -> Void) {
         self.onStatusUpdate = handler
+    }
+
+    func setSessionIdHandler(_ handler: @escaping @Sendable (String) -> Void) {
+        self.onSessionId = handler
     }
 
     func start() throws {
@@ -111,7 +116,7 @@ actor ClaudeCodeSession: AIEngine {
         self.isRunning = true
 
         print("[ClaudeCode] Session \(id) started with PID \(proc.processIdentifier)")
-        onOutput?("Claude Code ready. Send a message to start.\n")
+        onOutput?("\(AIEngineType.claude.readyMessage)\n")
     }
 
     func sendMessage(_ message: String) {
@@ -279,6 +284,7 @@ actor ClaudeCodeSession: AIEngine {
                 if let sid = json["session_id"] as? String {
                     sessionId = sid
                     print("[ClaudeCode] Session initialized: \(sid)")
+                    onSessionId?(sid)
                 }
             }
 
