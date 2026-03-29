@@ -8,7 +8,7 @@ export default function Terms() {
   return (
     <div className={styles.page}>
       <h1>TERMS OF USE</h1>
-      <p className={styles.lastUpdated}>Last updated: March 27, 2026</p>
+      <p className={styles.lastUpdated}>Last updated: March 28, 2026</p>
 
       <p>
         These Terms of Use (&quot;Terms&quot;) constitute a legally binding
@@ -99,9 +99,10 @@ export default function Terms() {
 
       <h3>4.1 Plans</h3>
       <p>
-        Tarsy offers a free tier (limited to 1 workspace) and a paid
-        subscription plan, Tarsy Pro (unlimited workspaces), at a price
-        displayed at the time of purchase.
+        Tarsy offers a free tier (limited to 1 workspace; certain features
+        such as OpenClaw require Tarsy Pro) and a paid subscription plan,
+        Tarsy Pro (unlimited workspaces, full access to all features), at a
+        price displayed at the time of purchase.
       </p>
 
       <h3>4.2 Billing</h3>

@@ -8,7 +8,7 @@ export default function Privacy() {
   return (
     <div className={styles.page}>
       <h1>PRIVACY POLICY</h1>
-      <p className={styles.lastUpdated}>Last updated: March 27, 2026</p>
+      <p className={styles.lastUpdated}>Last updated: March 28, 2026</p>
 
       <p>
         OPALLOO INOVACOES LTDA, registered under CNPJ 53.284.020/0001-06,
@@ -191,8 +191,8 @@ export default function Privacy() {
       <p>
         Screen frames are <strong>not stored, recorded, or logged</strong> by
         us — not on the relay server, not in any database. The relay server
-        acts as a stateless forwarder. We do not have access to the visual
-        content of your screen.
+        acts as a forwarding server that does not store or inspect your
+        content. We do not have access to the visual content of your screen.
       </p>
 
       <h3>2.2 Remote Input</h3>
@@ -367,6 +367,11 @@ export default function Privacy() {
       <ul>
         <li>TLS/SSL encryption for all data in transit</li>
         <li>
+          End-to-end encryption (E2E) for all communication between your iOS
+          and macOS devices, with trust-on-first-use (TOFU) key pinning — the
+          relay server cannot read your data even in transit
+        </li>
+        <li>
           Row-Level Security (RLS) on all database tables, ensuring users can
           only access their own data
         </li>
@@ -379,6 +384,10 @@ export default function Privacy() {
           exposed to client apps)
         </li>
         <li>Encrypted WebSocket connections (WSS) for screen streaming and remote input</li>
+        <li>
+          Machine secret verification and action allowlists on the relay
+          server to prevent unauthorized access
+        </li>
         <li>
           Rate limiting on the relay server (120 messages per second per
           connection)
@@ -545,6 +554,12 @@ export default function Privacy() {
         <li>
           <strong>Push Notifications:</strong> To alert you when AI agents need
           your input, tasks complete, or errors occur.
+        </li>
+        <li>
+          <strong>Live Activities:</strong> To display real-time AI agent status
+          on your Lock Screen and Dynamic Island while a session is active. No
+          additional data is collected — Live Activities use information already
+          present in the app.
         </li>
       </ul>
 
