@@ -299,7 +299,6 @@ class DaemonManager: ObservableObject {
                             }
                         }
 
-                        print("[Daemon] E2E key exchange completed (TLS-bound)")
                     }
                 }
                 return extra
@@ -309,7 +308,7 @@ class DaemonManager: ObservableObject {
         do {
             try await wsServer?.start()
         } catch {
-            print("[Daemon] Failed to start WS server: \(error)")
+            log("Failed to start WS server: \(error.localizedDescription)")
         }
     }
 
@@ -318,11 +317,9 @@ class DaemonManager: ObservableObject {
             let user = try await supabase.auth.user(jwt: token)
             // Verify the connecting user owns this machine
             guard let ownerId = ownerUserId else {
-                log("validateAuthToken: machine not yet registered — rejecting")
                 return false
             }
             guard user.id == ownerId else {
-                log("validateAuthToken: user \(user.id) does not own this machine (owner: \(ownerId)) — rejecting")
                 return false
             }
             return true
@@ -336,7 +333,6 @@ class DaemonManager: ObservableObject {
     private func connectRelay() async {
         // Get auth token for relay connection
         guard let session = try? await supabase.auth.session else {
-            log("Cannot connect to relay — no auth session")
             return
         }
 
@@ -508,13 +504,11 @@ class DaemonManager: ObservableObject {
                     // Cancellation — forward as empty response
                     await SudoPasswordManager.shared.handlePasswordResponse(packet: packet)
                 } else {
-                    print("[Security] Rejected sudo response: password not E2E encrypted")
-                }
+                    }
                 break
             }
             guard let plaintext = e2e.decrypt(encrypted) else {
-                print("[Security] Rejected sudo response: E2E decryption failed")
-                break
+                    break
             }
             let decryptedPacket = WSPacket(action: .sudoResponse, payload: ["password": plaintext], id: packet.id)
             await SudoPasswordManager.shared.handlePasswordResponse(packet: decryptedPacket)
@@ -1845,7 +1839,9 @@ class DaemonManager: ObservableObject {
 
     private func log(_ msg: String) {
         let entry = "[\(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium))] \(msg)"
+        #if DEBUG
         print(entry)
+        #endif
         debugLog += entry + "\n"
     }
 
@@ -1854,7 +1850,7 @@ class DaemonManager: ObservableObject {
         let localIp = getLocalIP()
         let hwUuid = getHardwareUUID()
 
-        log("registerMachine: tailscaleIP=\(tailscaleIP ?? "nil"), localIP=\(localIp ?? "nil"), hwUuid=\(hwUuid ?? "nil")")
+        log("registerMachine: starting")
 
         guard tailscaleIP != nil || localIp != nil else {
             log("registerMachine: skipped — no IPs available")
@@ -1865,7 +1861,7 @@ class DaemonManager: ObservableObject {
         do {
             let session = try await supabase.auth.session
             ownerUserId = session.user.id
-            log("registerMachine: got session for user \(session.user.id)")
+            log("registerMachine: authenticated")
 
             // Fetch all machines for this user
             let existing: [Machine] = try await supabase
@@ -1875,7 +1871,6 @@ class DaemonManager: ObservableObject {
                 .execute()
                 .value
 
-            log("registerMachine: found \(existing.count) existing machines")
 
             var updateData: [String: String] = [
                 "hostname": hostname,
@@ -1898,10 +1893,10 @@ class DaemonManager: ObservableObject {
                     .update(updateData)
                     .eq("id", value: machine.id.uuidString)
                     .execute()
-                log("registerMachine: updated machine \(machine.id)")
+                log("registerMachine: updated")
             } else {
                 updateData["user_id"] = session.user.id.uuidString
-                log("registerMachine: inserting new machine with data: \(updateData)")
+                log("registerMachine: creating new")
                 let result: Machine = try await supabase
                     .from("machines")
                     .insert(updateData)
@@ -1910,7 +1905,7 @@ class DaemonManager: ObservableObject {
                     .execute()
                     .value
                 machineId = result.id
-                log("registerMachine: created machine \(result.id)")
+                log("registerMachine: created")
             }
             lastError = nil
 
@@ -2038,7 +2033,6 @@ class DaemonManager: ObservableObject {
                 .eq("id", value: id.uuidString)
                 .execute()
         } catch {
-            print("[Daemon] Failed to update status: \(error)")
         }
     }
 

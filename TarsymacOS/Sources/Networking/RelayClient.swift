@@ -38,12 +38,7 @@ actor RelayClient {
     private func performConnect(token: String) {
         let baseURL = TarsyConfig.relayURL
 
-        guard let url = URL(string: baseURL) else {
-            print("[Relay] Invalid URL")
-            return
-        }
-
-        print("[Relay] Connecting to \(baseURL)...")
+        guard let url = URL(string: baseURL) else { return }
 
         // Cancel any existing connection
         webSocket?.cancel(with: .goingAway, reason: nil)
@@ -60,12 +55,8 @@ actor RelayClient {
         if let secret = machineSecret { auth["machineSecret"] = secret }
         if let data = try? JSONSerialization.data(withJSONObject: auth),
            let str = String(data: data, encoding: .utf8) {
-            ws.send(.string(str)) { error in
-                if let error { print("[Relay] Auth send error: \(error)") }
-            }
+            ws.send(.string(str)) { _ in }
         }
-
-        print("[Relay] Connecting as machine...")
 
         receiveLoop()
     }
@@ -76,7 +67,6 @@ actor RelayClient {
         isConnected = false
         reconnectAttempts = 0
         isReconnecting = false
-        print("[Relay] Disconnected")
     }
 
     func send(packet: WSPacket) {
@@ -85,35 +75,20 @@ actor RelayClient {
             let data = try packet.encode()
             guard let str = String(data: data, encoding: .utf8) else { return }
             let message = URLSessionWebSocketTask.Message.string(str)
-            ws.send(message) { error in
-                if let error {
-                    print("[Relay] Send error: \(error)")
-                }
-            }
-        } catch {
-            print("[Relay] Encode error: \(error)")
-        }
+            ws.send(message) { _ in }
+        } catch { }
     }
 
     func sendBinary(_ data: Data) {
         guard let ws = webSocket else { return }
         let message = URLSessionWebSocketTask.Message.data(data)
-        ws.send(message) { error in
-            if let error {
-                print("[Relay] Binary send error: \(error)")
-            }
-        }
+        ws.send(message) { _ in }
     }
 
     func sendBinary(_ data: Data, completion: @escaping @Sendable () -> Void) {
         guard let ws = webSocket else { completion(); return }
         let message = URLSessionWebSocketTask.Message.data(data)
-        ws.send(message) { error in
-            if let error {
-                print("[Relay] Binary send error: \(error)")
-            }
-            completion()
-        }
+        ws.send(message) { _ in completion() }
     }
 
     // MARK: - Receive Loop
@@ -132,7 +107,6 @@ actor RelayClient {
             if !isConnected {
                 isConnected = true
                 reconnectAttempts = 0
-                print("[Relay] Connected as machine")
             }
             switch message {
             case .string(let text):
@@ -147,8 +121,7 @@ actor RelayClient {
             }
             receiveLoop() // Continue listening
 
-        case .failure(let error):
-            print("[Relay] Receive error: \(error)")
+        case .failure:
             isConnected = false
             scheduleReconnect()
         }
@@ -157,14 +130,10 @@ actor RelayClient {
     // MARK: - Reconnect
 
     private func scheduleReconnect() {
-        guard reconnectAttempts < maxReconnectAttempts else {
-            print("[Relay] Max reconnect attempts reached")
-            return
-        }
+        guard reconnectAttempts < maxReconnectAttempts else { return }
 
         reconnectAttempts += 1
         let delay = min(reconnectAttempts * 2, 30)
-        print("[Relay] Reconnecting in \(delay)s (attempt \(reconnectAttempts))")
 
         Task {
             try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000)
@@ -173,13 +142,10 @@ actor RelayClient {
             do {
                 let refreshed = try await supabase.auth.refreshSession()
                 let token = refreshed.accessToken
-                print("[Relay] Token refreshed (exp changed: \(token != self.authToken))")
                 self.authToken = token
                 self.isReconnecting = true
                 self.performConnect(token: token)
             } catch {
-                print("[Relay] Token refresh failed: \(error.localizedDescription)")
-                // Can't reconnect without a valid token
                 if reconnectAttempts < maxReconnectAttempts {
                     scheduleReconnect()
                 }

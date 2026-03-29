@@ -76,18 +76,14 @@ public class MachineService: ObservableObject {
     public var bestIP: String? {
         // Check if we're on the same local network as the Mac
         if let macLocalIP = localIP, isOnSameSubnet(as: macLocalIP) {
-            print("[MachineService] bestIP: using local \(macLocalIP) (same subnet)")
             return macLocalIP
         }
 
         // Remote — use Tailscale
         if let tsIP = tailscaleIP {
-            print("[MachineService] bestIP: using Tailscale \(tsIP) (remote)")
             return tsIP
         }
 
-        // Last resort
-        print("[MachineService] bestIP: no IP available")
         return localIP
     }
 

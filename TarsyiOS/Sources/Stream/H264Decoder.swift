@@ -74,10 +74,12 @@ class H264Decoder: ObservableObject {
         let nalData = data.dropFirst()
         let nalUnits = parseNALUnits(nalData)
 
+        #if DEBUG
         if totalFramesReceived <= 3 || totalFramesReceived % 120 == 0 {
             let codec = codecDetected ? (isHEVC ? "HEVC" : "H264") : "detecting"
             print("[Decoder] Frame #\(totalFramesReceived) \(codec) size=\(data.count) key=\(isKeyframe) nals=\(nalUnits.count) decoded=\(totalFramesDecoded)")
         }
+        #endif
 
         for nal in nalUnits {
             guard !nal.isEmpty else { continue }
@@ -102,7 +104,6 @@ class H264Decoder: ObservableObject {
         let hevcType = (nal[0] >> 1) & 0x3F
         if hevcType == 32 {
             isHEVC = true
-            print("[Decoder] Switched to HEVC codec")
         }
     }
 
@@ -116,13 +117,11 @@ class H264Decoder: ObservableObject {
             if sps != nal {
                 sps = nal
                 formatDescription = nil
-                print("[Decoder] H.264 SPS (\(nal.count) bytes)")
             }
         case 8: // PPS
             if pps != nal {
                 pps = nal
                 formatDescription = nil
-                print("[Decoder] H.264 PPS (\(nal.count) bytes)")
             }
         case 5: // IDR
             ensureH264FormatDescription()
@@ -165,7 +164,6 @@ class H264Decoder: ObservableObject {
 
         if status == noErr, let desc {
             formatDescription = desc
-            print("[Decoder] H.264 format description created")
         }
     }
 
@@ -179,19 +177,16 @@ class H264Decoder: ObservableObject {
             if vps != nal {
                 vps = nal
                 formatDescription = nil
-                print("[Decoder] HEVC VPS (\(nal.count) bytes)")
             }
         case 33: // SPS
             if sps != nal {
                 sps = nal
                 formatDescription = nil
-                print("[Decoder] HEVC SPS (\(nal.count) bytes)")
             }
         case 34: // PPS
             if pps != nal {
                 pps = nal
                 formatDescription = nil
-                print("[Decoder] HEVC PPS (\(nal.count) bytes)")
             }
         case 19, 20: // IDR_W_RADL, IDR_N_LP
             ensureHEVCFormatDescription()
@@ -238,9 +233,6 @@ class H264Decoder: ObservableObject {
 
         if status == noErr, let desc {
             formatDescription = desc
-            print("[Decoder] HEVC format description created")
-        } else {
-            print("[Decoder] Failed to create HEVC format description: \(status)")
         }
     }
 

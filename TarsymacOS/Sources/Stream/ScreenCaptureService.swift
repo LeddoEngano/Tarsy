@@ -141,7 +141,6 @@ class ScreenCaptureService: NSObject, ObservableObject {
         try stream?.addStreamOutput(streamOutput!, type: .screen, sampleHandlerQueue: .global(qos: .userInteractive))
         try await stream?.startCapture()
         isCapturing = true
-        print("[ScreenCapture] Started capturing: \(window.title ?? "unknown")")
     }
 
     /// Capture the entire display (for OpenClaw full-screen mode)
@@ -187,7 +186,6 @@ class ScreenCaptureService: NSObject, ObservableObject {
         try await stream?.startCapture()
         isCapturing = true
         selectedWindow = nil
-        print("[ScreenCapture] Started full-display capture (\(config.width)x\(config.height))")
     }
 
     func stopCapture() async {
@@ -197,7 +195,6 @@ class ScreenCaptureService: NSObject, ObservableObject {
         // Don't nil out stream/streamOutput — keep for reuse
         isCapturing = false
         selectedWindow = nil
-        print("[ScreenCapture] Stopped")
     }
 }
 

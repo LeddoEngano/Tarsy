@@ -73,7 +73,9 @@ class H264Encoder {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits,
                            value: dataRateLimit as CFArray)
 
+        #if DEBUG
         print("[Encoder] Adaptive bitrate: \(newBitrate / 1000)kbps")
+        #endif
     }
 
     func configure(width: Int, height: Int, fps: Int, bitrate: Int) {
@@ -155,8 +157,10 @@ class H264Encoder {
         consecutiveDrops = 0
         consecutiveSuccess = 0
 
+        #if DEBUG
         let codecName = isHEVC ? "HEVC" : "H.264"
         print("[Encoder] \(codecName) configured: \(width)x\(height) @ \(fps)fps, \(bitrate/1000)kbps")
+        #endif
     }
 
     func encode(_ pixelBuffer: CVPixelBuffer) {
@@ -182,12 +186,7 @@ class H264Encoder {
             frameProperties: properties,
             infoFlagsOut: nil
         ) { [weak self] status, flags, sampleBuffer in
-            guard status == noErr, let sampleBuffer else {
-                if status != noErr {
-                    print("[Encoder] Encode error: \(status)")
-                }
-                return
-            }
+            guard status == noErr, let sampleBuffer else { return }
             self?.processSampleBuffer(sampleBuffer)
         }
     }
@@ -293,8 +292,6 @@ class H264Encoder {
         }
         session = nil
         frameCount = 0
-        let codecName = isHEVC ? "HEVC" : "H.264"
-        print("[Encoder] \(codecName) encoder stopped")
     }
 
     deinit {

@@ -35,9 +35,6 @@ class StreamViewModel: ObservableObject {
                         guard let self else { return }
                         self.fps = self.frameCount
                         self.frameCount = 0
-                        if self.fps == 0 {
-                            print("[Stream] FPS=0 | received=\(self.totalFramesReceived)")
-                        }
                     }
                 }
             }
@@ -48,7 +45,6 @@ class StreamViewModel: ObservableObject {
         let h264Data = Data(data.dropFirst(4))
 
         if !isConnected {
-            print("[Stream] First H.264 frame, size=\(h264Data.count)")
             DispatchQueue.main.async { [weak self] in
                 self?.isConnected = true
                 self?.h264Decoder.start()

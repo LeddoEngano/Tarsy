@@ -61,6 +61,7 @@ struct WorkspaceView: View {
     }
     @State private var viewMode: ViewMode = .browser
     @State private var showSessionPicker = false
+    @State private var showCommitConfirmation = false
     @State private var keyboardHeight: CGFloat = 0
     @State private var keyboardAnimation: Animation = .easeInOut(duration: 0.25)
 
@@ -151,7 +152,8 @@ struct WorkspaceView: View {
             if let feedback = checkpointFeedback {
                 VStack {
                     HStack(spacing: 8) {
-                        Image(systemName: feedback.contains("Saving") ? "arrow.triangle.2.circlepath" : feedback.contains("Saved") ? "checkmark.shield" : "xmark.shield")
+                        Image(systemName: feedback.contains("Saving") ? "arrow.triangle.2.circlepath" : feedback.contains("Committed") ? "checkmark" : "xmark")
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(feedback.contains("Failed") ? TarsyTheme.accentTerracotta : TarsyTheme.accentMoss)
                         Text(feedback)
                             .font(TarsyTheme.monoFontSmall)
@@ -191,6 +193,12 @@ struct WorkspaceView: View {
                 continueSessionInTab(session, engineType: engine)
             }
         }
+        .alert("Create Checkpoint", isPresented: $showCommitConfirmation) {
+            Button("Commit", role: nil) { createCheckpoint() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Save a git checkpoint of the current state?")
+        }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
@@ -205,7 +213,7 @@ struct WorkspaceView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 6) {
-                    Button(action: { createCheckpoint() }) {
+                    Button(action: { showCommitConfirmation = true }) {
                         ZStack(alignment: .bottomTrailing) {
                             Image("GitCommitIcon")
                                 .renderingMode(.original)
@@ -363,13 +371,12 @@ struct WorkspaceView: View {
                                     } icon: {
                                         if let asset = engine.iconAsset {
                                             Image(asset)
-                                                .renderingMode(.template)
                                                 .resizable()
                                                 .aspectRatio(contentMode: .fit)
-                                                .frame(width: 12, height: 12)
+                                                .frame(width: 20, height: 20)
                                         } else {
                                             Image(systemName: engine.iconName)
-                                                .font(.system(size: 12))
+                                                .font(.system(size: 14))
                                         }
                                     }
                                 }
@@ -1161,7 +1168,6 @@ struct WorkspaceView: View {
             await chatService.addMessage(msg)
 
             isAgentThinking = true
-            print("[Chat] sendMessage: tab=\(currentTab.type), sessionId=\(currentTab.sessionId ?? "nil"), connected=\(connectionManager.isConnected), path=\(workspace.localPath)")
 
             // Start Live Activity when user sends a real task
             if currentTab.type == .claude || currentTab.type == .engine {
@@ -1584,8 +1590,7 @@ struct WorkspaceView: View {
                 if packet.action == .gitCheckpointResult {
                     connectionManager.removeListener("git-checkpoint-\(workspace.id)")
                     if packet.payload?["success"] == "true" {
-                        let files = packet.payload?["filesChanged"] ?? "0"
-                        checkpointFeedback = "Saved (\(files) files)"
+                        checkpointFeedback = "Committed"
                         Haptics.success()
                     } else {
                         checkpointFeedback = "Failed"

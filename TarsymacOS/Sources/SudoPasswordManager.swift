@@ -290,7 +290,6 @@ actor SudoPasswordManager {
     /// The command must match the whitelist of allowed sudo commands.
     func runWithSudo(_ command: String, reason: String? = nil) async throws -> (output: String, exitCode: Int32) {
         guard isCommandAllowed(command) else {
-            print("[Security] Sudo command rejected by whitelist: \(command)")
             throw SudoError.commandNotAllowed
         }
 

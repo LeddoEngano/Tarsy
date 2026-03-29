@@ -69,7 +69,6 @@ actor WebSocketServer {
             parameters = NWParameters(tls: tlsOptions, tcp: tcpOptions)
 
             certificateFingerprint = TLSCertificateManager.shared.certificateFingerprint()
-            print("[WSServer] TLS enabled, fingerprint: \(certificateFingerprint ?? "unknown")")
         } else if tlsEnabled {
             throw NWError.posix(.ENOTSUP)
         } else {
@@ -90,11 +89,9 @@ actor WebSocketServer {
                 switch state {
                 case .ready:
                     resumed = true
-                    print("[WSServer] Listening on port \(self.port)")
                     continuation.resume()
                 case .failed(let error):
                     resumed = true
-                    print("[WSServer] Failed to start on port \(self.port): \(error)")
                     continuation.resume(throwing: error)
                 case .cancelled:
                     resumed = true
@@ -123,7 +120,6 @@ actor WebSocketServer {
         }
         connections.removeAll()
         authenticatedClients.removeAll()
-        print("[WSServer] Stopped")
     }
 
     func send(_ packet: WSPacket, to clientId: String) {
@@ -215,7 +211,7 @@ actor WebSocketServer {
             // Ban for 5 minutes
             entry.bannedUntil = now.addingTimeInterval(300)
             authFailures[ip] = entry
-            print("[WSServer] IP \(ip) temporarily banned for 5 minutes after \(entry.count) auth failures")
+            // IP banned for 5 minutes after repeated auth failures
             return true
         }
 
@@ -226,7 +222,6 @@ actor WebSocketServer {
     private func handleNewConnection(_ connection: NWConnection) {
         // Reject connections from public IPs
         if let remote = connection.currentPath?.remoteEndpoint, !isLocalNetwork(remote) {
-            print("[WSServer] Rejected connection from public IP: \(remote)")
             connection.cancel()
             return
         }
@@ -234,7 +229,6 @@ actor WebSocketServer {
         // Check if IP is banned due to auth failure rate limiting
         let ip = extractIP(from: connection.currentPath?.remoteEndpoint)
         if isIPBanned(ip) {
-            print("[WSServer] Rejected connection from banned IP: \(ip)")
             connection.cancel()
             return
         }
@@ -250,12 +244,10 @@ actor WebSocketServer {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             guard await self.connections[clientId] != nil else { return }
             guard await !self.authenticatedClients.contains(clientId) else { return }
-            print("[WSServer] Client \(clientId) auth timeout (3s), disconnecting")
             await self.send(WSPacket(action: .authFail, payload: ["reason": "auth timeout"]), to: clientId)
             await self.removeConnection(clientId)
         }
 
-        print("[WSServer] Client connected: \(clientId)")
     }
 
     private func receiveLoop(connection: NWConnection, clientId: String, authenticated: Bool, clientIP: String = "unknown") {
@@ -263,8 +255,7 @@ actor WebSocketServer {
             Task {
                 guard let self else { return }
 
-                if let error {
-                    print("[WSServer] Receive error: \(error)")
+                if error != nil {
                     await self.removeConnection(clientId)
                     return
                 }
@@ -276,9 +267,6 @@ actor WebSocketServer {
                 }
 
                 guard let packet = try? WSPacket.decode(from: data) else {
-                    // Log the raw data for debugging unknown actions
-                    let raw = String(data: data, encoding: .utf8) ?? "<binary \(data.count) bytes>"
-                    print("[WSServer] Failed to decode packet from \(clientId): \(raw.prefix(300))")
                     await self.receiveLoop(connection: connection, clientId: clientId, authenticated: authenticated, clientIP: clientIP)
                     return
                 }
@@ -289,7 +277,6 @@ actor WebSocketServer {
                         if let expectedMachineId = await self.machineId {
                             let packetMachineId = packet.payload?["machineId"]
                             if packetMachineId != expectedMachineId.uuidString {
-                                print("[WSServer] Client \(clientId) auth failed: machineId mismatch (got \(packetMachineId ?? "nil"), expected \(expectedMachineId))")
                                 let _ = await self.recordAuthFailure(ip: clientIP)
                                 await self.send(WSPacket(action: .authFail, payload: ["reason": "invalid machineId"]), to: clientId)
                                 await self.removeConnection(clientId)
@@ -300,7 +287,6 @@ actor WebSocketServer {
                         let valid = await self.validateToken(token)
                         if valid {
                             await self.markAuthenticated(clientId)
-                            print("[WSServer] Client \(clientId) authenticated")
                             var authPayload: [String: String] = [:]
                             if let fp = await self.certificateFingerprint {
                                 authPayload["fingerprint"] = fp
@@ -312,13 +298,11 @@ actor WebSocketServer {
                             await self.onClientConnected?(clientId)
                             await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true, clientIP: clientIP)
                         } else {
-                            print("[WSServer] Client \(clientId) auth failed")
                             let banned = await self.recordAuthFailure(ip: clientIP)
                             await self.send(WSPacket(action: .authFail), to: clientId)
                             await self.removeConnection(clientId)
                         }
                     } else {
-                        print("[WSServer] Client \(clientId) sent non-auth packet while unauthenticated, disconnecting")
                         await self.send(WSPacket(action: .authFail, payload: ["reason": "not authenticated"]), to: clientId)
                         await self.removeConnection(clientId)
                     }
@@ -331,7 +315,6 @@ actor WebSocketServer {
                     return
                 }
 
-                print("[WSServer] Received: \(packet.action.rawValue) from \(clientId)")
                 // Fire-and-forget: don't block the receive loop waiting for packet handling.
                 // This allows new messages (like sudoResponse) to arrive while a handler is suspended.
                 let handler = await self.getPacketHandler()
@@ -352,7 +335,6 @@ actor WebSocketServer {
         connections.removeValue(forKey: clientId)
         authenticatedClients.remove(clientId)
         onClientDisconnected?(clientId)
-        print("[WSServer] Client disconnected: \(clientId)")
     }
 
     // MARK: - Port Cleanup
@@ -375,7 +357,6 @@ actor WebSocketServer {
             let myPid = ProcessInfo.processInfo.processIdentifier
             for pidStr in output.components(separatedBy: "\n") {
                 if let pid = Int32(pidStr.trimmingCharacters(in: .whitespaces)), pid != myPid {
-                    print("[WSServer] Killing stale process \(pid) on port \(port)")
                     kill(pid, SIGTERM)
                 }
             }

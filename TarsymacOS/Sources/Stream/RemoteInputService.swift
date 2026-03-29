@@ -38,7 +38,6 @@ class RemoteInputService {
             detectSimulatorInfo()
         }
 
-        print("[RemoteInput] Target set: wid=\(windowId), pid=\(pid), sim=\(isSimulator)")
     }
 
     // MARK: - Tap
@@ -267,7 +266,6 @@ class RemoteInputService {
             process.standardError = Pipe()
             try? process.run()
             process.waitUntilExit()
-            print("[RemoteInput] Screenshot saved: \(path)")
         }
     }
 
@@ -535,14 +533,12 @@ class RemoteInputService {
                             let screenSize = screenSizeForDeviceType(deviceType)
                             simulatorScreenWidth = screenSize.width
                             simulatorScreenHeight = screenSize.height
-                            print("[RemoteInput] Simulator screen: \(screenSize.width)x\(screenSize.height) points (from \(deviceType))")
                             return
                         }
                     }
                 }
             }
         } catch {
-            print("[RemoteInput] Failed to get screen dimensions: \(error)")
         }
     }
 

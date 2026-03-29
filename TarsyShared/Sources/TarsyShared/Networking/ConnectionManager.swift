@@ -95,10 +95,8 @@ public class ConnectionManager: ObservableObject {
 
         if let host = lanHost {
             self.host = host
-            print("[WS] Trying LAN connection to \(host):\(port)...")
             performLANConnectWithRelayFallback()
         } else {
-            print("[WS] No LAN host available, connecting via relay...")
             performRelayConnect()
         }
     }
@@ -121,10 +119,8 @@ public class ConnectionManager: ObservableObject {
         errorMessage = nil
 
         if let host {
-            print("[WS] Reconnecting with smart connect to \(host):\(port)...")
             performLANConnectWithRelayFallback()
         } else {
-            print("[WS] Reconnecting via relay...")
             performRelayConnect()
         }
     }
@@ -148,11 +144,7 @@ public class ConnectionManager: ObservableObject {
     }
 
     public func send(_ packet: WSPacket) {
-        guard let data = try? packet.encode() else {
-            print("[WS] Encode failed for \(packet.action.rawValue)")
-            return
-        }
-        print("[WS] Sending: \(packet.action.rawValue)")
+        guard let data = try? packet.encode() else { return }
 
         if connectionMode == .relay {
             // Encrypt text packets for relay transit (E2E — relay can't read)
@@ -182,8 +174,7 @@ public class ConnectionManager: ObservableObject {
         let context = NWConnection.ContentContext(identifier: "text", metadata: [metadata])
 
         connection.send(content: data, contentContext: context, isComplete: true, completion: .contentProcessed { [weak self] error in
-            if let error {
-                print("[WS] LAN send error: \(error)")
+            if error != nil {
                 Task { @MainActor in self?.handleDisconnect() }
             }
         })
@@ -203,18 +194,15 @@ public class ConnectionManager: ObservableObject {
             Task { @MainActor in
                 switch state {
                 case .ready:
-                    print("[WS] LAN connected to \(host):\(port)")
                     self?.connectionMode = .lan
                     if let token = self?.authToken {
                         self?.send(WSPacket(action: .auth, payload: ["token": token, "e2ePublicKey": self?.e2e.publicKeyBase64 ?? ""]))
                     }
                     self?.receiveLANLoop()
                     self?.startPing()
-                case .failed(let error):
-                    print("[WS] LAN connection failed: \(error)")
+                case .failed:
                     self?.handleDisconnect()
-                case .waiting(let error):
-                    print("[WS] LAN waiting: \(error)")
+                case .waiting:
                 default:
                     break
                 }
@@ -240,7 +228,6 @@ public class ConnectionManager: ObservableObject {
         let timeoutTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             if !lanConnected && !self.isConnected {
-                print("[WS] LAN timeout, falling back to relay...")
                 conn.cancel()
                 self.connection = nil
                 self.performRelayConnect()
@@ -255,14 +242,12 @@ public class ConnectionManager: ObservableObject {
                     timeoutTask.cancel()
                     // If relay already connected while we were waiting, tear it down
                     if self?.relayTask != nil {
-                        print("[WS] LAN ready — cancelling relay in favor of LAN")
                         self?.relayTask?.cancel(with: .goingAway, reason: nil)
                         self?.relayTask = nil
                         self?.relaySession = nil
                         self?.pingTimer?.invalidate()
                         self?.pingTimer = nil
                     }
-                    print("[WS] LAN connected to \(host):\(port)")
                     self?.isConnected = true
                     // Don't reset isReconnecting here — let authSuccess handle it
                     // so onReconnected fires correctly on lifecycle reconnections
@@ -279,7 +264,6 @@ public class ConnectionManager: ObservableObject {
                     timeoutTask.cancel()
                     // Only fall back to relay if relay isn't already connected
                     if self?.isConnected != true {
-                        print("[WS] LAN failed, switching to relay...")
                         self?.connection = nil
                         self?.performRelayConnect()
                     }
@@ -298,8 +282,7 @@ public class ConnectionManager: ObservableObject {
     private func receiveLANLoop() {
         connection?.receiveMessage { [weak self] content, context, isComplete, error in
             Task { @MainActor in
-                if let error {
-                    print("[WS] LAN receive error: \(error)")
+                if error != nil {
                     self?.handleDisconnect()
                     return
                 }
@@ -307,7 +290,6 @@ public class ConnectionManager: ObservableObject {
                 if let data = content {
                     // Enforce message size limit on LAN (relay has 4MB WebSocket limit)
                     guard data.count <= 4 * 1024 * 1024 else {
-                        print("[WS] LAN message too large: \(data.count) bytes, dropping")
                         self?.receiveLANLoop()
                         return
                     }
@@ -348,8 +330,7 @@ public class ConnectionManager: ObservableObject {
     private func sendViaRelay(_ data: Data) {
         guard let relayTask, let str = String(data: data, encoding: .utf8) else { return }
         relayTask.send(.string(str)) { [weak self] error in
-            if let error {
-                print("[WS] Relay send error: \(error)")
+            if error != nil {
                 Task { @MainActor in self?.handleDisconnect() }
             }
         }
@@ -365,8 +346,6 @@ public class ConnectionManager: ObservableObject {
             return
         }
 
-        print("[WS] Connecting to relay...")
-
         relaySession = URLSession(configuration: .default)
         let task = relaySession!.webSocketTask(with: url)
         task.maximumMessageSize = 4 * 1024 * 1024 // 4MB
@@ -377,9 +356,7 @@ public class ConnectionManager: ObservableObject {
         let auth: [String: String] = ["action": "auth", "token": token, "role": "client"]
         if let data = try? JSONSerialization.data(withJSONObject: auth),
            let str = String(data: data, encoding: .utf8) {
-            task.send(.string(str)) { error in
-                if let error { print("[WS] Auth send error: \(error)") }
-            }
+            task.send(.string(str)) { _ in }
         }
 
         connectionMode = .relay
@@ -396,7 +373,6 @@ public class ConnectionManager: ObservableObject {
                 self.reconnectAttempts = 0
                 self.errorMessage = nil
                 self.startPing()
-                print("[WS] Relay connected (fallback)")
             }
         }
     }
@@ -444,8 +420,7 @@ public class ConnectionManager: ObservableObject {
                     }
                     self?.receiveRelayLoop()
 
-                case .failure(let error):
-                    print("[WS] Relay receive error: \(error)")
+                case .failure:
                     self?.handleDisconnect()
                 }
             }
@@ -491,19 +466,11 @@ public class ConnectionManager: ObservableObject {
                         certificateBase64: certB64,
                         forHost: h
                     )
-                    if verified {
-                        print("[WS] Authenticated (E2E ready, TLS-bound key verified)")
-                    } else {
-                        print("[WS] WARNING: E2E key signature verification failed — possible MITM")
+                    if !verified {
                         // Still connected but E2E may be compromised — reset and rely on TLS only
                         e2e.reset()
                     }
-                } else {
-                    // LAN connection (no signature needed — TLS protects directly)
-                    print("[WS] Authenticated (E2E ready, LAN/TLS)")
                 }
-            } else {
-                print("[WS] Authenticated (no E2E)")
             }
             // Notify listeners that we successfully reconnected
             if wasReconnecting {
@@ -514,7 +481,6 @@ public class ConnectionManager: ObservableObject {
             errorMessage = "authentication failed"
             disconnect()
         case .relayMachineOnline:
-            print("[WS] Mac is online via relay")
             isConnected = true
             // Don't reset isReconnecting here — let authSuccess handle it
             // so onReconnected fires correctly
@@ -544,8 +510,6 @@ public class ConnectionManager: ObservableObject {
                let decryptedData = e2e.decryptBinary(ciphertext),
                let innerPacket = try? WSPacket.decode(from: decryptedData) {
                 handlePacket(innerPacket)
-            } else {
-                print("[WS] Failed to decrypt E2E text packet")
             }
         case .error:
             let msg = packet.payload?["message"] ?? ""
@@ -615,7 +579,6 @@ public class ConnectionManager: ObservableObject {
                     let lastPong = self?.lastPongTime
                     let pongMissing = (lastPong == nil) || (lastPong! < lastPing)
                     if pongMissing && Date().timeIntervalSince(lastPing) > 15 {
-                        print("[WS] Ping timeout — no pong in 15s, treating as disconnected")
                         self?.handleDisconnect()
                         return
                     }
@@ -654,14 +617,9 @@ public class ConnectionManager: ObservableObject {
                 if fingerprint == pinned {
                     completion(true)
                 } else {
-                    // Fingerprint changed — reject connection to prevent potential MITM.
-                    // Smart connect will automatically fall back to relay.
-                    print("[WS] TLS fingerprint changed — rejecting LAN connection, will fall back to relay")
                     completion(false)
                 }
             } else {
-                // First connect (TOFU) — accept and pin later via authSuccess payload
-                print("[WS] TLS first connect — trusting certificate")
                 completion(true)
             }
         }, .global(qos: .userInitiated))
@@ -692,13 +650,11 @@ public class ConnectionManager: ObservableObject {
         let pinnedFP = loadPinnedFingerprint(forHost: host)
 
         if let pinned = pinnedFP, pinned != certFingerprint {
-            print("[WS] E2E binding failed: certificate fingerprint doesn't match pinned TLS cert")
             return false
         }
 
         // Create SecCertificate and extract public key
         guard let certificate = SecCertificateCreateWithData(nil, certData as CFData) else {
-            print("[WS] E2E binding failed: invalid certificate data")
             return false
         }
 
@@ -710,7 +666,6 @@ public class ConnectionManager: ObservableObject {
         }
 
         guard let publicKey = SecTrustCopyKey(trustRef) else {
-            print("[WS] E2E binding failed: could not extract public key from certificate")
             return false
         }
 
@@ -723,10 +678,6 @@ public class ConnectionManager: ObservableObject {
             signatureData as CFData,
             &error
         )
-
-        if !verified {
-            print("[WS] E2E binding failed: signature verification error: \(error?.takeRetainedValue().localizedDescription ?? "unknown")")
-        }
 
         return verified
     }

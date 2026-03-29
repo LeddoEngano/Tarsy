@@ -31,7 +31,6 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
         let token = deviceToken.map { String(format: "%02.2hhx", $0) }.joined()
-        print("[Push] Device token registered (\(token.count) chars)")
         AppDelegate.pendingPushToken = token
         // Try to save now — will fail silently if not authed yet
         Task { await AppDelegate.savePushTokenIfNeeded() }
@@ -51,16 +50,12 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     onConflict: "device_token"
                 )
                 .execute()
-            print("[Push] Token saved to Supabase")
             pendingPushToken = nil
         } catch {
-            print("[Push] Token save deferred (not authed yet)")
         }
     }
 
-    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
-        print("[Push] Failed to register: \(error.localizedDescription)")
-    }
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) { }
 
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
         AppDelegate.orientationLock
@@ -116,7 +111,6 @@ struct TarsyiOSApp: App {
                 .onOpenURL { url in
                     guard url.scheme == "com.tarsy.ios",
                           url.host == "login-callback" else {
-                        print("[Auth] Ignored unexpected URL: \(url.scheme ?? "nil")")
                         return
                     }
                     Task {
@@ -126,13 +120,9 @@ struct TarsyiOSApp: App {
                 .onChange(of: scenePhase) { _, newPhase in
                     switch newPhase {
                     case .background:
-                        // Clean disconnect prevents zombie connections when iOS suspends the socket
-                        print("[Lifecycle] App entering background — disconnecting cleanly")
                         connectionManager.disconnect()
                     case .active:
-                        // Re-establish connection when returning to foreground
                         if authManager.isAuthenticated && !connectionManager.isConnected {
-                            print("[Lifecycle] App became active — reconnecting...")
                             Task {
                                 await connectionManager.reconnectIfNeeded()
                             }

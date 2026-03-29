@@ -23,7 +23,6 @@ public class ProfileService: ObservableObject {
                 .value
             profile = result
         } catch {
-            print("[ProfileService] Load error: \(error)")
             // Profile might not exist yet (pre-trigger users) — try to create it
             await ensureProfileExists()
         }
@@ -42,7 +41,6 @@ public class ProfileService: ObservableObject {
                 .execute()
             profile?.displayName = name
         } catch {
-            print("[ProfileService] Update name error: \(error)")
         }
     }
 
@@ -56,7 +54,6 @@ public class ProfileService: ObservableObject {
                 .execute()
             profile?.voiceLanguage = language
         } catch {
-            print("[ProfileService] Update voice language error: \(error)")
         }
     }
 
@@ -74,7 +71,6 @@ public class ProfileService: ObservableObject {
                 .execute()
             profile?.agentPermissions = permissions
         } catch {
-            print("[ProfileService] Update permissions error: \(error)")
         }
     }
 
@@ -101,7 +97,6 @@ public class ProfileService: ObservableObject {
             profile?.subscriptionStatus = status
             profile?.subscriptionEndDate = endDate
         } catch {
-            print("[ProfileService] Update subscription error: \(error)")
         }
     }
 
@@ -130,12 +125,9 @@ public class ProfileService: ObservableObject {
                 let (_, response) = try await URLSession.shared.data(for: request)
                 let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
                 if (200...299).contains(statusCode) {
-                    print("[ProfileService] Billing email '\(type)' sent OK (attempt \(attempt))")
                     return
                 }
-                print("[ProfileService] Billing email '\(type)' failed with status \(statusCode) (attempt \(attempt))")
             } catch {
-                print("[ProfileService] Billing email '\(type)' error: \(error) (attempt \(attempt))")
             }
             if attempt < 2 {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -172,7 +164,6 @@ public class ProfileService: ObservableObject {
                 .execute()
             profile?.onboarded = true
         } catch {
-            print("[ProfileService] Mark onboarded error: \(error)")
         }
     }
 
@@ -196,7 +187,6 @@ public class ProfileService: ObservableObject {
                 .value
             profile = created
         } catch {
-            print("[ProfileService] Ensure profile error: \(error)")
         }
     }
 }

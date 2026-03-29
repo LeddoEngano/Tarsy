@@ -84,7 +84,6 @@ final class TLSCertificateManager {
 
         var error: Unmanaged<CFError>?
         guard let privateKey = SecKeyCreateRandomKey(keyPairAttrs as CFDictionary, &error) else {
-            print("[TLS] Key generation failed: \(error?.takeRetainedValue().localizedDescription ?? "unknown")")
             return nil
         }
 
@@ -206,7 +205,6 @@ final class TLSCertificateManager {
             data as CFData,
             &error
         ) else {
-            print("[TLS] Signing failed: \(error?.takeRetainedValue().localizedDescription ?? "unknown")")
             return nil
         }
 
