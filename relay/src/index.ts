@@ -359,7 +359,8 @@ const server = Bun.serve({
       if (isRateLimited(ws)) return; // Drop excess messages silently
 
       // Enforce text message size limit (binary frames like video use the WebSocket-level 4MB limit)
-      if (typeof message === "string" && message.length > 65536) {
+      // 1MB allows large git diffs and file trees while preventing abuse
+      if (typeof message === "string" && message.length > 1_048_576) {
         console.log(`[Relay] Text message too large: ${message.length} bytes from ${info.role} ${shortId(info.userId)}`);
         return;
       }

@@ -7,6 +7,7 @@ public class ChatService: ObservableObject {
     @Published public var updateCounter: Int = 0
 
     private var currentTabId: String?
+    private var tabMessages: [String: [ChatMessage]] = [:]
 
     public init() {}
 
@@ -49,19 +50,38 @@ public class ChatService: ObservableObject {
     // MARK: - Tab management
 
     public func switchTab(tabId: String) {
+        // Save current tab's messages
+        if let currentId = currentTabId {
+            tabMessages[currentId] = messages
+        }
         currentTabId = tabId
-        messages = []
+        // Restore target tab's messages
+        messages = tabMessages[tabId] ?? []
     }
 
     // MARK: - Add
 
     public func addMessage(_ message: ChatMessage) async {
-        messages.append(message)
+        if message.tabId == currentTabId {
+            messages.append(message)
+        } else {
+            tabMessages[message.tabId, default: []].append(message)
+        }
     }
 
     public func addAssistantChunk(workspaceId: UUID, tabId: String, content: String) {
-        // If last message is from assistant in same tab, append to it
-        if let last = messages.last, last.role == .assistant, last.tabId == tabId {
+        if tabId == currentTabId {
+            appendChunk(to: &messages, workspaceId: workspaceId, tabId: tabId, content: content)
+            updateCounter += 1
+        } else {
+            var cached = tabMessages[tabId] ?? []
+            appendChunk(to: &cached, workspaceId: workspaceId, tabId: tabId, content: content)
+            tabMessages[tabId] = cached
+        }
+    }
+
+    private func appendChunk(to msgs: inout [ChatMessage], workspaceId: UUID, tabId: String, content: String) {
+        if let last = msgs.last, last.role == .assistant, last.tabId == tabId {
             let updated = ChatMessage(
                 id: last.id,
                 workspaceId: last.workspaceId,
@@ -70,8 +90,7 @@ public class ChatService: ObservableObject {
                 content: last.content + content,
                 createdAt: last.createdAt
             )
-            messages[messages.count - 1] = updated
-            updateCounter += 1
+            msgs[msgs.count - 1] = updated
         } else {
             let msg = ChatMessage(
                 workspaceId: workspaceId,
@@ -79,7 +98,12 @@ public class ChatService: ObservableObject {
                 role: .assistant,
                 content: content.replacingOccurrences(of: "^\\s+", with: "", options: .regularExpression)
             )
-            messages.append(msg)
+            msgs.append(msg)
         }
+    }
+
+    /// Remove cached messages for a closed tab.
+    public func removeTab(_ tabId: String) {
+        tabMessages.removeValue(forKey: tabId)
     }
 }

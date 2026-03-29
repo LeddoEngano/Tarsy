@@ -42,6 +42,7 @@ actor GenericCLIEngine: AIEngine {
 
     func start() throws {
         isRunning = true
+        onOutput?("\(engineType.readyMessage)\n")
     }
 
     func sendMessage(_ message: String) {

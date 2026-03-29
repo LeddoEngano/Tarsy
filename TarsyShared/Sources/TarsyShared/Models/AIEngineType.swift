@@ -110,6 +110,29 @@ public enum AIEngineType: String, Codable, Sendable, CaseIterable {
         self == .claude
     }
 
+    /// Random fun ready message shown when the engine starts.
+    public var readyMessage: String {
+        let name = displayName
+        let messages = [
+            "\(name) locked and loaded. What are we building?",
+            "Your AI minion is ready. Command me, master.",
+            "\(name) online. Let's write some beautiful code.",
+            "Reporting for duty. Coffee not required (for me at least).",
+            "\(name) initialized. Time to make some magic happen.",
+            "Ready to rock. Just don't ask me to center a div... kidding, I got this.",
+            "System online. Brain at 100%. Humility at 12%. Let's go.",
+            "\(name) at your service. No bugs were harmed... yet.",
+            "Connected and caffeinated (metaphorically). What's the mission?",
+            "All systems go. Warning: may produce unreasonably good code.",
+            "\(name) pronto. Bora codar!",
+            "Engines on. Seatbelts fastened. Destination: production.",
+            "I'm here, I'm ready, and I have mass opinions about tabs vs spaces.",
+            "\(name) activated. Today's forecast: 100% chance of shipping.",
+            "Online and dangerously motivated. What are we breaking... I mean building?",
+        ]
+        return messages.randomElement()!
+    }
+
     /// Whether this engine supports MCP (Model Context Protocol) servers.
     public var supportsMCP: Bool {
         switch self {

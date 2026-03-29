@@ -203,6 +203,7 @@ public class ConnectionManager: ObservableObject {
                 case .failed:
                     self?.handleDisconnect()
                 case .waiting:
+                    break
                 default:
                     break
                 }
