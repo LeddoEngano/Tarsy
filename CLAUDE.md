@@ -41,7 +41,7 @@ iPhone/iPad app. Entry point: `ContentView` manages auth state (splash → login
 - **Workspace management** — `NewWorkspaceView` (scanned repos + manual creation), `WorkspaceSettingsView`, `AIContextEditorView` (templates for project overview, coding style, testing rules)
 - **MCP integrations** — `MCPStoreView` detects MCPs from all installed agents (not just Claude Code) with health indicators
 - **Web browser** — `WebBrowserView` (dev server management, port detection, WKWebView) + `TarsyProxySchemeHandler` (custom `tarsy-http://` scheme that proxies requests through WebSocket)
-- **Subscription** — `SubscriptionManager` (StoreKit 2, product: `tarsy_pro_monthly`) + `PaywallView`. Free: 1 workspace. Pro ($9/month): unlimited workspaces + OpenClaw access.
+- **Subscription** — `SubscriptionManager` (StoreKit 2, products: `tarsy_pro_monthly` + `tarsy_pro_annual`) + `PaywallView`. Free: 1 workspace. Pro ($14.99/month or $119.99/year): unlimited workspaces + OpenClaw access.
 - **Git** — `GitSafetyNetView` (3 tabs: Changes, History, Branches; diff viewer, rollback with checkpoints)
 - **Live Activities** — `LiveActivityManager` shows real-time agent status on the Lock Screen and Dynamic Island during active AI sessions
 - **Other** — `FileExplorerView` (tree view with search), `VoiceInputManager` (SFSpeechRecognizer, 9 languages, on-device when available), `PermissionOnboardingView` (auto/safe mode per engine), `ActiveSessionsView` (UltraContext session list with continue-session), `QuickDispatchView` (rapid task dispatch from dashboard), `SplashView`, `LoginView`, `StatusBanner` (reconnecting/error/relay indicators), `Haptics`
@@ -127,9 +127,10 @@ The user picks the engine per workspace. All engines conform to `AIEngineProtoco
 
 ## Monetization
 
-Freemium model via StoreKit 2 subscription (product ID: `tarsy_pro_monthly`):
+Freemium model via StoreKit 2 subscriptions (group: `Tarsy Pro`):
 - **Free:** 1 workspace, OpenClaw tab visible but Pro-gated (shows paywall)
-- **Pro ($9/month):** unlimited workspaces, full OpenClaw access
+- **Pro Monthly ($14.99/month):** unlimited workspaces, full OpenClaw access (product ID: `tarsy_pro_monthly`)
+- **Pro Annual ($119.99/year ≈ $9.99/month):** same as Pro Monthly, 33% savings (product ID: `tarsy_pro_annual`)
 
 Subscription status syncs between StoreKit and Supabase `profiles` table. Billing emails sent via `send-email` edge function on subscription state transitions.
 

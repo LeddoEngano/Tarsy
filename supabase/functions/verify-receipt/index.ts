@@ -363,7 +363,8 @@ serve(async (req) => {
     }
 
     // Validate product ID
-    if (transaction.productId !== "tarsy_pro_monthly") {
+    const validProductIds = ["tarsy_pro_monthly", "tarsy_pro_annual"];
+    if (!validProductIds.includes(transaction.productId)) {
       return new Response(
         JSON.stringify({ error: "Unknown product" }),
         { status: 400, headers: { "Content-Type": "application/json" } }

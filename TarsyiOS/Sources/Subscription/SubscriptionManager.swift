@@ -6,13 +6,19 @@ import TarsyShared
 class SubscriptionManager: ObservableObject {
     static let shared = SubscriptionManager()
 
-    static let proProductId = "tarsy_pro_monthly"
+    static let proMonthlyProductId = "tarsy_pro_monthly"
+    static let proAnnualProductId = "tarsy_pro_annual"
+    static let allProductIds = [proMonthlyProductId, proAnnualProductId]
     static let maxFreeWorkspaces = 1
 
     @Published var isPro = false
     @Published var isLoading = true
-    @Published var product: Product?
+    @Published var monthlyProduct: Product?
+    @Published var annualProduct: Product?
     @Published var expirationDate: Date?
+
+    /// Convenience: the monthly product (used by legacy callers)
+    var product: Product? { monthlyProduct }
 
     var profileService: ProfileService?
     private var transactionListener: Task<Void, Never>?
@@ -39,10 +45,18 @@ class SubscriptionManager: ObservableObject {
 
     func loadProduct() async {
         do {
-            let products = try await Product.products(for: [Self.proProductId])
-            product = products.first
+            let products = try await Product.products(for: Self.allProductIds)
+            for p in products {
+                switch p.id {
+                case Self.proMonthlyProductId:
+                    monthlyProduct = p
+                case Self.proAnnualProductId:
+                    annualProduct = p
+                default:
+                    break
+                }
+            }
         } catch {
-            print("[Subscription] Error loading product: \(error)")
         }
     }
 
@@ -51,7 +65,7 @@ class SubscriptionManager: ObservableObject {
 
         for await result in Transaction.currentEntitlements {
             if let transaction = try? result.payloadValue,
-               transaction.productID == Self.proProductId {
+               Self.allProductIds.contains(transaction.productID) {
                 foundActive = true
                 expirationDate = transaction.expirationDate
                 break
@@ -60,18 +74,17 @@ class SubscriptionManager: ObservableObject {
 
         isPro = foundActive
         isLoading = false
-        print("[Subscription] Pro: \(isPro), expires: \(expirationDate?.description ?? "n/a")")
         await syncWithProfile()
     }
 
-    func purchase() async -> Bool {
-        guard let product else {
-            print("[Subscription] No product available")
+    func purchase(annual: Bool = false) async -> Bool {
+        let selectedProduct = annual ? annualProduct : monthlyProduct
+        guard let selectedProduct else {
             return false
         }
 
         do {
-            let result = try await product.purchase()
+            let result = try await selectedProduct.purchase()
 
             switch result {
             case .success(let verification):
@@ -93,7 +106,6 @@ class SubscriptionManager: ObservableObject {
                 return false
             }
         } catch {
-            print("[Subscription] Purchase error: \(error)")
             return false
         }
     }
@@ -104,7 +116,6 @@ class SubscriptionManager: ObservableObject {
             await refreshStatus()
             return isPro
         } catch {
-            print("[Subscription] Restore error: \(error)")
             return false
         }
     }
@@ -119,7 +130,7 @@ class SubscriptionManager: ObservableObject {
 
         let wasPro = isPro
 
-        if transaction.productID == Self.proProductId {
+        if Self.allProductIds.contains(transaction.productID) {
             if transaction.revocationDate != nil {
                 isPro = false
                 expirationDate = nil
@@ -146,7 +157,7 @@ class SubscriptionManager: ObservableObject {
         // Find the latest verified transaction to send to the server
         for await result in Transaction.currentEntitlements {
             guard let transaction = try? result.payloadValue,
-                  transaction.productID == Self.proProductId else { continue }
+                  Self.allProductIds.contains(transaction.productID) else { continue }
 
             // Get the JWS representation for server-side validation
             let jwsRepresentation = result.jwsRepresentation
@@ -182,12 +193,8 @@ class SubscriptionManager: ObservableObject {
                 isPro = serverIsPro
                 expirationDate = serverEndDate
                 profileService?.profile?.isPro = serverIsPro
-                print("[Subscription] Server verified: isPro=\(serverIsPro)")
-            } else {
-                print("[Subscription] Server verification failed: HTTP \(httpResponse?.statusCode ?? 0)")
             }
         } catch {
-            print("[Subscription] Server verification error: \(error)")
         }
     }
 
