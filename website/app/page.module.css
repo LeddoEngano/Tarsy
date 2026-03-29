@@ -155,13 +155,42 @@
   text-align: center;
 }
 
+.priceCards {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  max-width: 780px;
+  margin: 0 auto;
+}
+
 .priceCard {
   background: var(--bg-secondary);
   border: 1px solid var(--bg-tertiary);
   border-radius: 16px;
   padding: 40px;
+  flex: 1;
   max-width: 380px;
-  margin: 0 auto;
+  position: relative;
+}
+
+.priceCardFeatured {
+  border-color: var(--accent-amber);
+  border-width: 2px;
+}
+
+.badge {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--accent-amber);
+  color: var(--bg-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 4px 14px;
+  border-radius: 20px;
+  white-space: nowrap;
 }
 
 .planName {
@@ -228,5 +257,13 @@
   }
   .featuresGrid {
     grid-template-columns: 1fr;
+  }
+  .priceCards {
+    flex-direction: column;
+    align-items: center;
+  }
+  .priceCard {
+    max-width: 100%;
+    width: 100%;
   }
 }

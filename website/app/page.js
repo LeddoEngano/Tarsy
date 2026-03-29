@@ -69,18 +69,34 @@ export default function Home() {
 
       <section className={styles.pricing} id="pricing">
         <h2 className={styles.sectionTitle}>PRICING</h2>
-        <div className={styles.priceCard}>
-          <div className={styles.planName}>TARSY PRO</div>
-          <div className={styles.price}>$9<span>/month</span></div>
-          <div className={styles.cancel}>cancel anytime</div>
-          <ul>
-            {proFeatures.map((f) => (
-              <li key={f}>{f}</li>
-            ))}
-          </ul>
-          <a href="https://apps.apple.com/app/tarsy" className={styles.ctaBlock}>
-            Get Tarsy Pro
-          </a>
+        <div className={styles.priceCards}>
+          <div className={styles.priceCard}>
+            <div className={styles.planName}>MONTHLY</div>
+            <div className={styles.price}>$14.99<span>/month</span></div>
+            <div className={styles.cancel}>cancel anytime</div>
+            <ul>
+              {proFeatures.map((f) => (
+                <li key={f}>{f}</li>
+              ))}
+            </ul>
+            <a href="https://apps.apple.com/app/tarsy" className={styles.ctaBlock}>
+              Get Tarsy Pro
+            </a>
+          </div>
+          <div className={`${styles.priceCard} ${styles.priceCardFeatured}`}>
+            <div className={styles.badge}>SAVE 33%</div>
+            <div className={styles.planName}>ANNUAL</div>
+            <div className={styles.price}>$9.99<span>/month</span></div>
+            <div className={styles.cancel}>$119.99 billed annually</div>
+            <ul>
+              {proFeatures.map((f) => (
+                <li key={f}>{f}</li>
+              ))}
+            </ul>
+            <a href="https://apps.apple.com/app/tarsy" className={styles.ctaBlock}>
+              Get Tarsy Pro
+            </a>
+          </div>
         </div>
       </section>
     </>

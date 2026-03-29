@@ -100,16 +100,17 @@ export default function Terms() {
       <h3>4.1 Plans</h3>
       <p>
         Tarsy offers a free tier (limited to 1 workspace; certain features
-        such as OpenClaw require Tarsy Pro) and a paid subscription plan,
-        Tarsy Pro (unlimited workspaces, full access to all features), at a
-        price displayed at the time of purchase.
+        such as OpenClaw require Tarsy Pro) and paid subscription plans:
+        Tarsy Pro Monthly and Tarsy Pro Annual (both providing unlimited
+        workspaces and full access to all features), at the prices displayed
+        at the time of purchase.
       </p>
 
       <h3>4.2 Billing</h3>
       <ul>
         <li>
-          Subscriptions are billed monthly through the Apple App Store and
-          processed via Apple&apos;s payment infrastructure.
+          Subscriptions are billed monthly or annually through the Apple App
+          Store and processed via Apple&apos;s payment infrastructure.
         </li>
         <li>
           Payment is charged to your Apple ID account at confirmation of
