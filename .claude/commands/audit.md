@@ -1,5 +1,5 @@
 ---
-name: vibecoder-review
+name: audit
 description: Practical OWASP-focused security review for fast-moving codebases built with AI assistance - catches common patterns where speed trumps security (exposed secrets, auth bypasses, missing access controls, injection vulnerabilities)
 ---
 
@@ -697,7 +697,7 @@ Keep it simple and actionable:
 ```markdown
 # Vibecoder Security Review: [Project Name]
 
-**Date:** 2024-XX-XX
+**Date:** YYYY-MM-DD
 
 ## Summary
 
@@ -714,7 +714,7 @@ Found X high-priority issues, Y medium-priority issues in this [framework] appli
 const OPENAI_API_KEY = "sk-proj-abc123...";
 ```
 
-**Impact:** Anyone viewing page source can steal key → unlimited API usage billed to you
+**Impact:** Anyone viewing page source can steal key -> unlimited API usage billed to you
 
 **Evidence:**
 - Key visible in bundled `main.js` (line 1234)
@@ -735,7 +735,7 @@ app.get('/api/profile', (req, res) => {
 });
 ```
 
-**Impact:** Change `userId` in URL → access any user's profile data
+**Impact:** Change `userId` in URL -> access any user's profile data
 
 **Attack scenario:**
 1. Normal: `/api/profile?userId=123` (your account)
@@ -758,19 +758,6 @@ app.get('/api/profile', (req, res) => {
 **Environment:** [Production, staging visible]
 **Auth pattern:** [JWT, sessions, etc.]
 ```
-
-## Time Budget
-
-**Total:** ~2 hours for initial review
-
-- Quick recon: 15 min
-- Secrets scan: 10 min
-- Auth review: 20 min
-- Data access: 20 min
-- Injection scan: 20 min
-- Uploads & deps: 10 min
-- Hygiene: 5 min
-- Documentation: 20 min
 
 ## Key Principles
 
@@ -817,38 +804,3 @@ app.get('/api/profile', (req, res) => {
 - Are test credentials actually disabled in production?
 - Is the dependency vulnerability actually exploitable here?
 - Are platform-level protections actually enabled?
-
-## Integration with Other Skills
-
-This skill is **not** a replacement for:
-- **reconnaissance** - Use for comprehensive mapping
-- **analysis-deep-dive** - Use for validating data flow
-- **assessment** - Use for severity classification
-
-This skill **is** good for:
-- Initial triage before deeper analysis
-- Quick health checks
-- Finding obvious low-hanging fruit
-- Scoping a full security review
-
-## Success Criteria
-
-A good vibecoder review finds:
-- 3-5 high-severity issues in typical projects
-- 5-10 medium-severity issues
-- Actionable, specific remediation advice
-- Clear attack scenarios for each finding
-
-**Red flags if you find nothing:**
-- Either the code is unusually secure (rare for vibecoders)
-- Or you missed something - dig deeper
-
-## The Bottom Line
-
-**Vibecoders prioritize shipping over security.** This creates predictable patterns:
-- Hardcoded secrets (fastest to "just make it work")
-- Missing authorization (works in demo with one user)
-- Trust in client (easy to build, hard to secure)
-- No validation (adds friction to development)
-
-**Your job:** Find these patterns before attackers do. Focus on what's easy to exploit, not theoretical risks.
