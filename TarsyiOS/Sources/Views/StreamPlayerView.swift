@@ -131,6 +131,7 @@ struct StreamPlayerView: View {
                     // Bottom controls — matches browser layout
                     VStack(alignment: .leading, spacing: 8) {
                         streamButton("camera.viewfinder") {
+                            print("[Screenshot] Button tapped")
                             saveScreenshot()
                         }
 
@@ -523,8 +524,16 @@ struct StreamPlayerView: View {
     }
 
     private func saveScreenshot() {
-        guard let image = viewModel.h264Decoder.captureScreenshot() else { return }
+        print("[Screenshot] saveScreenshot called")
+        print("[Screenshot] decoder.lastFrameImage exists: \(viewModel.h264Decoder.captureScreenshot() != nil)")
+        print("[Screenshot] onScreenshot callback exists: \(onScreenshot != nil)")
+        guard let image = viewModel.h264Decoder.captureScreenshot() else {
+            print("[Screenshot] FAILED: captureScreenshot returned nil")
+            return
+        }
+        print("[Screenshot] Got image: \(image.size)")
         onScreenshot?(image)
+        print("[Screenshot] onScreenshot called")
     }
 
     // MARK: - Browser Navigation (sends commands to macOS)

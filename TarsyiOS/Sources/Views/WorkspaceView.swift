@@ -47,8 +47,6 @@ struct WorkspaceView: View {
     @State private var showGitSheet = false
     @State private var showFileExplorer = false
     @State private var showMCPStore = false
-    @State private var showAIContext = false
-    @State private var showWorkspaceSettings = false
     @State private var showPaywall = false
     @State private var importedSessionTabs: Set<String> = []
     @State private var checkpointFeedback: String? = nil
@@ -142,9 +140,6 @@ struct WorkspaceView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Custom header (replaces UINavigationBar to avoid rotation layout bug)
-                customHeader
-
                 if workspace.isFullScreen {
                     // OpenClaw: stream-first layout
                     openClawLayout
@@ -207,15 +202,58 @@ struct WorkspaceView: View {
         } message: {
             Text("Save a git checkpoint of the current state?")
         }
-        .navigationBarHidden(true)
-        .navigationDestination(isPresented: $showAIContext) {
-            AIContextEditorView(workspace: workspace)
-                .environmentObject(workspaceService)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(workspace.status == .running ? TarsyTheme.statusRunning : TarsyTheme.statusIdle)
+                        .frame(width: 8, height: 8)
+                    Text(workspace.name)
+                        .font(TarsyTheme.monoFont)
+                        .foregroundColor(TarsyTheme.textPrimary)
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 6) {
+                    Button(action: { showCommitConfirmation = true }) {
+                        ZStack(alignment: .bottomTrailing) {
+                            Image("GitCommitIcon")
+                                .renderingMode(.original)
+                                .resizable()
+                                .frame(width: 22, height: 22)
+                            Image(systemName: "plus")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(Color(red: 0.133, green: 0.773, blue: 0.369))
+                                .offset(x: -10, y: -1)
+                        }
+                    }
+
+                    Menu {
+                        Button(action: { showGitSheet = true }) {
+                            Label("git", systemImage: "arrow.triangle.branch")
+                        }
+                        Button(action: { showFileExplorer = true }) {
+                            Label("file explorer", systemImage: "folder")
+                        }
+                        Button(action: { showMCPStore = true }) {
+                            Label("integrations", systemImage: "puzzlepiece.extension")
+                        }
+                        NavigationLink(destination: AIContextEditorView(workspace: workspace).environmentObject(workspaceService)) {
+                            Label("ai context", systemImage: "brain")
+                        }
+                        NavigationLink(destination: WorkspaceSettingsView(workspace: workspace).environmentObject(workspaceService)) {
+                            Label("settings", systemImage: "gearshape")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundColor(TarsyTheme.accentAmber)
+                    }
+                }
+            }
         }
-        .navigationDestination(isPresented: $showWorkspaceSettings) {
-            WorkspaceSettingsView(workspace: workspace)
-                .environmentObject(workspaceService)
-        }
+        .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .task {
             // Initialize tabs
             if tabs.isEmpty {
@@ -544,72 +582,6 @@ struct WorkspaceView: View {
     // MARK: - OpenClaw Layout (stream-first, chat as overlay)
 
     @State private var showOpenClawChat = false
-    @Environment(\.dismiss) private var dismiss
-
-    private var customHeader: some View {
-        HStack(spacing: 0) {
-            Button(action: { dismiss() }) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(TarsyTheme.textPrimary)
-                    .frame(width: 44, height: 44)
-            }
-
-            Spacer()
-
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(workspace.status == .running ? TarsyTheme.statusRunning : TarsyTheme.statusIdle)
-                    .frame(width: 8, height: 8)
-                Text(workspace.name)
-                    .font(TarsyTheme.monoFont)
-                    .foregroundColor(TarsyTheme.textPrimary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            HStack(spacing: 6) {
-                Button(action: { showCommitConfirmation = true }) {
-                    ZStack(alignment: .bottomTrailing) {
-                        Image("GitCommitIcon")
-                            .renderingMode(.original)
-                            .resizable()
-                            .frame(width: 22, height: 22)
-                        Image(systemName: "plus")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(Color(red: 0.133, green: 0.773, blue: 0.369))
-                            .offset(x: -10, y: -1)
-                    }
-                }
-
-                Menu {
-                    Button(action: { showGitSheet = true }) {
-                        Label("git", systemImage: "arrow.triangle.branch")
-                    }
-                    Button(action: { showFileExplorer = true }) {
-                        Label("file explorer", systemImage: "folder")
-                    }
-                    Button(action: { showMCPStore = true }) {
-                        Label("integrations", systemImage: "puzzlepiece.extension")
-                    }
-                    Button(action: { showAIContext = true }) {
-                        Label("ai context", systemImage: "brain")
-                    }
-                    Button(action: { showWorkspaceSettings = true }) {
-                        Label("settings", systemImage: "gearshape")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .foregroundColor(TarsyTheme.accentAmber)
-                }
-            }
-            .fixedSize()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(TarsyTheme.backgroundPrimary)
-    }
 
     private var openClawLayout: some View {
         ZStack(alignment: .bottom) {
@@ -775,7 +747,11 @@ struct WorkspaceView: View {
             }
 
             ZStack {
-                chatArea
+                VStack(spacing: 0) {
+                    chatArea
+                    inputBar
+                        .padding(.bottom, isInputFocused ? keyboardHeight : 0)
+                }
 
                 if let questions = interactiveQuestions {
                     PaginatedQuestionCard(
@@ -790,13 +766,14 @@ struct WorkspaceView: View {
                         }
                     )
                     .padding(.horizontal, 12)
-                    .frame(maxHeight: .infinity)
+                    .padding(.top, 10)
+                    .padding(.bottom, 8)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                     .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
                 }
             }
 
-            inputBar
+            infoBar
                 .padding(.bottom, isInputFocused ? keyboardHeight : 0)
         }
         .ignoresSafeArea(edges: .bottom)
@@ -873,6 +850,61 @@ struct WorkspaceView: View {
         )
         .background(TarsyTheme.backgroundSecondary.opacity(0.9))
         .cornerRadius(12)
+    }
+
+    private var infoBar: some View {
+        VStack(spacing: 0) {
+            // Info bar
+            HStack(spacing: 0) {
+                // Branch + pull
+                Button(action: { pullBranch() }) {
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 10))
+                        Text(currentBranch.isEmpty ? workspace.currentBranch ?? "main" : currentBranch)
+                            .lineLimit(1)
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 8))
+                    }
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textSecondary)
+                }
+
+                Text("  |  ")
+                    .font(.system(size: 11))
+                    .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
+
+                // Engine + model
+                HStack(spacing: 3) {
+                    AgentIcon(engineType: currentTab.engineType ?? .claude, size: 14)
+                    Text(engineDisplayName)
+                        .lineLimit(1)
+                }
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(TarsyTheme.textSecondary)
+
+                if contextPercent > 0 {
+                    Text("  |  ")
+                        .font(.system(size: 11))
+                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
+
+                    // Context %
+                    Text("\(Int(contextPercent))% ctx")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(contextPercent > 80 ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 6)
+
+            // Extra space for home indicator when safe area is ignored
+            if !isInputFocused {
+                Color.clear.frame(height: 20)
+            }
+        }
+        .background(TarsyTheme.backgroundPrimary)
     }
 
     private var inputBar: some View {
@@ -969,8 +1001,8 @@ struct WorkspaceView: View {
                         Image(systemName: isRecording ? "mic.fill" : "mic")
                             .font(.system(size: 16))
                             .foregroundColor(isRecording ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
+                            .frame(width: 36, height: 36)
                     }
-                        .frame(height: 36)
                         .gesture(
                             LongPressGesture(minimumDuration: 0.15)
                                 .onEnded { _ in startVoiceInput() }
@@ -1001,56 +1033,6 @@ struct WorkspaceView: View {
             .if_iOS26GlassEffect()
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-
-            // Info bar
-            HStack(spacing: 0) {
-                // Branch + pull
-                Button(action: { pullBranch() }) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 10))
-                        Text(currentBranch.isEmpty ? workspace.currentBranch ?? "main" : currentBranch)
-                            .lineLimit(1)
-                        Image(systemName: "arrow.down")
-                            .font(.system(size: 8))
-                    }
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(TarsyTheme.textSecondary)
-                }
-
-                Text("  |  ")
-                    .font(.system(size: 11))
-                    .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
-
-                // Engine + model
-                HStack(spacing: 3) {
-                    AgentIcon(engineType: currentTab.engineType ?? .claude, size: 14)
-                    Text(engineDisplayName)
-                        .lineLimit(1)
-                }
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(TarsyTheme.textSecondary)
-
-                if contextPercent > 0 {
-                    Text("  |  ")
-                        .font(.system(size: 11))
-                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
-
-                    // Context %
-                    Text("\(Int(contextPercent))% ctx")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(contextPercent > 80 ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 6)
-
-            // Extra space for home indicator when safe area is ignored
-            if !isInputFocused {
-                Color.clear.frame(height: 20)
-            }
         }
         .background(TarsyTheme.backgroundPrimary)
         .overlay(alignment: .topLeading) {
@@ -1152,10 +1134,10 @@ struct WorkspaceView: View {
                     .foregroundColor(TarsyTheme.textSecondary)
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 3)
+        .padding(.vertical, 2)
         .background(TarsyTheme.backgroundSecondary)
-        .cornerRadius(8)
+        .cornerRadius(6)
     }
 
     // MARK: - Actions

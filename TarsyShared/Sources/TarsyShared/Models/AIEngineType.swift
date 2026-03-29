@@ -124,7 +124,7 @@ public enum AIEngineType: String, Codable, Sendable, CaseIterable {
             "\(name) at your service. No bugs were harmed... yet.",
             "Connected and caffeinated (metaphorically). What's the mission?",
             "All systems go. Warning: may produce unreasonably good code.",
-            "\(name) pronto. Bora codar!",
+            "\(name) is up. Let's write some code!",
             "Engines on. Seatbelts fastened. Destination: production.",
             "I'm here, I'm ready, and I have mass opinions about tabs vs spaces.",
             "\(name) activated. Today's forecast: 100% chance of shipping.",

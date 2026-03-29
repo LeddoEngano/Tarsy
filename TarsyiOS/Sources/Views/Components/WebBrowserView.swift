@@ -747,6 +747,7 @@ struct FullscreenWebBrowser: View {
                         }
                     )
                     .padding(.horizontal, 40)
+                    .frame(maxHeight: 400)
                     .shadow(color: .black.opacity(0.4), radius: 12, y: -2)
                 }
 

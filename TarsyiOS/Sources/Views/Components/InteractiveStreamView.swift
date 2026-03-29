@@ -468,6 +468,10 @@ struct InteractiveStreamView: View {
                 if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
                     scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait))
                 }
+                // Force navigation bar to recalculate layout after rotation settles
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    Self.forceNavigationBarLayout()
+                }
             }
         }
         .alert("select language", isPresented: $showLanguagePicker) {
@@ -907,8 +911,31 @@ struct InteractiveStreamView: View {
             }
         }
         onClose()
+        // Force navigation bar layout after dismiss + rotation animation
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            Self.forceNavigationBarLayout()
+        }
     }
 
+    /// Walks the window's view hierarchy to find any UINavigationBar and forces layout recalculation.
+    private static func forceNavigationBarLayout() {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else { return }
+
+        func findNavBars(in view: UIView) {
+            if let navBar = view as? UINavigationBar {
+                navBar.setNeedsLayout()
+                navBar.layoutIfNeeded()
+                // Also force the parent navigation controller's view
+                navBar.superview?.setNeedsLayout()
+                navBar.superview?.layoutIfNeeded()
+            }
+            for subview in view.subviews {
+                findNavBars(in: subview)
+            }
+        }
+        findNavBars(in: window)
+    }
 
     private func stopAnalogScroll() {
         analogScrollOrigin = nil

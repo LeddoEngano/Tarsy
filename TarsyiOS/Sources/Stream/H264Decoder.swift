@@ -25,8 +25,11 @@ class H264Decoder: ObservableObject {
     private var totalFramesReceived = 0
     private var totalFramesDecoded = 0
 
-    /// Last decoded sample buffer for screenshot capture
-    private(set) var lastSampleBuffer: CMSampleBuffer?
+    /// Screenshot support: parallel VTDecompressionSession to capture decoded pixel buffers
+    private var screenshotSession: VTDecompressionSession?
+    private var screenshotFormatDesc: CMVideoFormatDescription?
+    private var lastDecodedPixelBuffer: CVPixelBuffer?
+    private let lastFrameLock = NSLock()
 
     init() {
         setupDisplayLayer()
@@ -53,7 +56,12 @@ class H264Decoder: ObservableObject {
         fpsTimer = nil
         displayLayer?.flushAndRemoveImage()
         formatDescription = nil
-        lastSampleBuffer = nil
+        lastFrameLock.lock()
+        lastDecodedPixelBuffer = nil
+        lastFrameLock.unlock()
+        if let s = screenshotSession { VTDecompressionSessionInvalidate(s) }
+        screenshotSession = nil
+        screenshotFormatDesc = nil
         vps = nil
         sps = nil
         pps = nil
@@ -355,28 +363,72 @@ class H264Decoder: ObservableObject {
             return
         }
 
-        lastSampleBuffer = sampleBuffer
+        // Decode in parallel via VTDecompressionSession for screenshot capture
+        decodeForScreenshot(sampleBuffer)
         layer.enqueue(sampleBuffer)
         DispatchQueue.main.async { [weak self] in
             self?.frameCount += 1
         }
     }
 
-    /// Capture a screenshot from the last decoded frame
+    /// Decode each frame via a persistent VTDecompressionSession to retain the pixel buffer
+    private func decodeForScreenshot(_ sampleBuffer: CMSampleBuffer) {
+        guard let fmt = formatDescription else { return }
+
+        // Recreate session if format changed
+        if screenshotFormatDesc !== fmt {
+            if let s = screenshotSession { VTDecompressionSessionInvalidate(s) }
+            screenshotSession = nil
+            screenshotFormatDesc = nil
+
+            let attrs: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+            ]
+            var session: VTDecompressionSession?
+            let status = VTDecompressionSessionCreate(
+                allocator: kCFAllocatorDefault,
+                formatDescription: fmt,
+                decoderSpecification: nil,
+                imageBufferAttributes: attrs as CFDictionary,
+                outputCallback: nil,
+                decompressionSessionOut: &session
+            )
+            guard status == noErr, let session else { return }
+            screenshotSession = session
+            screenshotFormatDesc = fmt
+        }
+
+        guard let session = screenshotSession else { return }
+
+        VTDecompressionSessionDecodeFrame(session, sampleBuffer: sampleBuffer, flags: [._1xRealTimePlayback], infoFlagsOut: nil) { [weak self] status, _, imageBuffer, _, _ in
+            guard status == noErr, let imageBuffer else { return }
+            self?.lastFrameLock.lock()
+            self?.lastDecodedPixelBuffer = imageBuffer
+            self?.lastFrameLock.unlock()
+        }
+    }
+
+    /// Capture a screenshot from the last decoded pixel buffer
     func captureScreenshot() -> UIImage? {
-        guard let sampleBuffer = lastSampleBuffer,
-              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
+        lastFrameLock.lock()
+        let pb = lastDecodedPixelBuffer
+        lastFrameLock.unlock()
 
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        let context = CIContext()
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-
-        guard let cgImage = context.createCGImage(ciImage, from: CGRect(x: 0, y: 0, width: width, height: height)) else {
+        guard let pb else {
+            print("[Screenshot] no decoded pixel buffer")
             return nil
         }
 
-        return UIImage(cgImage: cgImage)
+        let ci = CIImage(cvPixelBuffer: pb)
+        let ctx = CIContext()
+        let w = CVPixelBufferGetWidth(pb)
+        let h = CVPixelBufferGetHeight(pb)
+        guard let cg = ctx.createCGImage(ci, from: CGRect(x: 0, y: 0, width: w, height: h)) else {
+            print("[Screenshot] CIContext.createCGImage failed")
+            return nil
+        }
+        print("[Screenshot] captured \(w)x\(h)")
+        return UIImage(cgImage: cg)
     }
 
     deinit {
