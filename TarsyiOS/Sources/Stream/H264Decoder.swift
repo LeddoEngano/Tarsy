@@ -3,6 +3,7 @@ import AVFoundation
 import VideoToolbox
 import UIKit
 import CoreMedia
+import CoreImage
 
 /// Hardware-accelerated video decoder supporting both HEVC (H.265) and H.264.
 /// Receives Annex B NAL units from the relay and displays them via AVSampleBufferDisplayLayer.
@@ -23,6 +24,9 @@ class H264Decoder: ObservableObject {
     private let processingQueue = DispatchQueue(label: "video.decoding", qos: .userInteractive)
     private var totalFramesReceived = 0
     private var totalFramesDecoded = 0
+
+    /// Last decoded sample buffer for screenshot capture
+    private(set) var lastSampleBuffer: CMSampleBuffer?
 
     init() {
         setupDisplayLayer()
@@ -49,6 +53,7 @@ class H264Decoder: ObservableObject {
         fpsTimer = nil
         displayLayer?.flushAndRemoveImage()
         formatDescription = nil
+        lastSampleBuffer = nil
         vps = nil
         sps = nil
         pps = nil
@@ -350,10 +355,28 @@ class H264Decoder: ObservableObject {
             return
         }
 
+        lastSampleBuffer = sampleBuffer
         layer.enqueue(sampleBuffer)
         DispatchQueue.main.async { [weak self] in
             self?.frameCount += 1
         }
+    }
+
+    /// Capture a screenshot from the last decoded frame
+    func captureScreenshot() -> UIImage? {
+        guard let sampleBuffer = lastSampleBuffer,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
+
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let context = CIContext()
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+
+        guard let cgImage = context.createCGImage(ciImage, from: CGRect(x: 0, y: 0, width: width, height: height)) else {
+            return nil
+        }
+
+        return UIImage(cgImage: cgImage)
     }
 
     deinit {

@@ -81,6 +81,7 @@ struct InteractiveStreamView: View {
     @Binding var engineSessionId: String?
     var engineType: AIEngineType
     var workspacePath: String
+    var workspaceId: String = ""
     var aiContext: String
     var onSessionCreated: ((String) -> Void)?
     @ObservedObject var todoManager: VoiceTodoManager
@@ -671,50 +672,72 @@ struct InteractiveStreamView: View {
             }
         }
 
-        // Listen for result
-        connectionManager.addListener("screenshot") { [self] packet in
-            if packet.action == .screenshotResult,
-               let base64 = packet.payload?["data"],
-               let imageData = Data(base64Encoded: base64),
-               let image = UIImage(data: imageData) {
+        // Handle screenshot received (shared logic for both packet and binary paths)
+        let handleScreenshotData: (Data) -> Void = { [self] imageData in
+            guard let image = UIImage(data: imageData) else { return }
+            UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
 
-                // Save to Photos
-                UIImageWriteToSavedPhotosAlbum(image, nil, nil, nil)
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    screenshotProgress = 1.0
+                }
 
-                DispatchQueue.main.async {
-                    // Animate: → 1.0 (saved)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     withAnimation(.easeOut(duration: 0.2)) {
-                        screenshotProgress = 1.0
+                        isCapturingScreenshot = false
+                    }
+                    screenshotSaved = true
+                    Haptics.success()
+
+                    if !hintAlreadyShown {
+                        withAnimation(.easeOut(duration: 0.3)) {
+                            showGalleryHint = true
+                        }
+                        hintAlreadyShown = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                            withAnimation(.easeOut(duration: 0.4)) {
+                                showGalleryHint = false
+                            }
+                        }
                     }
 
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            isCapturingScreenshot = false
-                        }
-                        screenshotSaved = true
-                        Haptics.success()
-
-                        // Show gallery hint only on first screenshot
-                        if !hintAlreadyShown {
-                            withAnimation(.easeOut(duration: 0.3)) {
-                                showGalleryHint = true
-                            }
-                            hintAlreadyShown = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
-                                withAnimation(.easeOut(duration: 0.4)) {
-                                    showGalleryHint = false
-                                }
-                            }
-                        }
-
-                        // Reset checkmark after 2s
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                            screenshotSaved = false
-                        }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        screenshotSaved = false
                     }
                 }
                 connectionManager.removeListener("screenshot")
+                connectionManager.onScreenshotReceived = nil
             }
+        }
+
+        // Listen for JSON screenshotResult packet (primary path)
+        connectionManager.addListener("screenshot") { [self] packet in
+            if packet.action == .screenshotResult {
+                if let base64 = packet.payload?["data"],
+                   let imageData = Data(base64Encoded: base64) {
+                    handleScreenshotData(imageData)
+                } else if packet.payload?["error"] != nil {
+                    // Screenshot failed on macOS side
+                    DispatchQueue.main.async {
+                        withAnimation { isCapturingScreenshot = false }
+                        screenshotProgress = 0
+                        connectionManager.removeListener("screenshot")
+                        connectionManager.onScreenshotReceived = nil
+                    }
+                }
+            } else if packet.action == .error {
+                DispatchQueue.main.async {
+                    withAnimation { isCapturingScreenshot = false }
+                    screenshotProgress = 0
+                    connectionManager.removeListener("screenshot")
+                    connectionManager.onScreenshotReceived = nil
+                }
+            }
+        }
+
+        // Listen for binary SCRN data (fallback for direct binary screenshots)
+        connectionManager.onScreenshotReceived = { imageData in
+            handleScreenshotData(imageData)
         }
 
         // Timeout after 10s
@@ -723,6 +746,7 @@ struct InteractiveStreamView: View {
                 withAnimation { isCapturingScreenshot = false }
                 screenshotProgress = 0
                 connectionManager.removeListener("screenshot")
+                connectionManager.onScreenshotReceived = nil
             }
         }
     }
@@ -989,15 +1013,14 @@ struct InteractiveStreamView: View {
             todoManager.addItem(text: transcription, sessionId: sessionId)
         } else {
             // No session yet — create one with the message
-            connectionManager.send(WSPacket(
-                action: .engineCreate,
-                payload: [
-                    "path": workspacePath,
-                    "engineType": engineType.rawValue,
-                    "aiContext": aiContext,
-                    "message": fullMessage
-                ]
-            ))
+            var createPayload = [
+                "path": workspacePath,
+                "engineType": engineType.rawValue,
+                "aiContext": aiContext,
+                "message": fullMessage
+            ]
+            if !workspaceId.isEmpty { createPayload["workspaceId"] = workspaceId }
+            connectionManager.send(WSPacket(action: .engineCreate, payload: createPayload))
             todoManager.addItem(text: transcription, sessionId: "pending")
         }
     }

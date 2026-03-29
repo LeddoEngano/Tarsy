@@ -47,7 +47,10 @@ struct WorkspaceView: View {
     @State private var showGitSheet = false
     @State private var showFileExplorer = false
     @State private var showMCPStore = false
+    @State private var showAIContext = false
+    @State private var showWorkspaceSettings = false
     @State private var showPaywall = false
+    @State private var importedSessionTabs: Set<String> = []
     @State private var checkpointFeedback: String? = nil
     @State private var isRecording = false
     @StateObject private var voiceInput = VoiceInputManager()
@@ -62,6 +65,8 @@ struct WorkspaceView: View {
     @State private var viewMode: ViewMode = .browser
     @State private var showSessionPicker = false
     @State private var showCommitConfirmation = false
+    @State private var isFullscreenStream = false
+    @State private var isFullscreenBrowser = false
     @State private var keyboardHeight: CGFloat = 0
     @State private var keyboardAnimation: Animation = .easeInOut(duration: 0.25)
 
@@ -137,6 +142,9 @@ struct WorkspaceView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 0) {
+                // Custom header (replaces UINavigationBar to avoid rotation layout bug)
+                customHeader
+
                 if workspace.isFullScreen {
                     // OpenClaw: stream-first layout
                     openClawLayout
@@ -199,58 +207,15 @@ struct WorkspaceView: View {
         } message: {
             Text("Save a git checkpoint of the current state?")
         }
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(workspace.status == .running ? TarsyTheme.statusRunning : TarsyTheme.statusIdle)
-                        .frame(width: 8, height: 8)
-                    Text(workspace.name)
-                        .font(TarsyTheme.monoFont)
-                        .foregroundColor(TarsyTheme.textPrimary)
-                }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 6) {
-                    Button(action: { showCommitConfirmation = true }) {
-                        ZStack(alignment: .bottomTrailing) {
-                            Image("GitCommitIcon")
-                                .renderingMode(.original)
-                                .resizable()
-                                .frame(width: 22, height: 22)
-                            Image(systemName: "plus")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundColor(Color(red: 0.133, green: 0.773, blue: 0.369))
-                                .offset(x: -10, y: -1)
-                        }
-                    }
-
-                    Menu {
-                        Button(action: { showGitSheet = true }) {
-                            Label("git", systemImage: "arrow.triangle.branch")
-                        }
-                        Button(action: { showFileExplorer = true }) {
-                            Label("file explorer", systemImage: "folder")
-                        }
-                        Button(action: { showMCPStore = true }) {
-                            Label("integrations", systemImage: "puzzlepiece.extension")
-                        }
-                        NavigationLink(destination: AIContextEditorView(workspace: workspace).environmentObject(workspaceService)) {
-                            Label("ai context", systemImage: "brain")
-                        }
-                        NavigationLink(destination: WorkspaceSettingsView(workspace: workspace).environmentObject(workspaceService)) {
-                            Label("settings", systemImage: "gearshape")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .foregroundColor(TarsyTheme.accentAmber)
-                    }
-                }
-            }
+        .navigationBarHidden(true)
+        .navigationDestination(isPresented: $showAIContext) {
+            AIContextEditorView(workspace: workspace)
+                .environmentObject(workspaceService)
         }
-        .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
+        .navigationDestination(isPresented: $showWorkspaceSettings) {
+            WorkspaceSettingsView(workspace: workspace)
+                .environmentObject(workspaceService)
+        }
         .task {
             // Initialize tabs
             if tabs.isEmpty {
@@ -258,8 +223,10 @@ struct WorkspaceView: View {
                 if connectionManager.openclawAvailable {
                     tabs.append(TerminalTab(id: "openclaw", title: "OpenClaw", isFixed: true, type: .openclaw))
                 }
-                tabs.append(TerminalTab(id: "claude-1", title: "Claude Code", isFixed: false, type: .claude, sessionId: nil, engineType: .claude))
-                // Default to Claude tab
+                let preferredEngine = detectedAgents.first ?? .claude
+                let tabType: TerminalTab.TabType = preferredEngine == .claude ? .claude : .engine
+                tabs.append(TerminalTab(id: "\(preferredEngine.rawValue)-1", title: preferredEngine.displayName, isFixed: false, type: tabType, sessionId: nil, engineType: preferredEngine))
+                // Default to engine tab
                 if tabs.count > 1 {
                     selectedTabIndex = tabs.count - 1
                 }
@@ -352,7 +319,7 @@ struct WorkspaceView: View {
                         }
 
                         Button(action: { showSessionPicker = true }) {
-                            Label("Continue session", systemImage: "clock.arrow.circlepath")
+                            Label("Import session", systemImage: "clock.arrow.circlepath")
                         }
                     } label: {
                         Image(systemName: "plus")
@@ -384,7 +351,7 @@ struct WorkspaceView: View {
                         }
 
                         Button(action: { showSessionPicker = true }) {
-                            Label("Continue session", systemImage: "clock.arrow.circlepath")
+                            Label("Import session", systemImage: "clock.arrow.circlepath")
                         }
                     } label: {
                         Image(systemName: "plus")
@@ -577,6 +544,72 @@ struct WorkspaceView: View {
     // MARK: - OpenClaw Layout (stream-first, chat as overlay)
 
     @State private var showOpenClawChat = false
+    @Environment(\.dismiss) private var dismiss
+
+    private var customHeader: some View {
+        HStack(spacing: 0) {
+            Button(action: { dismiss() }) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .frame(width: 44, height: 44)
+            }
+
+            Spacer()
+
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(workspace.status == .running ? TarsyTheme.statusRunning : TarsyTheme.statusIdle)
+                    .frame(width: 8, height: 8)
+                Text(workspace.name)
+                    .font(TarsyTheme.monoFont)
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            HStack(spacing: 6) {
+                Button(action: { showCommitConfirmation = true }) {
+                    ZStack(alignment: .bottomTrailing) {
+                        Image("GitCommitIcon")
+                            .renderingMode(.original)
+                            .resizable()
+                            .frame(width: 22, height: 22)
+                        Image(systemName: "plus")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(Color(red: 0.133, green: 0.773, blue: 0.369))
+                            .offset(x: -10, y: -1)
+                    }
+                }
+
+                Menu {
+                    Button(action: { showGitSheet = true }) {
+                        Label("git", systemImage: "arrow.triangle.branch")
+                    }
+                    Button(action: { showFileExplorer = true }) {
+                        Label("file explorer", systemImage: "folder")
+                    }
+                    Button(action: { showMCPStore = true }) {
+                        Label("integrations", systemImage: "puzzlepiece.extension")
+                    }
+                    Button(action: { showAIContext = true }) {
+                        Label("ai context", systemImage: "brain")
+                    }
+                    Button(action: { showWorkspaceSettings = true }) {
+                        Label("settings", systemImage: "gearshape")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundColor(TarsyTheme.accentAmber)
+                }
+            }
+            .fixedSize()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(TarsyTheme.backgroundPrimary)
+    }
 
     private var openClawLayout: some View {
         ZStack(alignment: .bottom) {
@@ -597,7 +630,8 @@ struct WorkspaceView: View {
                 interactiveOptions: $interactiveOptions,
                 onInteractiveChoice: { sendInteractiveChoice($0) },
                 onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) },
-                onVoiceMessage: { persistVoiceMessage($0) }
+                onVoiceMessage: { persistVoiceMessage($0) },
+                isFullscreen: $isFullscreenStream
             )
             .ignoresSafeArea()
 
@@ -686,6 +720,7 @@ struct WorkspaceView: View {
                 )
                 .padding(.horizontal, 12)
                 .padding(.bottom, 80)
+                .frame(maxHeight: .infinity)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
                 .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
             }
@@ -720,6 +755,7 @@ struct WorkspaceView: View {
                             onInteractiveChoice: { sendInteractiveChoice($0) },
                             onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) },
                             onVoiceMessage: { persistVoiceMessage($0) },
+                            isFullscreen: $isFullscreenBrowser,
                             isActive: $isStreamActive
                         )
                             .frame(maxWidth: .infinity)
@@ -738,27 +774,28 @@ struct WorkspaceView: View {
                 Divider().background(TarsyTheme.backgroundTertiary)
             }
 
-            chatArea
+            ZStack {
+                chatArea
 
-            // Interactive question card
-            if let questions = interactiveQuestions {
-                PaginatedQuestionCard(
-                    questions: questions,
-                    onSubmitAll: { answers in
-                        submitMultiQuestionAnswers(answers)
-                    },
-                    onDismiss: {
-                        withAnimation {
-                            interactiveQuestions = nil
+                if let questions = interactiveQuestions {
+                    PaginatedQuestionCard(
+                        questions: questions,
+                        onSubmitAll: { answers in
+                            submitMultiQuestionAnswers(answers)
+                        },
+                        onDismiss: {
+                            withAnimation {
+                                interactiveQuestions = nil
+                            }
                         }
-                    }
-                )
-                .padding(.horizontal, 12)
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
-                .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
+                    )
+                    .padding(.horizontal, 12)
+                    .frame(maxHeight: .infinity)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    .shadow(color: .black.opacity(0.3), radius: 12, y: -2)
+                }
             }
 
-            // Input bar
             inputBar
                 .padding(.bottom, isInputFocused ? keyboardHeight : 0)
         }
@@ -790,7 +827,8 @@ struct WorkspaceView: View {
             interactiveOptions: $interactiveOptions,
             onInteractiveChoice: { sendInteractiveChoice($0) },
             onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) },
-            onVoiceMessage: { persistVoiceMessage($0) }
+            onVoiceMessage: { persistVoiceMessage($0) },
+            isFullscreen: $isFullscreenStream
         )
             .frame(maxWidth: .infinity)
             .frame(height: UIScreen.main.bounds.height * 0.35)
@@ -839,20 +877,6 @@ struct WorkspaceView: View {
 
     private var inputBar: some View {
         VStack(spacing: 0) {
-            // Attachments preview
-            if !attachments.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(attachments) { attachment in
-                            attachmentChip(attachment)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                }
-                .background(TarsyTheme.backgroundPrimary)
-            }
-
             // Input bar
             VStack(spacing: 0) {
                 // Text field
@@ -893,20 +917,6 @@ struct WorkspaceView: View {
 
                     Spacer()
 
-                    if isRecording {
-                        HStack(spacing: 5) {
-                            Circle()
-                                .fill(TarsyTheme.accentTerracotta)
-                                .frame(width: 6, height: 6)
-                                .opacity(recDotVisible ? 1 : 0.15)
-                            Text(recordingTimerText)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(TarsyTheme.accentTerracotta)
-                                .monospacedDigit()
-                        }
-                        .transition(.opacity)
-                    }
-
                     // Voice tasks button (left of mic)
                     if todoManager.hasActiveItems {
                         Button { todoManager.isMinimized ? todoManager.expand() : todoManager.minimize() } label: {
@@ -945,10 +955,22 @@ struct WorkspaceView: View {
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
                     }
 
-                    Image(systemName: isRecording ? "mic.fill" : "mic")
-                        .font(.system(size: 16))
-                        .foregroundColor(isRecording ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
-                        .frame(width: 36, height: 36)
+                    HStack(spacing: 3) {
+                        if isRecording {
+                            Circle()
+                                .fill(TarsyTheme.accentTerracotta)
+                                .frame(width: 5, height: 5)
+                                .opacity(recDotVisible ? 1 : 0.15)
+                            Text(recordingTimerText)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(TarsyTheme.accentTerracotta)
+                                .monospacedDigit()
+                        }
+                        Image(systemName: isRecording ? "mic.fill" : "mic")
+                            .font(.system(size: 16))
+                            .foregroundColor(isRecording ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
+                    }
+                        .frame(height: 36)
                         .gesture(
                             LongPressGesture(minimumDuration: 0.15)
                                 .onEnded { _ in startVoiceInput() }
@@ -1031,6 +1053,27 @@ struct WorkspaceView: View {
             }
         }
         .background(TarsyTheme.backgroundPrimary)
+        .overlay(alignment: .topLeading) {
+            if !attachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(attachments) { attachment in
+                            attachmentChip(attachment)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                }
+                .fixedSize(horizontal: true, vertical: true)
+                .background(
+                    TarsyTheme.backgroundSecondary
+                        .cornerRadius(12)
+                        .shadow(color: .black.opacity(0.3), radius: 8, y: -2)
+                )
+                .padding(.leading, 12)
+                .offset(y: -52)
+            }
+        }
         .confirmationDialog("Attach", isPresented: $showAttachmentPicker) {
             Button("Photo Library") { showPhotoPicker = true }
             Button("Camera") { /* TODO */ }
@@ -1079,25 +1122,25 @@ struct WorkspaceView: View {
 
     @ViewBuilder
     private func attachmentChip(_ attachment: Attachment) -> some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             if attachment.type == .image, let thumb = attachment.thumbnail {
                 Image(uiImage: thumb)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
-                    .frame(width: 32, height: 32)
-                    .cornerRadius(6)
+                    .frame(width: 24, height: 24)
+                    .cornerRadius(4)
                     .clipped()
             } else {
                 Image(systemName: "doc.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: 11))
                     .foregroundColor(TarsyTheme.accentAmber)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 24, height: 24)
                     .background(TarsyTheme.backgroundTertiary)
-                    .cornerRadius(6)
+                    .cornerRadius(4)
             }
 
             Text(attachment.name)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(TarsyTheme.textPrimary)
                 .lineLimit(1)
 
@@ -1105,14 +1148,14 @@ struct WorkspaceView: View {
                 withAnimation { attachments.removeAll { $0.id == attachment.id } }
             }) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 14))
+                    .font(.system(size: 11))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
         .background(TarsyTheme.backgroundSecondary)
-        .cornerRadius(10)
+        .cornerRadius(8)
     }
 
     // MARK: - Actions
@@ -1206,7 +1249,8 @@ struct WorkspaceView: View {
                         "engineType": engineType.rawValue,
                         "aiContext": workspace.aiContext ?? "",
                         "message": messageText,
-                        "permissionMode": permConfig.mode(for: engineType).rawValue
+                        "permissionMode": permConfig.mode(for: engineType).rawValue,
+                        "workspaceId": workspace.id.uuidString
                     ]
                     if let images = imagesPayload { payload["images"] = images }
                     connectionManager.send(WSPacket(action: .engineCreate, payload: payload))
@@ -1251,7 +1295,8 @@ struct WorkspaceView: View {
                 payload: [
                     "path": workspace.localPath,
                     "engineType": engineType.rawValue,
-                    "aiContext": workspace.aiContext ?? ""
+                    "aiContext": workspace.aiContext ?? "",
+                    "workspaceId": workspace.id.uuidString
                 ]
             ))
             print("[Workspace] Sent engineCreate type=\(engineType.rawValue) for path=\(workspace.localPath)")
@@ -1276,7 +1321,8 @@ struct WorkspaceView: View {
                 "path": workspace.localPath,
                 "engineType": engineType.rawValue,
                 "aiContext": workspace.aiContext ?? "",
-                "permissionMode": permConfig.mode(for: engineType).rawValue
+                "permissionMode": permConfig.mode(for: engineType).rawValue,
+                "workspaceId": workspace.id.uuidString
             ]
         ))
     }
@@ -1289,6 +1335,21 @@ struct WorkspaceView: View {
         let tab = TerminalTab(id: uniqueId, title: title, isFixed: false, type: tabType, sessionId: nil, engineType: engineType)
         tabs.append(tab)
         selectedTabIndex = tabs.count - 1
+        chatService.switchTab(tabId: uniqueId)
+
+        // Load imported session messages into the chat
+        for msg in session.messages {
+            let chatMsg = ChatMessage(
+                workspaceId: workspace.id,
+                tabId: uniqueId,
+                role: msg.role == "user" ? .user : .assistant,
+                content: msg.content
+            )
+            Task { await chatService.addMessage(chatMsg) }
+        }
+
+        // Mark tab to suppress the first "ready" greeting from the engine
+        importedSessionTabs.insert(uniqueId)
 
         let contextSummary = session.messages
             .suffix(10)
@@ -1310,6 +1371,7 @@ struct WorkspaceView: View {
 
     private func closeTab(at index: Int) {
         let tab = tabs[index]
+        chatService.removeTab(tab.id)
         if let sessionId = tab.sessionId {
             if tab.type == .claude || tab.type == .engine {
                 let engineType = tab.engineType?.rawValue ?? "claude"
@@ -1437,7 +1499,12 @@ struct WorkspaceView: View {
 
                 // Agent detection
                 case .agentsDetected:
-                    break // handled by ConnectionManager.detectedAgents
+                    // Update initial tab if it has no session yet and preferred engine changed
+                    if let preferred = detectedAgents.first,
+                       let idx = tabs.firstIndex(where: { ($0.type == .claude || $0.type == .engine) && $0.sessionId == nil && $0.engineType != preferred }) {
+                        let tabType: TerminalTab.TabType = preferred == .claude ? .claude : .engine
+                        tabs[idx] = TerminalTab(id: "\(preferred.rawValue)-1", title: preferred.displayName, isFixed: false, type: tabType, sessionId: nil, engineType: preferred)
+                    }
 
                 // Branch update
                 case .gitBranchesResult:
@@ -1458,6 +1525,13 @@ struct WorkspaceView: View {
         let sessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
         todoManager.markResumed(sessionId: sessionId)
         todoManager.confirmWorking(sessionId: sessionId)
+
+        // Suppress the first "ready" greeting for imported session tabs
+        if let tabId = tabId(forSession: sessionId) ?? (isActiveTabSession(packet) ? currentTab.id : nil),
+           importedSessionTabs.contains(tabId) {
+            importedSessionTabs.remove(tabId)
+            return
+        }
         if let output = packet.payload?["output"] {
             if output.hasPrefix("🔧") {
                 let clean = output.trimmingCharacters(in: .whitespacesAndNewlines)

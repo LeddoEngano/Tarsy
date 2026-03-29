@@ -75,7 +75,7 @@ struct StreamPlayerView: View {
     var onInteractiveChoice: ((InteractiveOption) -> Void)?
     var onMultiQuestionSubmit: (([String: String]) -> Void)?
     var onVoiceMessage: ((String) -> Void)?
-    @State private var isFullscreen = false
+    @Binding var isFullscreen: Bool
     @State private var isDevServerRunning = false
     @State private var isDevServerStarting = false
     @State private var isStartingStream = false
@@ -264,6 +264,7 @@ struct StreamPlayerView: View {
                 engineSessionId: $activeSessionId,
                 engineType: activeEngineType,
                 workspacePath: workspace.localPath,
+                workspaceId: workspace.id.uuidString,
                 aiContext: workspace.aiContext ?? "",
                 onSessionCreated: onSessionCreated,
                 todoManager: todoManager,
@@ -522,11 +523,7 @@ struct StreamPlayerView: View {
     }
 
     private func saveScreenshot() {
-        guard let layer = viewModel.h264Decoder.displayLayer else { return }
-        let renderer = UIGraphicsImageRenderer(size: layer.bounds.size)
-        let image = renderer.image { ctx in
-            layer.render(in: ctx.cgContext)
-        }
+        guard let image = viewModel.h264Decoder.captureScreenshot() else { return }
         onScreenshot?(image)
     }
 

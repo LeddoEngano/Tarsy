@@ -35,7 +35,7 @@ struct WebBrowserView: View {
     @State private var devServerOutput = ""
     @State private var isDevServerRunning = false
     @State private var userRequestedScan = false
-    @State private var isFullscreen = false
+    @Binding var isFullscreen: Bool
     @State private var isPageLoading = false
     @State private var showMiniUrlBar = false
     @State private var miniUrlText = ""
@@ -319,29 +319,26 @@ struct WebBrowserView: View {
         }
         .ignoresSafeArea(.keyboard)
         .fullScreenCover(isPresented: $isFullscreen) {
-            fullscreenBrowser
+            FullscreenWebBrowser(
+                url: webViewRef.webView?.url ?? webViewURL ?? URL(string: "about:blank")!,
+                connectionManager: connectionManager,
+                isRelay: connectionManager.connectionMode == .relay,
+                onScreenshot: onScreenshot,
+                onClose: { isFullscreen = false },
+                engineSessionId: $activeSessionId,
+                engineType: activeEngineType,
+                workspacePath: workspace.localPath,
+                workspaceId: workspace.id.uuidString,
+                aiContext: workspace.aiContext ?? "",
+                onSessionCreated: onSessionCreated,
+                todoManager: todoManager,
+                interactiveQuestions: $interactiveQuestions,
+                interactiveOptions: $interactiveOptions,
+                onInteractiveChoice: onInteractiveChoice,
+                onMultiQuestionSubmit: onMultiQuestionSubmit,
+                onVoiceMessage: onVoiceMessage
+            )
         }
-    }
-
-    private var fullscreenBrowser: some View {
-        FullscreenWebBrowser(
-            url: webViewRef.webView?.url ?? webViewURL ?? URL(string: "about:blank")!,
-            connectionManager: connectionManager,
-            isRelay: connectionManager.connectionMode == .relay,
-            onScreenshot: onScreenshot,
-            onClose: { isFullscreen = false },
-            engineSessionId: $activeSessionId,
-            engineType: activeEngineType,
-            workspacePath: workspace.localPath,
-            aiContext: workspace.aiContext ?? "",
-            onSessionCreated: onSessionCreated,
-            todoManager: todoManager,
-            interactiveQuestions: $interactiveQuestions,
-            interactiveOptions: $interactiveOptions,
-            onInteractiveChoice: onInteractiveChoice,
-            onMultiQuestionSubmit: onMultiQuestionSubmit,
-            onVoiceMessage: onVoiceMessage
-        )
     }
 
     @ViewBuilder
@@ -594,6 +591,7 @@ struct FullscreenWebBrowser: View {
     @Binding var engineSessionId: String?
     var engineType: AIEngineType
     var workspacePath: String
+    var workspaceId: String = ""
     var aiContext: String
     var onSessionCreated: ((String) -> Void)?
     @ObservedObject var todoManager: VoiceTodoManager
@@ -856,15 +854,14 @@ struct FullscreenWebBrowser: View {
             ))
             todoManager.addItem(text: transcription, sessionId: sessionId)
         } else {
-            connectionManager.send(WSPacket(
-                action: .engineCreate,
-                payload: [
-                    "path": workspacePath,
-                    "engineType": engineType.rawValue,
-                    "message": fullMessage,
-                    "aiContext": aiContext
-                ]
-            ))
+            var createPayload = [
+                "path": workspacePath,
+                "engineType": engineType.rawValue,
+                "message": fullMessage,
+                "aiContext": aiContext
+            ]
+            if !workspaceId.isEmpty { createPayload["workspaceId"] = workspaceId }
+            connectionManager.send(WSPacket(action: .engineCreate, payload: createPayload))
             todoManager.addItem(text: transcription, sessionId: "pending")
         }
     }

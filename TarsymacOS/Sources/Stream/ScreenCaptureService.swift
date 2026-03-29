@@ -1,6 +1,8 @@
 import Foundation
 import ScreenCaptureKit
 import CoreMedia
+import CoreImage
+import AppKit
 
 @MainActor
 class ScreenCaptureService: NSObject, ObservableObject {
@@ -15,6 +17,9 @@ class ScreenCaptureService: NSObject, ObservableObject {
 
     /// Direct pixel buffer callback for H.264 encoding
     var onPixelBuffer: ((CVPixelBuffer) -> Void)?
+
+    /// Latest pixel buffer for screenshot capture (updated every frame)
+    private(set) var lastPixelBuffer: CVPixelBuffer?
 
     // Request permission once at startup without triggering a capture
     func requestPermission() async {
@@ -129,12 +134,14 @@ class ScreenCaptureService: NSObject, ObservableObject {
         // Reuse stream output if possible
         if streamOutput == nil {
             streamOutput = StreamOutput { [weak self] pixelBuffer in
+                self?.lastPixelBuffer = pixelBuffer
                 self?.onPixelBuffer?(pixelBuffer)
             }
         }
-        streamOutput?.pixelBufferHandler = onPixelBuffer != nil ? { [weak self] pixelBuffer in
+        streamOutput?.pixelBufferHandler = { [weak self] pixelBuffer in
+            self?.lastPixelBuffer = pixelBuffer
             self?.onPixelBuffer?(pixelBuffer)
-        } : nil
+        }
 
         // Only create new SCStream if we don't have one
         stream = SCStream(filter: filter, configuration: config, delegate: nil)
@@ -173,12 +180,14 @@ class ScreenCaptureService: NSObject, ObservableObject {
 
         if streamOutput == nil {
             streamOutput = StreamOutput { [weak self] pixelBuffer in
+                self?.lastPixelBuffer = pixelBuffer
                 self?.onPixelBuffer?(pixelBuffer)
             }
         }
-        streamOutput?.pixelBufferHandler = onPixelBuffer != nil ? { [weak self] pixelBuffer in
+        streamOutput?.pixelBufferHandler = { [weak self] pixelBuffer in
+            self?.lastPixelBuffer = pixelBuffer
             self?.onPixelBuffer?(pixelBuffer)
-        } : nil
+        }
 
         let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
         stream = SCStream(filter: filter, configuration: config, delegate: nil)
@@ -188,12 +197,30 @@ class ScreenCaptureService: NSObject, ObservableObject {
         selectedWindow = nil
     }
 
+    /// Capture a JPEG screenshot from the current stream
+    func captureScreenshot(quality: CGFloat = 0.7) -> Data? {
+        guard let pixelBuffer = lastPixelBuffer else { return nil }
+
+        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        let context = CIContext()
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+
+        guard let cgImage = context.createCGImage(ciImage, from: CGRect(x: 0, y: 0, width: width, height: height)) else {
+            return nil
+        }
+
+        let bitmap = NSBitmapImageRep(cgImage: cgImage)
+        return bitmap.representation(using: .jpeg, properties: [.compressionFactor: quality as NSNumber])
+    }
+
     func stopCapture() async {
         if let stream {
             try? await stream.stopCapture()
         }
         // Don't nil out stream/streamOutput — keep for reuse
         isCapturing = false
+        lastPixelBuffer = nil
         selectedWindow = nil
     }
 }

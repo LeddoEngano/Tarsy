@@ -92,7 +92,7 @@ struct PaginatedQuestionCard: View {
             ScrollView {
                 optionsList(for: question)
             }
-            .frame(maxHeight: isCompact ? 120 : 220)
+            .frame(maxHeight: isCompact ? 180 : .infinity)
 
             // Custom text input
             customInputField(for: question)

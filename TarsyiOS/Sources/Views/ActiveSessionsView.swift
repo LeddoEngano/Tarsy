@@ -27,6 +27,10 @@ struct ActiveSessionsView: View {
     @State private var showNewWorkspace = false
     @State private var showPaywall = false
 
+    private var visibleSessions: [UltraContextSession] {
+        client.sessions.filter { $0.title != "Untitled session" }
+    }
+
     var body: some View {
         NavigationStack {
             ZStack {
@@ -40,7 +44,7 @@ struct ActiveSessionsView: View {
                             .font(TarsyTheme.monoFontSmall)
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
-                } else if client.sessions.isEmpty {
+                } else if visibleSessions.isEmpty {
                     emptyView
                 } else {
                     VStack(spacing: 0) {
@@ -52,11 +56,11 @@ struct ActiveSessionsView: View {
                     }
                 }
             }
-            .navigationTitle("active sessions")
+            .navigationTitle("session history")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    if !client.sessions.isEmpty {
+                    if !visibleSessions.isEmpty {
                         Button(isEditing ? "done" : "edit") {
                             withAnimation {
                                 isEditing.toggle()
@@ -143,13 +147,13 @@ struct ActiveSessionsView: View {
     private var deleteBar: some View {
         HStack {
             Button {
-                if selectedIds.count == client.sessions.count {
+                if selectedIds.count == visibleSessions.count {
                     selectedIds.removeAll()
                 } else {
-                    selectedIds = Set(client.sessions.map(\.id))
+                    selectedIds = Set(visibleSessions.map(\.id))
                 }
             } label: {
-                Text(selectedIds.count == client.sessions.count ? "deselect all" : "select all")
+                Text(selectedIds.count == visibleSessions.count ? "deselect all" : "select all")
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
                     .foregroundColor(TarsyTheme.accentAmber)
             }
@@ -192,7 +196,7 @@ struct ActiveSessionsView: View {
                 .font(.system(size: 48))
                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
 
-            Text("no active sessions")
+            Text("no sessions yet")
                 .font(TarsyTheme.monoFont)
                 .foregroundColor(TarsyTheme.textSecondary)
 
@@ -207,7 +211,7 @@ struct ActiveSessionsView: View {
     private var sessionList: some View {
         ScrollView {
             LazyVStack(spacing: 10) {
-                ForEach(client.sessions) { session in
+                ForEach(visibleSessions) { session in
                     Button {
                         if isEditing {
                             toggleSelection(session.id)
@@ -248,7 +252,7 @@ struct ActiveSessionsView: View {
         do {
             try await client.deleteContexts(ids: ids)
             selectedIds.removeAll()
-            if client.sessions.isEmpty { isEditing = false }
+            if visibleSessions.isEmpty { isEditing = false }
         } catch {
             print("[ActiveSessions] Delete error: \(error)")
         }
@@ -270,6 +274,7 @@ struct ActiveSessionsView: View {
                 hasImage: session.hasImage,
                 projectPath: session.projectPath ?? full.projectPath,
                 engineType: session.engineType ?? full.engineType,
+                workspaceId: session.workspaceId ?? full.workspaceId,
                 messageCount: full.messages.count
             )
             loadedSession = full
@@ -281,8 +286,15 @@ struct ActiveSessionsView: View {
     }
 
     private func matchWorkspaces(for session: UltraContextSession?) -> [Workspace] {
+        // Primary: match by workspaceId (reliable for monorepos)
+        if let wsId = session?.workspaceId,
+           let uuid = UUID(uuidString: wsId) {
+            let byId = workspaceService.workspaces.filter { $0.id == uuid }
+            if !byId.isEmpty { return byId }
+        }
+
+        // Fallback: match by path (for sessions created before workspaceId was added)
         guard let path = session?.projectPath else { return [] }
-        // Collect all workspaces that match by path
         let exact = workspaceService.workspaces.filter { $0.localPath == path }
         if !exact.isEmpty { return exact }
 

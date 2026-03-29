@@ -17,7 +17,14 @@ struct WorkspaceSessionPicker: View {
     @State private var pendingSession: UltraContextSession?
 
     var filteredSessions: [UltraContextSession] {
-        client.sessions.filter { session in
+        let wsId = workspace.id.uuidString
+        return client.sessions.filter { session in
+            guard session.title != "Untitled session" else { return false }
+            // Primary: match by workspaceId (reliable for monorepos)
+            if let sessionWsId = session.workspaceId {
+                return sessionWsId.lowercased() == wsId.lowercased()
+            }
+            // Fallback: match by path (for sessions created before workspaceId was added)
             guard let path = session.projectPath else { return false }
             return workspace.localPath == path
                 || path.hasPrefix(workspace.localPath)
@@ -73,6 +80,14 @@ struct WorkspaceSessionPicker: View {
             .navigationTitle("previous sessions")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        Task { await client.loadSessions() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundColor(TarsyTheme.accentAmber)
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("cancel") { dismiss() }
                         .foregroundColor(TarsyTheme.accentAmber)
@@ -98,6 +113,7 @@ struct WorkspaceSessionPicker: View {
                             hasImage: session.hasImage,
                             projectPath: session.projectPath,
                             engineType: engine.rawValue,
+                            workspaceId: session.workspaceId,
                             messageCount: session.messageCount
                         )
                         onSelect(session, engine)
@@ -172,6 +188,7 @@ struct WorkspaceSessionPicker: View {
                 hasImage: session.hasImage,
                 projectPath: session.projectPath ?? full.projectPath,
                 engineType: session.engineType ?? full.engineType,
+                workspaceId: session.workspaceId ?? full.workspaceId,
                 messageCount: full.messages.count
             )
             pendingSession = enriched
@@ -186,6 +203,7 @@ struct WorkspaceSessionPicker: View {
                     hasImage: enriched.hasImage,
                     projectPath: enriched.projectPath,
                     engineType: engine.rawValue,
+                    workspaceId: enriched.workspaceId,
                     messageCount: enriched.messageCount
                 )
                 onSelect(finalSession, engine)
