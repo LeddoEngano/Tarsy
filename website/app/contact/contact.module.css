@@ -19,21 +19,22 @@
   margin-bottom: 40px;
 }
 
-.card {
+/* Form */
+.form {
   background: var(--bg-secondary);
   border: 1px solid var(--bg-tertiary);
   border-radius: 12px;
   padding: 32px;
   text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.item {
-  padding: 16px 0;
-  border-bottom: 1px solid var(--bg-tertiary);
-}
-
-.item:last-child {
-  border-bottom: none;
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .label {
@@ -41,14 +42,122 @@
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 1px;
-  margin-bottom: 4px;
 }
 
-.value {
+.input,
+.select,
+.textarea {
+  font-family: 'JetBrains Mono', monospace;
   font-size: 14px;
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 8px;
+  padding: 12px 14px;
+  outline: none;
+  transition: border-color 0.2s;
+  width: 100%;
+}
+
+.input:focus,
+.select:focus,
+.textarea:focus {
+  border-color: var(--accent-amber);
+}
+
+.input:disabled,
+.select:disabled,
+.textarea:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
+.select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a89e91' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+  cursor: pointer;
+}
+
+.select option {
+  background: var(--bg-primary);
   color: var(--text-primary);
 }
 
-.value a {
+.textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+/* Error */
+.error {
+  font-size: 13px;
+  color: var(--accent-terracotta);
+  background: rgba(196, 112, 75, 0.1);
+  border: 1px solid rgba(196, 112, 75, 0.3);
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+
+/* Submit button */
+.submitButton {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--bg-primary);
+  background: var(--accent-amber);
+  border: none;
+  border-radius: 8px;
+  padding: 14px;
+  cursor: pointer;
+  transition: opacity 0.2s;
+  letter-spacing: 0.5px;
+  width: 100%;
+}
+
+.submitButton:hover {
+  opacity: 0.85;
+}
+
+.submitButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Alt contact */
+.altContact {
+  margin-top: 24px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.altContact a {
   color: var(--accent-amber);
+}
+
+/* Success */
+.successContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.successIcon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(122, 139, 111, 0.15);
+  color: var(--accent-moss);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
