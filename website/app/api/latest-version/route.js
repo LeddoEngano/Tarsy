@@ -1,0 +1,21 @@
+import { NextResponse } from "next/server";
+
+// Update these values when releasing a new version of the macOS app.
+const LATEST_VERSION = "1.0.0";
+const DOWNLOAD_URL = "https://www.tarsy.dev/download/Tarsy.dmg";
+const RELEASE_NOTES = null; // e.g. "Bug fixes and performance improvements"
+
+export async function GET() {
+  return NextResponse.json(
+    {
+      version: LATEST_VERSION,
+      downloadURL: DOWNLOAD_URL,
+      releaseNotes: RELEASE_NOTES,
+    },
+    {
+      headers: {
+        "Cache-Control": "public, max-age=300, s-maxage=300",
+      },
+    }
+  );
+}

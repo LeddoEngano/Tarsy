@@ -5,6 +5,7 @@ import TarsyShared
 struct TarsymacOSApp: App {
     @StateObject private var authManager = AuthManager()
     @StateObject private var daemonManager = DaemonManager()
+    @StateObject private var updateChecker = UpdateChecker()
 
     init() {
         // Ignore SIGPIPE globally so writing to a closed pipe (e.g., terminated
@@ -39,10 +40,14 @@ struct TarsymacOSApp: App {
             MenuBarView()
                 .environmentObject(authManager)
                 .environmentObject(daemonManager)
+                .environmentObject(updateChecker)
+                .onAppear {
+                    updateChecker.startPeriodicChecks()
+                }
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: daemonManager.isRunning ? "eye.circle.fill" : "eye.circle")
-            }
+            Image(systemName: updateChecker.shouldShowBanner
+                  ? "arrow.down.circle.fill"
+                  : daemonManager.isRunning ? "eye.circle.fill" : "eye.circle")
         }
         .menuBarExtraStyle(.window)
 

@@ -4,10 +4,64 @@ import TarsyShared
 struct MenuBarView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var daemonManager: DaemonManager
+    @EnvironmentObject var updateChecker: UpdateChecker
     @Environment(\.openWindow) var openWindow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Update available banner
+            if let update = updateChecker.availableUpdate, updateChecker.shouldShowBanner {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundColor(Color(red: 0.83, green: 0.65, blue: 0.46)) // amber
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("v\(update.version) available")
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.91, green: 0.88, blue: 0.83)) // warm beige
+                        if let notes = update.releaseNotes {
+                            Text(notes)
+                                .font(.system(size: 10, design: .monospaced))
+                                .foregroundColor(.secondary)
+                                .lineLimit(2)
+                        }
+                    }
+                    Spacer()
+                    Button {
+                        updateChecker.dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(8)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(red: 0.83, green: 0.65, blue: 0.46).opacity(0.15))
+                )
+
+                Button {
+                    NSWorkspace.shared.open(update.downloadURL)
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.down.to.line")
+                        Text("Download Update")
+                    }
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 6)
+                    .foregroundColor(.white)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color(red: 0.83, green: 0.65, blue: 0.46)) // amber
+                    )
+                }
+                .buttonStyle(.plain)
+
+                Divider()
+            }
+
             // Header
             HStack {
                 Text("TARSY")
@@ -110,6 +164,11 @@ struct MenuBarView: View {
             }
             .font(.system(size: 12, design: .monospaced))
 
+            Button("Check for Updates...") {
+                Task { await updateChecker.check(resetDismissed: true) }
+            }
+            .font(.system(size: 12, design: .monospaced))
+
             Button("Settings...") {
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
             }
@@ -133,6 +192,12 @@ struct MenuBarView: View {
                 NSApplication.shared.terminate(nil)
             }
             .font(.system(size: 12, design: .monospaced))
+
+            // Version
+            Text("v\(updateChecker.currentVersion)")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .padding(16)
         .frame(width: 280)
