@@ -513,21 +513,8 @@ struct DashboardView: View {
 struct WorkspaceCard: View {
     let workspace: Workspace
 
-    var statusColor: Color {
-        switch workspace.status {
-        case .running: return TarsyTheme.statusRunning
-        case .starting: return TarsyTheme.statusStarting
-        case .idle: return TarsyTheme.statusIdle
-        case .error: return TarsyTheme.statusError
-        }
-    }
-
     var body: some View {
         HStack(spacing: 16) {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 10, height: 10)
-
             VStack(alignment: .leading, spacing: 4) {
                 Text(workspace.name)
                     .font(TarsyTheme.monoFont)
@@ -560,9 +547,9 @@ struct WorkspaceCard: View {
                     .foregroundColor(TarsyTheme.accentMoss)
             }
 
-            Text(workspace.status.rawValue)
-                .font(TarsyTheme.monoFontSmall)
-                .foregroundColor(statusColor)
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundColor(TarsyTheme.textSecondary)
         }
         .padding(16)
         .background(TarsyTheme.backgroundSecondary)
@@ -573,3 +560,11 @@ struct WorkspaceCard: View {
         )
     }
 }
+
+#if DEBUG
+#Preview {
+    PreviewWrapper {
+        DashboardView()
+    }
+}
+#endif

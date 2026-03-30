@@ -206,9 +206,6 @@ struct WorkspaceView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 8) {
-                    Circle()
-                        .fill(workspace.status == .running ? TarsyTheme.statusRunning : TarsyTheme.statusIdle)
-                        .frame(width: 8, height: 8)
                     Text(workspace.name)
                         .font(TarsyTheme.monoFont)
                         .foregroundColor(TarsyTheme.textPrimary)
