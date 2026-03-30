@@ -309,3 +309,11 @@ struct SettingsView: View {
         return String(email.prefix(2)).uppercased()
     }
 }
+
+#if DEBUG
+#Preview("Settings") {
+    SettingsView()
+        .environmentObject(AuthManager())
+        .environmentObject(DaemonManager())
+}
+#endif

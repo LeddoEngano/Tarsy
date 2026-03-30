@@ -820,3 +820,11 @@ extension Color {
         )
     }
 }
+
+#if DEBUG
+#Preview("Onboarding") {
+    OnboardingWindow()
+        .environmentObject(AuthManager())
+        .environmentObject(DaemonManager())
+}
+#endif

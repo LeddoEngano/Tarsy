@@ -293,3 +293,12 @@ private struct MenuItemButtonStyle: ButtonStyle {
             )
     }
 }
+
+#if DEBUG
+#Preview("Menu Bar") {
+    MenuBarView()
+        .environmentObject(AuthManager())
+        .environmentObject(DaemonManager())
+        .environmentObject(UpdateChecker())
+}
+#endif
