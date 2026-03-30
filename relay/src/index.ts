@@ -40,7 +40,7 @@ function isMachineReplacementAbuse(userId: string): boolean {
   // Only count successful replacements — rejected attempts must NOT add timestamps,
   // otherwise the counter never resets and creates a permanent reconnect loop.
   machineReplacements.set(userId, recent);
-  if (recent.length >= 3) {
+  if (recent.length >= 10) {
     return true;
   }
   recent.push(now);
@@ -364,9 +364,10 @@ const server = Bun.serve({
         payload: {},
         timestamp: new Date().toISOString(),
       }));
-        } catch {
-          console.log(`[Relay] Auth message parse error`);
-          ws.close(4001, "Invalid auth message");
+        } catch (e) {
+          const preview = typeof message === "string" ? message.slice(0, 100) : `[binary ${(message as ArrayBuffer).byteLength}B]`;
+          console.log(`[Relay] Auth parse error: ${e} | msg: ${preview}`);
+          // Don't close — allow retry within the 5s auth timeout
         }
         return;
       }
