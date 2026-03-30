@@ -61,7 +61,7 @@ const CLIENT_ALLOWED_PREFIXES = [
   "engine:status", "agents:", "agent:", "ultracontext:",
   "repo:analyze", "wizard:",
   "security:rotate_machine_secret",
-  "e2e:encrypted",
+  "e2e:",
   "auth", "ping", "pong",
 ];
 
@@ -75,7 +75,7 @@ const MACHINE_ALLOWED_PREFIXES = [
   "agents:", "agent:", "ultracontext:",
   "repo:analysis", "wizard:",
   "security:rotate_result", "security:fingerprint_update",
-  "e2e:encrypted",
+  "e2e:",
   "relay:machine_online", "auth", "auth:success", "ping", "pong", "error",
 ];
 

@@ -558,6 +558,17 @@ public class ConnectionManager: ObservableObject {
             // Don't reset isReconnecting here — let authSuccess handle it
             // so onReconnected fires correctly
             lastPongTime = Date()
+            // Initiate E2E key exchange via relay
+            if connectionMode == .relay && !e2e.isReady {
+                e2e.reset()
+                send(WSPacket(action: .e2eKeyExchange, payload: ["e2ePublicKey": e2e.publicKeyBase64]))
+            }
+        case .e2eKeyExchangeResponse:
+            if let remoteKey = packet.payload?["e2ePublicKey"] {
+                if e2e.completeKeyExchange(remotePublicKeyBase64: remoteKey) {
+                    print("[E2E] Relay E2E established")
+                }
+            }
         case .auth, .pong:
             lastPongTime = Date()
             if let pingTime = lastPingTime {

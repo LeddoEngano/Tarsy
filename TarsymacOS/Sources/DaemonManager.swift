@@ -31,7 +31,8 @@ class DaemonManager: ObservableObject {
     private var systemSleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var lastActiveClientId: String = "relay"
     private var detectedAgents: [AIEngineType] = []
-    private let e2e = E2ECrypto()
+    private let e2e = E2ECrypto()       // LAN E2E
+    private let relayE2E = E2ECrypto() // Relay E2E (separate key pair)
     private let agentTaskService = AgentTaskService()
     private var sessionTaskMap: [String: UUID] = [:] // sessionId -> agentTask.id
     /// Last terminal-state packet per session (engineComplete, engineAskUser).
@@ -296,10 +297,10 @@ class DaemonManager: ObservableObject {
     func sendToClientOrRelay(_ packet: WSPacket, to clientId: String) async {
         if clientId == "relay" {
             // Encrypt text packets for relay transit (E2E — relay can't read)
-            if e2e.isReady {
+            if relayE2E.isReady {
                 do {
                     let jsonData = try packet.encode()
-                    if let encrypted = e2e.encryptBinary(jsonData) {
+                    if let encrypted = relayE2E.encryptBinary(jsonData) {
                         let envelope = WSPacket(
                             action: .e2eEncrypted,
                             payload: ["data": encrypted.base64EncodedString()],
@@ -324,15 +325,32 @@ class DaemonManager: ObservableObject {
         switch packet.action {
         // E2E encrypted envelope — unwrap and re-dispatch
         case .e2eEncrypted:
+            let crypto = clientId == "relay" ? relayE2E : e2e
             guard let dataB64 = packet.payload?["data"],
                   let ciphertext = Data(base64Encoded: dataB64),
-                  let decryptedData = e2e.decryptBinary(ciphertext),
+                  let decryptedData = crypto.decryptBinary(ciphertext),
                   let innerPacket = try? WSPacket.decode(from: decryptedData) else {
-                log("e2eEncrypted: failed to decrypt packet")
+                log("e2eEncrypted: failed to decrypt packet from \(clientId)")
                 return
             }
             await handlePacket(clientId: clientId, packet: innerPacket)
             return
+        // E2E key exchange via relay — iOS sends its public key
+        case .e2eKeyExchange:
+            if let clientKey = packet.payload?["e2ePublicKey"], !clientKey.isEmpty {
+                relayE2E.reset()
+                if relayE2E.completeKeyExchange(remotePublicKeyBase64: clientKey) {
+                    log("e2eKeyExchange: relay E2E established")
+                    // Send response directly (not via sendToClientOrRelay which would try to encrypt)
+                    await relayClient.send(packet: WSPacket(
+                        action: .e2eKeyExchangeResponse,
+                        payload: ["e2ePublicKey": relayE2E.publicKeyBase64],
+                        id: packet.id
+                    ))
+                } else {
+                    log("e2eKeyExchange: ECDH failed")
+                }
+            }
         case .workspaceList:
             await handleWorkspaceList(clientId: clientId, packet: packet)
         case .workspaceScanRepos:
@@ -1630,18 +1648,15 @@ class DaemonManager: ObservableObject {
     private func setupEncoderFrameRelay(encoder: H264Encoder, isRelay: Bool, clientId: String) {
         let relay = self.relayClient
         let wsServer = self.wsServer
-        let e2eRef = self.e2e
+        let e2eRef = isRelay ? self.relayE2E : self.e2e
         let sendInFlight = OSAllocatedUnfairLock(initialState: false)
         var frameCount = 0
         var dropCount = 0
         log("setupEncoderFrameRelay: isRelay=\(isRelay), clientId=\(clientId), e2eReady=\(e2eRef.isReady)")
         encoder.onEncodedFrame = { [weak encoder] encodedData in
             frameCount += 1
-            // Encrypt frame data if E2E is ready AND this is a LAN connection.
-            // Relay connections don't have E2E key exchange — the relay iOS client
-            // can't decrypt frames encrypted with a LAN E2E key.
             let framePayload: Data
-            if !isRelay, e2eRef.isReady, let encrypted = e2eRef.encryptBinary(encodedData) {
+            if e2eRef.isReady, let encrypted = e2eRef.encryptBinary(encodedData) {
                 framePayload = encrypted
             } else {
                 framePayload = encodedData

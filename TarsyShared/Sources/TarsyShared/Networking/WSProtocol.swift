@@ -155,6 +155,8 @@ public enum WSAction: String, Codable, Sendable {
     case securityRotateResult = "security:rotate_result"
     case securityFingerprintUpdate = "security:fingerprint_update"
     case e2eEncrypted = "e2e:encrypted"
+    case e2eKeyExchange = "e2e:key_exchange"
+    case e2eKeyExchangeResponse = "e2e:key_exchange_response"
 
     // System
     case auth
