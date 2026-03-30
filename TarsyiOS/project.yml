@@ -37,8 +37,6 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
-        LSApplicationQueriesSchemes:
-          - tailscale
         NSLocalNetworkUsageDescription: "Tarsy connects to your Mac on the local network to stream and send commands."
         NSPhotoLibraryUsageDescription: "Tarsy needs access to your photos to send images to the AI agent."
         NSPhotoLibraryAddUsageDescription: "Tarsy saves screenshots from the stream to your photo library."

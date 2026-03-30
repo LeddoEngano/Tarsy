@@ -750,7 +750,6 @@ struct WorkspaceView: View {
                 VStack(spacing: 0) {
                     chatArea
                     inputBar
-                        .padding(.bottom, isInputFocused ? keyboardHeight : 0)
                 }
 
                 if let questions = interactiveQuestions {
@@ -1508,10 +1507,14 @@ struct WorkspaceView: View {
         todoManager.markResumed(sessionId: sessionId)
         todoManager.confirmWorking(sessionId: sessionId)
 
-        // Suppress the first "ready" greeting for imported session tabs
-        if let tabId = tabId(forSession: sessionId) ?? (isActiveTabSession(packet) ? currentTab.id : nil),
-           importedSessionTabs.contains(tabId) {
-            importedSessionTabs.remove(tabId)
+        // Suppress the first "ready" greeting for imported session tabs.
+        // The ready message may arrive before .engineCreate assigns the sessionId to the tab,
+        // so also check if the current tab (with no sessionId yet) is in the suppression set.
+        let resolvedTabId = tabId(forSession: sessionId)
+            ?? (isActiveTabSession(packet) ? currentTab.id : nil)
+            ?? (currentTab.sessionId == nil && importedSessionTabs.contains(currentTab.id) ? currentTab.id : nil)
+        if let resolvedTabId, importedSessionTabs.contains(resolvedTabId) {
+            importedSessionTabs.remove(resolvedTabId)
             return
         }
         if let output = packet.payload?["output"] {
