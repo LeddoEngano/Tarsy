@@ -3,6 +3,7 @@ import SwiftUI
 struct SplashView: View {
     @State private var opacity = 0.0
     @State private var scale = 0.8
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ZStack {
@@ -48,9 +49,14 @@ struct SplashView: View {
             .opacity(opacity)
         }
         .onAppear {
-            withAnimation(.easeOut(duration: 0.6)) {
+            if reduceMotion {
                 opacity = 1
                 scale = 1
+            } else {
+                withAnimation(.easeOut(duration: 0.6)) {
+                    opacity = 1
+                    scale = 1
+                }
             }
         }
     }

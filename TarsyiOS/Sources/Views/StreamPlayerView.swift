@@ -115,6 +115,7 @@ struct StreamPlayerView: View {
                             streamButton("stop.fill", color: TarsyTheme.accentTerracotta) {
                                 stopDevServer()
                             }
+                            .accessibilityLabel("Stop dev server")
                         }
                         Spacer()
                         Text("\(viewModel.fps) fps")
@@ -134,6 +135,7 @@ struct StreamPlayerView: View {
                             print("[Screenshot] Button tapped")
                             saveScreenshot()
                         }
+                        .accessibilityLabel("Take screenshot")
 
                         HStack(spacing: 8) {
                             if isWebMode {
@@ -143,21 +145,25 @@ struct StreamPlayerView: View {
                                     withAnimation(.easeInOut(duration: 0.25)) { showMiniUrlBar = true }
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isMiniUrlFocused = true }
                                 }
+                                .accessibilityLabel("Enter URL")
 
                                 // Back
                                 streamButton("chevron.left") {
                                     connectionManager.send(WSPacket(action: .browserBack, payload: [:]))
                                 }
+                                .accessibilityLabel("Go back")
 
                                 // Forward
                                 streamButton("chevron.right") {
                                     connectionManager.send(WSPacket(action: .browserForward, payload: [:]))
                                 }
+                                .accessibilityLabel("Go forward")
 
                                 // Reload
                                 streamButton("arrow.clockwise") {
                                     connectionManager.send(WSPacket(action: .browserRefresh, payload: [:]))
                                 }
+                                .accessibilityLabel("Reload page")
                             }
 
                             Spacer()
@@ -173,12 +179,14 @@ struct StreamPlayerView: View {
                                         .background(.ultraThinMaterial)
                                         .cornerRadius(8)
                                 }
+                                .accessibilityLabel("Select port \(selectedPort ?? 0)")
                             }
 
                             // Fullscreen
                             streamButton("arrow.up.left.and.arrow.down.right") {
                                 isFullscreen.toggle()
                             }
+                            .accessibilityLabel(isFullscreen ? "Exit fullscreen" : "Enter fullscreen")
                         }
                     }
                 }
@@ -248,6 +256,7 @@ struct StreamPlayerView: View {
                                     .stroke(TarsyTheme.accentAmber, lineWidth: 1)
                             )
                     }
+                    .accessibilityLabel("Start stream")
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

@@ -225,6 +225,7 @@ struct WorkspaceView: View {
                                 .offset(x: -10, y: -1)
                         }
                     }
+                    .accessibilityLabel("Create git checkpoint")
 
                     Menu {
                         Button(action: { showGitSheet = true }) {
@@ -246,6 +247,7 @@ struct WorkspaceView: View {
                         Image(systemName: "ellipsis.circle")
                             .foregroundColor(TarsyTheme.accentAmber)
                     }
+                    .accessibilityLabel("More options")
                 }
             }
         }
@@ -936,6 +938,7 @@ struct WorkspaceView: View {
                             .foregroundColor(TarsyTheme.textSecondary)
                             .frame(width: 36, height: 36)
                     }
+                    .accessibilityLabel("Add attachment")
 
                     Spacer()
 
@@ -981,6 +984,7 @@ struct WorkspaceView: View {
                             )
                         }
                         .transition(.scale(scale: 0.5).combined(with: .opacity))
+                        .accessibilityLabel("Agent tasks")
                     }
 
                     HStack(spacing: 3) {
@@ -1006,6 +1010,7 @@ struct WorkspaceView: View {
                                     .onEnded { _ in stopVoiceInput() }
                                 )
                         )
+                        .accessibilityLabel(isRecording ? "Stop recording" : "Hold to record voice")
 
                     Button(action: { sendMessage() }) {
                         Image(systemName: "arrow.up")
@@ -1016,6 +1021,7 @@ struct WorkspaceView: View {
                             .cornerRadius(16)
                     }
                     .disabled(!canSend)
+                    .accessibilityLabel("Send message")
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)

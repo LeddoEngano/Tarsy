@@ -19,6 +19,7 @@ struct DashboardView: View {
     @State private var deepLinkWorkspace: Workspace?
     @State private var isDeepLinkActive = false
     @State private var hasFetchedMachines = false
+    @State private var machineStatusTimer: Timer?
 
     var body: some View {
         NavigationStack {
@@ -62,6 +63,7 @@ struct DashboardView: View {
                                     Image(systemName: "bolt.fill")
                                         .foregroundColor(TarsyTheme.accentAmber)
                                 }
+                                .accessibilityLabel("Quick dispatch")
                             }
                             Button(action: {
                                 if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
@@ -73,6 +75,7 @@ struct DashboardView: View {
                                 Image(systemName: "wand.and.stars")
                                     .foregroundColor(TarsyTheme.accentAmber)
                             }
+                            .accessibilityLabel("AI project wizard")
                             Button(action: {
                                 if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
                                     showNewWorkspace = true
@@ -83,10 +86,12 @@ struct DashboardView: View {
                                 Image(systemName: "plus")
                                     .foregroundColor(TarsyTheme.accentAmber)
                             }
+                            .accessibilityLabel("New workspace")
                             Button(action: { showActiveSessions = true }) {
                                 Image(systemName: "bubble.left.and.bubble.right")
                                     .foregroundColor(TarsyTheme.textSecondary)
                             }
+                            .accessibilityLabel("Active sessions")
                         }
                         Button(action: { showProfile = true }) {
                             if let avatarUrlStr = profileService.profile?.avatarUrl, let url = URL(string: avatarUrlStr) {
@@ -105,6 +110,7 @@ struct DashboardView: View {
                                     .foregroundColor(TarsyTheme.textSecondary)
                             }
                         }
+                        .accessibilityLabel("Profile")
                     }
                 }
                 .padding(.horizontal, 16)
@@ -172,6 +178,17 @@ struct DashboardView: View {
             await workspaceService.fetchWorkspaces()
             await taskService.loadActiveTasks()
             await taskService.cleanupOldTasks()
+        }
+        .onAppear {
+            // Poll machine status with jitter (25-35s) to avoid thundering herd
+            let interval = 30.0 + Double.random(in: -5...5)
+            machineStatusTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
+                Task { await machineService.fetchMachine() }
+            }
+        }
+        .onDisappear {
+            machineStatusTimer?.invalidate()
+            machineStatusTimer = nil
         }
         .onChange(of: deepLinkRouter.pendingWorkspaceId) { _, wsId in
             guard let wsId else { return }

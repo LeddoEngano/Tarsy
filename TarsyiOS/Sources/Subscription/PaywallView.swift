@@ -29,6 +29,7 @@ struct PaywallView: View {
                             .background(TarsyTheme.backgroundSecondary)
                             .cornerRadius(16)
                     }
+                    .accessibilityLabel("Close")
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
@@ -93,7 +94,15 @@ struct PaywallView: View {
                         .padding(.top, 8)
                 }
 
-                Spacer().frame(height: 24)
+                // Auto-renewal disclosure
+                Text("Subscription automatically renews. Manage or cancel anytime in Settings > App Store.")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                    .padding(.top, 12)
+
+                Spacer().frame(height: 16)
 
                 // Subscribe button
                 Button(action: { purchase() }) {
