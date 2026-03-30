@@ -3,6 +3,19 @@ import TarsyShared
 import ScreenCaptureKit
 import AuthenticationServices
 
+private enum Theme {
+    static let bg = Color(hex: "1a1a1a")
+    static let bgCard = Color(hex: "2a2a2a")
+    static let bgField = Color(hex: "252525")
+    static let border = Color(hex: "3a3a3a")
+    static let textPrimary = Color(hex: "e8e0d4")
+    static let textSecondary = Color(hex: "a89e91")
+    static let textMuted = Color(hex: "6b6b6b")
+    static let amber = Color(hex: "d4a574")
+    static let moss = Color(hex: "7a8b6f")
+    static let terracotta = Color(hex: "c4704b")
+}
+
 struct OnboardingWindow: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var daemonManager: DaemonManager
@@ -11,7 +24,7 @@ struct OnboardingWindow: View {
     @State private var password = ""
     @State private var isSignUp = false
 
-    enum OnboardingStep {
+    enum OnboardingStep: CaseIterable {
         case login
         case permissions
         case ready
@@ -19,18 +32,16 @@ struct OnboardingWindow: View {
 
     var body: some View {
         ZStack {
-            Color(hex: "1a1a1a")
-                .ignoresSafeArea()
+            Theme.bg.ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Header
                 header
 
-                Divider().background(Color(hex: "3a3a3a"))
-
-                // Steps indicator
+                // Steps
                 stepsIndicator
-                    .padding(.top, 20)
+                    .padding(.top, 24)
+                    .padding(.bottom, 20)
 
                 // Content
                 Group {
@@ -44,20 +55,25 @@ struct OnboardingWindow: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                Spacer()
             }
         }
-        .frame(width: 480, height: 520)
-        .onAppear {
+        .frame(width: 500, height: 560)
+        .task {
             if authManager.isAuthenticated {
-                step = .permissions
+                checkPermissions()
+                // Small delay to let permission checks complete
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                step = allPermissionsGranted ? .ready : .permissions
             }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuth in
             if isAuth {
-                step = .permissions
-                Task { await daemonManager.start() }
+                checkPermissions()
+                Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    step = allPermissionsGranted ? .ready : .permissions
+                    await daemonManager.start()
+                }
             }
         }
     }
@@ -65,86 +81,125 @@ struct OnboardingWindow: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 4) {
-                eyeIcon(size: 14)
-                eyeIcon(size: 14)
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                HStack(spacing: 3) {
+                    eyeIcon(size: 12)
+                    eyeIcon(size: 12)
+                }
+
+                Text("tarsy")
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
+
+                Spacer()
+
+                Text("setup")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(Theme.textMuted)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule().fill(Theme.border)
+                    )
             }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 16)
 
-            Text("TARSY")
-                .font(.system(size: 20, weight: .bold, design: .monospaced))
-                .foregroundColor(Color(hex: "d4a574"))
-
-            Spacer()
-
-            Text("setup")
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(Color(hex: "a89e91"))
+            Rectangle()
+                .fill(Theme.border)
+                .frame(height: 1)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 16)
-        .background(Color(hex: "2a2a2a"))
     }
 
     // MARK: - Steps Indicator
 
     private var stepsIndicator: some View {
-        HStack(spacing: 10) {
-            stepDot(label: "1. login", active: step == .login, done: step != .login)
-            stepLine(done: step != .login)
-            stepDot(label: "2. perms", active: step == .permissions, done: step == .ready)
-            stepLine(done: step == .ready)
-            stepDot(label: "3. ready", active: step == .ready, done: false)
+        HStack(spacing: 0) {
+            stepPill(index: 0, label: "login", thisStep: .login)
+
+            stepConnector(done: step != .login)
+
+            stepPill(index: 1, label: "permissions", thisStep: .permissions)
+
+            stepConnector(done: step == .ready)
+
+            stepPill(index: 2, label: "ready", thisStep: .ready)
         }
-        .padding(.horizontal, 24)
+        .padding(.horizontal, 40)
     }
 
-    @ViewBuilder
-    private func stepDot(label: String, active: Bool, done: Bool) -> some View {
-        VStack(spacing: 4) {
-            Circle()
-                .fill(done ? Color(hex: "7a8b6f") : active ? Color(hex: "d4a574") : Color(hex: "3a3a3a"))
-                .frame(width: 10, height: 10)
-                .overlay(
-                    done ? Image(systemName: "checkmark")
-                        .font(.system(size: 6, weight: .bold))
-                        .foregroundColor(.white) : nil
-                )
+    private func stepPill(index: Int, label: String, thisStep: OnboardingStep) -> some View {
+        let active = step == thisStep
+        let done = stepIndex(step) > index
+
+        return HStack(spacing: 6) {
+            if done {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(Theme.moss)
+            } else {
+                Text("\(index + 1)")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(active ? Theme.amber : Theme.textMuted)
+            }
+
             Text(label)
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(active ? Color(hex: "d4a574") : Color(hex: "6b6b6b"))
+                .font(.system(size: 10, weight: active ? .semibold : .regular, design: .monospaced))
+                .foregroundColor(done ? Theme.moss : active ? Theme.amber : Theme.textMuted)
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            Capsule()
+                .fill(active ? Theme.amber.opacity(0.1) : done ? Theme.moss.opacity(0.08) : Color.clear)
+                .overlay(
+                    Capsule()
+                        .stroke(active ? Theme.amber.opacity(0.3) : done ? Theme.moss.opacity(0.2) : Theme.border, lineWidth: 1)
+                )
+        )
     }
 
-    @ViewBuilder
-    private func stepLine(done: Bool) -> some View {
+    private func stepConnector(done: Bool) -> some View {
         Rectangle()
-            .fill(done ? Color(hex: "7a8b6f") : Color(hex: "3a3a3a"))
+            .fill(done ? Theme.moss.opacity(0.4) : Theme.border)
             .frame(height: 1)
-            .frame(maxWidth: 40)
-            .offset(y: -8)
+            .frame(maxWidth: 24)
+    }
+
+    private func stepIndex(_ s: OnboardingStep) -> Int {
+        switch s {
+        case .login: return 0
+        case .permissions: return 1
+        case .ready: return 2
+        }
     }
 
     // MARK: - Login Step
 
     private var loginStep: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 0) {
             Spacer()
 
-            Text("sign in to your tarsy account")
-                .font(.system(size: 14, design: .monospaced))
-                .foregroundColor(Color(hex: "a89e91"))
+            VStack(spacing: 6) {
+                Text("welcome to tarsy")
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
 
-            VStack(spacing: 12) {
+                Text("sign in to connect your devices")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Theme.textSecondary)
+            }
+            .padding(.bottom, 24)
+
+            VStack(spacing: 10) {
                 // Sign in with Apple
                 SignInWithAppleButton(.signIn) { request in
                     let nonce = authManager.generateNonce()
                     request.requestedScopes = [.email, .fullName]
                     request.nonce = authManager.sha256(nonce)
                 } onCompletion: { result in
-                    Task {
-                        await authManager.handleAppleSignIn(result: result)
-                    }
+                    Task { await authManager.handleAppleSignIn(result: result) }
                 }
                 .signInWithAppleButtonStyle(.white)
                 .frame(height: 44)
@@ -165,49 +220,41 @@ struct OnboardingWindow: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .frame(height: 44)
-                    .background(Color(hex: "2a2a2a"))
+                    .background(Theme.bgCard)
                     .cornerRadius(8)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
                     )
                 }
                 .buttonStyle(.plain)
+                .pointerOnHover()
 
                 // Divider
-                HStack {
-                    Rectangle()
-                        .fill(Color(hex: "6b6b6b").opacity(0.3))
-                        .frame(height: 1)
+                HStack(spacing: 12) {
+                    Rectangle().fill(Theme.border).frame(height: 1)
                     Text("or")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Color(hex: "6b6b6b"))
-                    Rectangle()
-                        .fill(Color(hex: "6b6b6b").opacity(0.3))
-                        .frame(height: 1)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Theme.textMuted)
+                    Rectangle().fill(Theme.border).frame(height: 1)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
 
-                TextField("", text: $email, prompt: Text("email").foregroundColor(Color(hex: "6b6b6b")))
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14, design: .monospaced))
-                    .foregroundColor(Color(hex: "e8e0d4"))
-                    .padding(12)
-                    .background(Color(hex: "2a2a2a"))
-                    .cornerRadius(8)
-
-                SecureField("", text: $password, prompt: Text("password").foregroundColor(Color(hex: "6b6b6b")))
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 14, design: .monospaced))
-                    .foregroundColor(Color(hex: "e8e0d4"))
-                    .padding(12)
-                    .background(Color(hex: "2a2a2a"))
-                    .cornerRadius(8)
+                // Email / Password
+                VStack(spacing: 8) {
+                    styledTextField("email", text: $email)
+                    styledSecureField("password", text: $password)
+                }
 
                 if let error = authManager.errorMessage {
-                    Text(error)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Color(hex: "c4704b"))
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                        Text(error)
+                            .font(.system(size: 11, design: .monospaced))
+                    }
+                    .foregroundColor(Theme.terracotta)
+                    .padding(.top, 2)
                 }
 
                 Button(action: {
@@ -219,57 +266,60 @@ struct OnboardingWindow: View {
                         }
                     }
                 }) {
-                    Text(authManager.isLoading ? "..." : (isSignUp ? "create account" : "sign in"))
-                        .font(.system(size: 14, design: .monospaced))
-                        .foregroundColor(Color(hex: "1a1a1a"))
-                        .frame(maxWidth: .infinity)
-                        .padding(12)
-                        .background(Color(hex: "d4a574"))
-                        .cornerRadius(8)
+                    HStack(spacing: 6) {
+                        if authManager.isLoading {
+                            ProgressView()
+                                .scaleEffect(0.5)
+                                .frame(width: 14, height: 14)
+                        }
+                        Text(isSignUp ? "create account" : "sign in")
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundColor(Theme.bg)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(email.isEmpty || password.isEmpty ? Theme.textMuted : Theme.amber)
+                    )
                 }
                 .buttonStyle(.plain)
+                .pointerOnHover()
                 .disabled(email.isEmpty || password.isEmpty || authManager.isLoading)
 
                 Button(action: { isSignUp.toggle() }) {
                     Text(isSignUp ? "already have an account? sign in" : "no account? sign up")
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Color(hex: "6b6b6b"))
+                        .foregroundColor(Theme.textMuted)
                 }
                 .buttonStyle(.plain)
+                .pointerOnHover()
             }
-            .frame(maxWidth: 300)
-
-            // Legal links
-            HStack(spacing: 0) {
-                Text("by signing in, you agree to our ")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Color(hex: "6b6b6b"))
-
-                Button("Terms") {
-                    if let url = URL(string: "https://www.tarsy.dev/terms") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundColor(Color(hex: "d4a574"))
-                .buttonStyle(.plain)
-
-                Text(" and ")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Color(hex: "6b6b6b"))
-
-                Button("Privacy Policy") {
-                    if let url = URL(string: "https://www.tarsy.dev/privacy") {
-                        NSWorkspace.shared.open(url)
-                    }
-                }
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundColor(Color(hex: "d4a574"))
-                .buttonStyle(.plain)
-            }
-            .padding(.top, 8)
+            .frame(maxWidth: 320)
 
             Spacer()
+
+            // Legal
+            HStack(spacing: 0) {
+                Text("by signing in, you agree to our ")
+                    .foregroundColor(Theme.textMuted)
+                Button("Terms") {
+                    if let url = URL(string: "https://www.tarsy.dev/terms") { NSWorkspace.shared.open(url) }
+                }
+                .foregroundColor(Theme.textSecondary)
+                .buttonStyle(.plain)
+                .pointerOnHover()
+                Text(" and ")
+                    .foregroundColor(Theme.textMuted)
+                Button("Privacy Policy") {
+                    if let url = URL(string: "https://www.tarsy.dev/privacy") { NSWorkspace.shared.open(url) }
+                }
+                .foregroundColor(Theme.textSecondary)
+                .buttonStyle(.plain)
+                .pointerOnHover()
+            }
+            .font(.system(size: 10, design: .monospaced))
+            .padding(.bottom, 20)
         }
     }
 
@@ -285,85 +335,142 @@ struct OnboardingWindow: View {
         hasScreenRecording && hasAccessibility && hasFilesAccess
     }
 
+    private var grantedCount: Int {
+        [hasScreenRecording, hasAccessibility, hasFilesAccess].filter { $0 }.count
+    }
+
     private var permissionsStep: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 0) {
             Spacer()
 
-            Image(systemName: "lock.shield")
-                .font(.system(size: 36))
-                .foregroundColor(Color(hex: "d4a574"))
+            VStack(spacing: 6) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 32))
+                    .foregroundColor(Theme.amber)
+                    .padding(.bottom, 4)
 
-            Text("permissions")
-                .font(.system(size: 16, weight: .semibold, design: .monospaced))
-                .foregroundColor(Color(hex: "e8e0d4"))
+                Text("permissions")
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
 
-            Text("tarsy needs these permissions\nto capture your screen and control windows")
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(Color(hex: "a89e91"))
-                .multilineTextAlignment(.center)
+                Text("tarsy needs a few permissions to work")
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Theme.textSecondary)
+            }
+            .padding(.bottom, 20)
 
-            VStack(spacing: 10) {
+            // Progress
+            VStack(spacing: 6) {
+                HStack {
+                    Text("\(grantedCount) of 3 granted")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(allPermissionsGranted ? Theme.moss : Theme.textSecondary)
+                    Spacer()
+                }
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(Theme.border)
+                            .frame(height: 3)
+
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(allPermissionsGranted ? Theme.moss : Theme.amber)
+                            .frame(width: geo.size.width * CGFloat(grantedCount) / 3.0, height: 3)
+                            .animation(.easeInOut(duration: 0.3), value: grantedCount)
+                    }
+                }
+                .frame(height: 3)
+            }
+            .padding(.horizontal, 40)
+            .padding(.bottom, 16)
+
+            // Permission rows
+            VStack(spacing: 8) {
                 permissionRow(
+                    icon: "rectangle.dashed.badge.record",
                     name: "screen recording",
-                    description: "stream your browser/simulator to iphone",
+                    description: "stream your screen to iPhone",
                     granted: hasScreenRecording,
                     settingsKey: "Privacy_ScreenCapture"
                 )
 
                 permissionRow(
+                    icon: "hand.tap",
                     name: "accessibility",
-                    description: "control windows and detect running apps",
+                    description: "control windows and input remotely",
                     granted: hasAccessibility,
                     settingsKey: "Privacy_Accessibility"
                 )
 
                 permissionRow(
+                    icon: "folder",
                     name: "files and folders",
-                    description: "scan your projects to find repos",
+                    description: "scan projects and read your repos",
                     granted: hasFilesAccess,
                     settingsKey: "Privacy_FilesAndFolders"
                 )
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, 40)
 
-            HStack(spacing: 12) {
+            // Actions
+            HStack(spacing: 10) {
                 Button(action: { checkPermissions() }) {
                     HStack(spacing: 6) {
                         if isCheckingPermissions {
                             ProgressView()
-                                .controlSize(.small)
+                                .scaleEffect(0.4)
+                                .frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11))
                         }
                         Text("refresh")
-                            .font(.system(size: 13, design: .monospaced))
+                            .font(.system(size: 12, design: .monospaced))
                     }
-                    .foregroundColor(Color(hex: "d4a574"))
-                    .frame(maxWidth: 120)
-                    .padding(10)
-                    .overlay(
+                    .foregroundColor(Theme.textSecondary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
+                    .background(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color(hex: "d4a574"), lineWidth: 1)
+                            .fill(Theme.bgCard)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Theme.border, lineWidth: 1)
+                            )
                     )
                 }
                 .buttonStyle(.plain)
+                .pointerOnHover()
 
                 if allPermissionsGranted {
-                    Button(action: { step = .ready }) {
-                        Text("continue")
-                            .font(.system(size: 14, design: .monospaced))
-                            .foregroundColor(Color(hex: "1a1a1a"))
-                            .frame(maxWidth: 120)
-                            .padding(10)
-                            .background(Color(hex: "d4a574"))
-                            .cornerRadius(8)
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) { step = .ready }
+                    }) {
+                        HStack(spacing: 6) {
+                            Text("continue")
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(Theme.bg)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 9)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8).fill(Theme.amber)
+                        )
                     }
                     .buttonStyle(.plain)
+                    .pointerOnHover()
                 }
             }
+            .padding(.top, 20)
 
             if !allPermissionsGranted {
                 Text("grant permissions above, then click refresh")
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Color(hex: "6b6b6b"))
+                    .foregroundColor(Theme.textMuted)
+                    .padding(.top, 10)
             }
 
             Spacer()
@@ -374,41 +481,58 @@ struct OnboardingWindow: View {
     }
 
     @ViewBuilder
-    private func permissionRow(name: String, description: String, granted: Bool, settingsKey: String) -> some View {
+    private func permissionRow(icon: String, name: String, description: String, granted: Bool, settingsKey: String) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: granted ? "checkmark.circle.fill" : "xmark.circle")
-                .font(.system(size: 18))
-                .foregroundColor(granted ? Color(hex: "7a8b6f") : Color(hex: "c4704b"))
+            ZStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(granted ? Theme.moss.opacity(0.12) : Theme.terracotta.opacity(0.1))
+                    .frame(width: 32, height: 32)
+
+                Image(systemName: granted ? "checkmark" : icon)
+                    .font(.system(size: granted ? 12 : 13, weight: granted ? .bold : .regular))
+                    .foregroundColor(granted ? Theme.moss : Theme.terracotta)
+            }
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundColor(Color(hex: "e8e0d4"))
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
                 Text(description)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Color(hex: "6b6b6b"))
+                    .foregroundColor(Theme.textMuted)
             }
 
             Spacer()
 
             if !granted {
                 Button(action: { openSettings(settingsKey) }) {
-                    Text("open settings")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(Color(hex: "d4a574"))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(Color(hex: "d4a574"), lineWidth: 1)
+                    Text("grant")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(Theme.amber)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Theme.amber.opacity(0.1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .stroke(Theme.amber.opacity(0.3), lineWidth: 1)
+                                )
                         )
                 }
                 .buttonStyle(.plain)
+                .pointerOnHover()
             }
         }
         .padding(12)
-        .background(Color(hex: "2a2a2a"))
-        .cornerRadius(8)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Theme.bgCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(granted ? Theme.moss.opacity(0.2) : Theme.border, lineWidth: 1)
+                )
+        )
     }
 
     private func checkPermissions() {
@@ -455,55 +579,15 @@ struct OnboardingWindow: View {
         return accessCount >= 2
     }
 
-    private var automationRow: some View {
-        HStack(spacing: 12) {
-            Image(systemName: hasAutomation ? "checkmark.circle.fill" : "xmark.circle")
-                .font(.system(size: 18))
-                .foregroundColor(hasAutomation ? Color(hex: "7a8b6f") : Color(hex: "c4704b"))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("automation")
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundColor(Color(hex: "e8e0d4"))
-                Text("control browser tabs via apple events")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Color(hex: "6b6b6b"))
-            }
-
-            Spacer()
-
-            if !hasAutomation {
-                Button(action: { requestAutomationPermission() }) {
-                    Text("grant access")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(Color(hex: "d4a574"))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(Color(hex: "d4a574"), lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(12)
-        .background(Color(hex: "2a2a2a"))
-        .cornerRadius(8)
-    }
-
     @State private var automationDenied = false
-
     @State private var automationUserAttempts = 0
 
     private func requestAutomationPermission() {
         automationUserAttempts += 1
         let attempt = automationUserAttempts
 
-        // Bring app to foreground — LSUIElement apps may not get TCC dialogs otherwise
         NSApp.activate(ignoringOtherApps: true)
 
-        // Run on background thread — AEDeterminePermissionToAutomateTarget blocks until user responds
         DispatchQueue.global(qos: .userInitiated).async {
             let succeeded = checkAutomationWithAEAPI(askUser: true)
 
@@ -519,14 +603,9 @@ struct OnboardingWindow: View {
         }
     }
 
-    /// Uses AEDeterminePermissionToAutomateTarget to check/trigger automation permission.
-    /// Targets Finder (always running). askUser=true shows the macOS consent dialog.
     private func checkAutomationWithAEAPI(askUser: Bool) -> Bool {
         let targetDescriptor = NSAppleEventDescriptor(bundleIdentifier: "com.apple.finder")
-        guard let aeDesc = targetDescriptor.aeDesc else {
-            print("[Automation] Failed to create AE descriptor")
-            return false
-        }
+        guard let aeDesc = targetDescriptor.aeDesc else { return false }
 
         let status = AEDeterminePermissionToAutomateTarget(
             aeDesc,
@@ -535,15 +614,9 @@ struct OnboardingWindow: View {
             askUser
         )
 
-        print("[Automation] AEDeterminePermissionToAutomateTarget status: \(status)")
-
         switch status {
         case noErr:
             return true
-        case OSStatus(errAEEventNotPermitted): // -1743: denied
-            return false
-        case OSStatus(procNotFound): // -600: Finder not running (unlikely)
-            return false
         default:
             return false
         }
@@ -566,67 +639,104 @@ struct OnboardingWindow: View {
     // MARK: - Ready Step
 
     private var readyStep: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 0) {
             Spacer()
 
-            HStack(spacing: 12) {
-                eyeIcon(size: 28)
-                eyeIcon(size: 28)
+            // Success icon
+            ZStack {
+                Circle()
+                    .fill(Theme.moss.opacity(0.1))
+                    .frame(width: 72, height: 72)
+                Circle()
+                    .fill(Theme.moss.opacity(0.15))
+                    .frame(width: 56, height: 56)
+                HStack(spacing: 4) {
+                    eyeIcon(size: 18)
+                    eyeIcon(size: 18)
+                }
             }
+            .padding(.bottom, 16)
 
-            Text("tarsy is ready!")
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
-                .foregroundColor(Color(hex: "d4a574"))
+            Text("tarsy is ready")
+                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                .foregroundColor(Theme.textPrimary)
+                .padding(.bottom, 4)
 
-            VStack(spacing: 8) {
-                statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "signed in as \(authManager.currentUser?.email ?? "...")")
-                statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "relay connected (remote access ready)")
-                statusRow(icon: "lock.fill", color: "7a8b6f", text: "TLS encrypted on port \(TarsyConfig.websocketPort)")
-                statusRow(icon: "checkmark.circle.fill", color: "7a8b6f", text: "H.264 streaming ready")
-            }
-
-            Text("tarsy will now run in your menu bar.\nopen the tarsy app on your iphone to start.")
+            Text("everything is set up and running")
                 .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(Color(hex: "a89e91"))
+                .foregroundColor(Theme.textSecondary)
+                .padding(.bottom, 24)
+
+            // Status cards
+            VStack(spacing: 6) {
+                readyRow(icon: "person.fill.checkmark", text: "signed in as \(authManager.currentUser?.email ?? "...")")
+                readyRow(icon: "antenna.radiowaves.left.and.right", text: "relay connected — remote access ready")
+                readyRow(icon: "lock.fill", text: "encrypted on port \(TarsyConfig.websocketPort)")
+                readyRow(icon: "video.fill", text: "H.264 streaming ready")
+            }
+            .padding(.horizontal, 48)
+            .padding(.bottom, 28)
+
+            Text("tarsy runs in your menu bar.\nopen the app on your iPhone to start.")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(Theme.textMuted)
                 .multilineTextAlignment(.center)
+                .lineSpacing(3)
+                .padding(.bottom, 24)
 
             Button(action: { closeWindow() }) {
-                Text("minimize to menu bar")
-                    .font(.system(size: 14, design: .monospaced))
-                    .foregroundColor(Color(hex: "1a1a1a"))
-                    .frame(maxWidth: 240)
-                    .padding(12)
-                    .background(Color(hex: "d4a574"))
-                    .cornerRadius(8)
+                HStack(spacing: 8) {
+                    Image(systemName: "menubar.arrow.up.rectangle")
+                        .font(.system(size: 12))
+                    Text("minimize to menu bar")
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                }
+                .foregroundColor(Theme.bg)
+                .frame(maxWidth: 260)
+                .padding(.vertical, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 8).fill(Theme.amber)
+                )
             }
             .buttonStyle(.plain)
+            .pointerOnHover()
 
             Spacer()
         }
     }
 
     @ViewBuilder
-    private func statusRow(icon: String, color: String, text: String) -> some View {
-        HStack(spacing: 8) {
+    private func readyRow(icon: String, text: String) -> some View {
+        HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 11))
-                .foregroundColor(Color(hex: color))
+                .font(.system(size: 10))
+                .foregroundColor(Theme.moss)
+                .frame(width: 16, alignment: .center)
+
             Text(text)
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundColor(Color(hex: "a89e91"))
+                .foregroundColor(Theme.textSecondary)
+
             Spacer()
         }
-        .frame(maxWidth: 340)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Theme.moss.opacity(0.05))
+        )
     }
+
+    // MARK: - Components
 
     @ViewBuilder
     private func eyeIcon(size: CGFloat) -> some View {
         ZStack {
             Circle()
-                .fill(Color(hex: "d4a574"))
+                .fill(Theme.amber)
                 .frame(width: size, height: size)
             Circle()
-                .fill(Color(hex: "1a1a1a"))
+                .fill(Theme.bg)
                 .frame(width: size * 0.45, height: size * 0.45)
                 .offset(x: size * 0.05, y: -size * 0.05)
             Circle()
@@ -636,8 +746,53 @@ struct OnboardingWindow: View {
         }
     }
 
+    private func styledTextField(_ placeholder: String, text: Binding<String>) -> some View {
+        TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
+            .textFieldStyle(.plain)
+            .font(.system(size: 13, design: .monospaced))
+            .foregroundColor(Theme.textPrimary)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.bgField)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.border, lineWidth: 1)
+                    )
+            )
+    }
+
+    private func styledSecureField(_ placeholder: String, text: Binding<String>) -> some View {
+        SecureField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
+            .textFieldStyle(.plain)
+            .font(.system(size: 13, design: .monospaced))
+            .foregroundColor(Theme.textPrimary)
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.bgField)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.border, lineWidth: 1)
+                    )
+            )
+    }
+
     private func closeWindow() {
         NSApplication.shared.keyWindow?.close()
+    }
+}
+
+// Pointer cursor on hover
+extension View {
+    func pointerOnHover() -> some View {
+        self.onHover { hovering in
+            if hovering {
+                NSCursor.pointingHand.push()
+            } else {
+                NSCursor.pop()
+            }
+        }
     }
 }
 
