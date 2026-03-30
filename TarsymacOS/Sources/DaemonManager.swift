@@ -1632,18 +1632,27 @@ class DaemonManager: ObservableObject {
         let wsServer = self.wsServer
         let e2eRef = self.e2e
         let sendInFlight = OSAllocatedUnfairLock(initialState: false)
+        var frameCount = 0
+        var dropCount = 0
+        log("setupEncoderFrameRelay: isRelay=\(isRelay), clientId=\(clientId), e2eReady=\(e2eRef.isReady)")
         encoder.onEncodedFrame = { [weak encoder] encodedData in
-            // Encrypt frame data if E2E is ready (binary AES-GCM, no base64)
+            frameCount += 1
+            // Encrypt frame data if E2E is ready AND this is a LAN connection.
+            // Relay connections don't have E2E key exchange — the relay iOS client
+            // can't decrypt frames encrypted with a LAN E2E key.
             let framePayload: Data
-            if e2eRef.isReady, let encrypted = e2eRef.encryptBinary(encodedData) {
+            if !isRelay, e2eRef.isReady, let encrypted = e2eRef.encryptBinary(encodedData) {
                 framePayload = encrypted
             } else {
-                // Fallback to unencrypted only if E2E not established (e.g., LAN with TLS)
                 framePayload = encodedData
             }
 
             var prefixedData = Data("H264".utf8)
             prefixedData.append(framePayload)
+
+            if frameCount <= 5 || frameCount % 200 == 0 {
+                print("[FrameRelay] frame #\(frameCount): \(prefixedData.count)B, isRelay=\(isRelay), dropped=\(dropCount), e2e=\(e2eRef.isReady)")
+            }
 
             if isRelay {
                 let alreadyInFlight = sendInFlight.withLock { val -> Bool in
@@ -1652,6 +1661,7 @@ class DaemonManager: ObservableObject {
                     return false
                 }
                 guard !alreadyInFlight else {
+                    dropCount += 1
                     encoder?.reportFrameDropped()
                     return
                 }

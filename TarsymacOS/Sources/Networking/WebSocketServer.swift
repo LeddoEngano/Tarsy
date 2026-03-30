@@ -70,7 +70,9 @@ actor WebSocketServer {
 
             certificateFingerprint = TLSCertificateManager.shared.certificateFingerprint()
         } else if tlsEnabled {
-            throw NWError.posix(.ENOTSUP)
+            // TLS identity creation failed — fall back to plain TCP so LAN still works
+            print("[WS] TLS identity unavailable, falling back to unencrypted WebSocket")
+            parameters = NWParameters.tcp
         } else {
             parameters = NWParameters.tcp
         }
