@@ -394,14 +394,6 @@ const server = Bun.serve({
         }
       }
 
-      // Debug: log binary frame forwarding (temporary)
-      if (typeof message !== "string") {
-        const bytes = message instanceof ArrayBuffer ? message.byteLength : (message as Buffer).length;
-        const clientCount = clients.get(info.userId)?.size ?? 0;
-        const machineOnline = machines.has(info.userId);
-        console.log(`[Relay] Binary ${info.role}→${info.role === "machine" ? "clients" : "machine"}: ${bytes}B (clients=${clientCount}, machine=${machineOnline})`);
-      }
-
       if (info.role === "machine") {
         forwardToClients(info.userId, message as string | Buffer, ws);
       } else {

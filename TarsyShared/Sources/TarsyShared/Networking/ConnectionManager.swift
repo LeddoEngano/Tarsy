@@ -359,26 +359,10 @@ public class ConnectionManager: ObservableObject {
 
     // MARK: - Relay Transport
 
-    private var relaySendCount = 0
-
     private func sendViaRelay(_ data: Data) {
-        guard let relayTask else {
-            print("[Relay:TX] sendViaRelay: relayTask is nil!")
-            return
-        }
-        guard let str = String(data: data, encoding: .utf8) else {
-            print("[Relay:TX] sendViaRelay: failed to convert \(data.count)B to string")
-            return
-        }
-        relaySendCount += 1
-        if relaySendCount <= 10 || relaySendCount % 50 == 0 {
-            // Parse action for logging
-            let action = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["action"] as? String ?? "?"
-            print("[Relay:TX] send #\(relaySendCount): action=\(action), \(data.count)B")
-        }
+        guard let relayTask, let str = String(data: data, encoding: .utf8) else { return }
         relayTask.send(.string(str)) { [weak self] error in
-            if let error {
-                print("[Relay:TX] send error: \(error)")
+            if error != nil {
                 Task { @MainActor in self?.handleDisconnect() }
             }
         }
@@ -425,76 +409,49 @@ public class ConnectionManager: ObservableObject {
         }
     }
 
-    private var relayMsgCount = 0
-    private var relayBinaryCount = 0
-    private var relayTextCount = 0
-
     private func receiveRelayLoop() {
-        guard let relayTask else {
-            print("[Relay:RX] receiveRelayLoop: relayTask is nil, stopping")
-            return
-        }
+        guard let relayTask else { return }
 
         relayTask.receive { [weak self] result in
             Task { @MainActor in
-                guard let self else {
-                    print("[Relay:RX] self is nil in receive callback")
-                    return
-                }
-                self.relayMsgCount += 1
-
                 switch result {
                 case .success(let message):
                     switch message {
                     case .string(let text):
-                        self.relayTextCount += 1
                         if let data = text.data(using: .utf8),
                            let packet = try? WSPacket.decode(from: data) {
-                            if self.relayTextCount <= 10 || self.relayTextCount % 50 == 0 {
-                                print("[Relay:RX] text #\(self.relayTextCount): action=\(packet.action.rawValue)")
-                            }
-                            self.handlePacket(packet)
-                        } else {
-                            print("[Relay:RX] text #\(self.relayTextCount): failed to decode, len=\(text.count), preview=\(String(text.prefix(80)))")
+                            self?.handlePacket(packet)
                         }
                     case .data(let data):
-                        self.relayBinaryCount += 1
                         let prefix = data.prefix(4)
                         let prefixStr = prefix.count == 4 ? String(data: prefix, encoding: .utf8) : nil
 
-                        if self.relayBinaryCount <= 5 || self.relayBinaryCount % 100 == 0 {
-                            print("[Relay:RX] binary #\(self.relayBinaryCount): \(data.count)B, prefix=\(prefixStr ?? "nil"), hasStreamHandler=\(self.onStreamFrameReceived != nil)")
-                        }
-
                         if prefixStr == "H264" {
                             let payload = Data(data.dropFirst(4))
-                            if let decrypted = self.e2e.decryptBinary(payload) {
+                            if let decrypted = self?.e2e.decryptBinary(payload) {
                                 var frameData = Data("H264".utf8)
                                 frameData.append(decrypted)
-                                self.onStreamFrameReceived?(frameData)
+                                self?.onStreamFrameReceived?(frameData)
                             } else {
-                                self.onStreamFrameReceived?(data)
+                                self?.onStreamFrameReceived?(data)
                             }
                         } else if prefixStr == "SCRN" {
                             let payload = Data(data.dropFirst(4))
-                            if let decrypted = self.e2e.decryptBinary(payload) {
-                                self.onScreenshotReceived?(decrypted)
+                            if let decrypted = self?.e2e.decryptBinary(payload) {
+                                self?.onScreenshotReceived?(decrypted)
                             } else {
-                                self.onScreenshotReceived?(payload)
+                                self?.onScreenshotReceived?(payload)
                             }
                         } else {
-                            print("[Relay:RX] binary unknown prefix: \(prefixStr ?? "nil"), \(data.count)B")
-                            self.onStreamFrameReceived?(data)
+                            self?.onStreamFrameReceived?(data)
                         }
                     @unknown default:
-                        print("[Relay:RX] unknown message type")
                         break
                     }
-                    self.receiveRelayLoop()
+                    self?.receiveRelayLoop()
 
-                case .failure(let error):
-                    print("[Relay:RX] receive FAILED after \(self.relayMsgCount) msgs (\(self.relayTextCount) text, \(self.relayBinaryCount) binary): \(error)")
-                    self.handleDisconnect()
+                case .failure:
+                    self?.handleDisconnect()
                 }
             }
         }
@@ -565,9 +522,7 @@ public class ConnectionManager: ObservableObject {
             }
         case .e2eKeyExchangeResponse:
             if let remoteKey = packet.payload?["e2ePublicKey"] {
-                if e2e.completeKeyExchange(remotePublicKeyBase64: remoteKey) {
-                    print("[E2E] Relay E2E established")
-                }
+                _ = e2e.completeKeyExchange(remotePublicKeyBase64: remoteKey)
             }
         case .auth, .pong:
             lastPongTime = Date()

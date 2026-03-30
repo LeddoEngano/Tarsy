@@ -10,7 +10,7 @@ class DaemonManager: ObservableObject {
     @Published var isRunning = false
     @Published var activeWorkspaces: [Workspace] = []
     private var registeredWorkspacePaths: Set<String> = []
-    @Published var connectedClients = 0
+    private var connectedClients = 0
     @Published var machineId: UUID?
     @Published var lastError: String?
     private var ownerUserId: UUID?
@@ -1650,11 +1650,7 @@ class DaemonManager: ObservableObject {
         let wsServer = self.wsServer
         let e2eRef = isRelay ? self.relayE2E : self.e2e
         let sendInFlight = OSAllocatedUnfairLock(initialState: false)
-        var frameCount = 0
-        var dropCount = 0
-        log("setupEncoderFrameRelay: isRelay=\(isRelay), clientId=\(clientId), e2eReady=\(e2eRef.isReady)")
         encoder.onEncodedFrame = { [weak encoder] encodedData in
-            frameCount += 1
             let framePayload: Data
             if e2eRef.isReady, let encrypted = e2eRef.encryptBinary(encodedData) {
                 framePayload = encrypted
@@ -1665,10 +1661,6 @@ class DaemonManager: ObservableObject {
             var prefixedData = Data("H264".utf8)
             prefixedData.append(framePayload)
 
-            if frameCount <= 5 || frameCount % 200 == 0 {
-                print("[FrameRelay] frame #\(frameCount): \(prefixedData.count)B, isRelay=\(isRelay), dropped=\(dropCount), e2e=\(e2eRef.isReady)")
-            }
-
             if isRelay {
                 let alreadyInFlight = sendInFlight.withLock { val -> Bool in
                     if val { return true }
@@ -1676,7 +1668,6 @@ class DaemonManager: ObservableObject {
                     return false
                 }
                 guard !alreadyInFlight else {
-                    dropCount += 1
                     encoder?.reportFrameDropped()
                     return
                 }
