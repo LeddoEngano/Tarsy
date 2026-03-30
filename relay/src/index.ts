@@ -37,22 +37,28 @@ function isMachineReplacementAbuse(userId: string): boolean {
   const now = Date.now();
   const timestamps = machineReplacements.get(userId) || [];
   const recent = timestamps.filter(t => now - t < 60_000);
-  recent.push(now);
+  // Only count successful replacements — rejected attempts must NOT add timestamps,
+  // otherwise the counter never resets and creates a permanent reconnect loop.
   machineReplacements.set(userId, recent);
-  return recent.length > 3;
+  if (recent.length >= 3) {
+    return true;
+  }
+  recent.push(now);
+  return false;
 }
 
 // Action allowlists per role — defense in depth against message injection
+// Prefixes must match WSAction raw values (e.g., "claude:" not "claude_code:")
 const CLIENT_ALLOWED_PREFIXES = [
   "workspace:", "stream:start", "stream:stop",
-  "remote_input:", "screenshot:request",
+  "remote:", "screenshot:request",
   "terminal:create", "terminal:input", "terminal:close", "terminal:list",
-  "claude_code:create", "claude_code:message", "claude_code:close",
-  "generic_engine:create", "generic_engine:message", "generic_engine:close",
+  "claude:create", "claude:message", "claude:close", "claude:user_response",
+  "engine:create", "engine:message", "engine:close", "engine:user_response",
   "openclaw:message",
-  "git:", "file:", "browser:", "http_proxy:request",
-  "dev_server:", "mcp:", "sudo:response",
-  "engine_status:", "agents:", "agent:", "ultracontext:",
+  "git:", "file:", "browser:", "proxy:",
+  "devserver:", "mcp:", "sudo:response",
+  "engine:status", "agents:", "agent:", "ultracontext:",
   "repo:analyze", "wizard:",
   "security:rotate_machine_secret",
   "e2e:encrypted",
@@ -60,18 +66,17 @@ const CLIENT_ALLOWED_PREFIXES = [
 ];
 
 const MACHINE_ALLOWED_PREFIXES = [
-  "workspace:", "stream:frame",
-  "screenshot:result", "terminal:output", "terminal:list_result",
-  "claude_code:output", "claude_code:complete", "claude_code:ask_user",
-  "generic_engine:output", "generic_engine:complete", "generic_engine:ask_user",
+  "workspace:", "stream:",
+  "screenshot:result", "terminal:",
+  "claude:", "engine:",
   "openclaw:", "git:", "file:", "browser:",
-  "http_proxy:response", "dev_server:",
-  "mcp:", "engine_status:", "sudo:request", "sudo:result",
+  "proxy:", "devserver:",
+  "mcp:", "engine:status", "sudo:request", "sudo:result",
   "agents:", "agent:", "ultracontext:",
   "repo:analysis", "wizard:",
   "security:rotate_result", "security:fingerprint_update",
   "e2e:encrypted",
-  "relay:machine_online", "auth", "ping", "pong", "error",
+  "relay:machine_online", "auth", "auth:success", "ping", "pong", "error",
 ];
 
 function isActionAllowed(action: string, role: "machine" | "client"): boolean {
@@ -155,6 +160,11 @@ function registerConnection(ws: WebSocket, userId: string, role: "machine" | "cl
     if (existing) {
       if (isMachineReplacementAbuse(userId)) {
         console.log(`[Relay] Machine replacement abuse detected for ${userId.slice(0, 8)}`);
+        // Clean up the dead existing entry so clients don't think machine is online
+        if (existing.readyState !== WebSocket.OPEN) {
+          machines.delete(userId);
+          connections.delete(existing);
+        }
         const userClients = clients.get(userId);
         if (userClients) {
           const alert = JSON.stringify({
@@ -348,7 +358,12 @@ const server = Bun.serve({
           console.log(`[Relay] Auth OK for ${auth.role} ${userId.slice(0, 8)} (${elapsed}ms)`);
           unauthenticatedCount = Math.max(0, unauthenticatedCount - 1);
           registerConnection(ws, userId, auth.role as "machine" | "client");
-          ws.send(JSON.stringify({ action: "auth:ok" }));
+          ws.send(JSON.stringify({
+        id: crypto.randomUUID(),
+        action: "auth:success",
+        payload: {},
+        timestamp: new Date().toISOString(),
+      }));
         } catch {
           console.log(`[Relay] Auth message parse error`);
           ws.close(4001, "Invalid auth message");
@@ -376,6 +391,14 @@ const server = Bun.serve({
         } catch {
           // Non-JSON text message — allow (could be legacy format)
         }
+      }
+
+      // Debug: log binary frame forwarding (temporary)
+      if (typeof message !== "string") {
+        const bytes = message instanceof ArrayBuffer ? message.byteLength : (message as Buffer).length;
+        const clientCount = clients.get(info.userId)?.size ?? 0;
+        const machineOnline = machines.has(info.userId);
+        console.log(`[Relay] Binary ${info.role}→${info.role === "machine" ? "clients" : "machine"}: ${bytes}B (clients=${clientCount}, machine=${machineOnline})`);
       }
 
       if (info.role === "machine") {
