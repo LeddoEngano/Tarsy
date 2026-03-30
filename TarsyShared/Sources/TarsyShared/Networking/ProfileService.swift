@@ -105,28 +105,19 @@ public class ProfileService: ObservableObject {
     public func sendBillingEmail(type: String, endDate: Date? = nil) async {
         guard let profile = profile, !profile.email.isEmpty else { return }
 
+        var body: [String: String] = [
+            "email_type": type,
+            "email": profile.email,
+            "display_name": profile.displayName ?? ""
+        ]
+        if let end = endDate {
+            body["subscription_end_date"] = ISO8601DateFormatter().string(from: end)
+        }
+
         for attempt in 1...2 {
             do {
-                let session = try await supabase.auth.session
-                var body: [String: String] = [
-                    "email_type": type,
-                    "email": profile.email,
-                    "display_name": profile.displayName ?? ""
-                ]
-                if let end = endDate {
-                    body["subscription_end_date"] = ISO8601DateFormatter().string(from: end)
-                }
-                let url = TarsyConfig.supabaseURL.appendingPathComponent("functions/v1/send-email")
-                var request = URLRequest(url: url)
-                request.httpMethod = "POST"
-                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
-                request.httpBody = try JSONSerialization.data(withJSONObject: body)
-                let (_, response) = try await URLSession.shared.data(for: request)
-                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-                if (200...299).contains(statusCode) {
-                    return
-                }
+                try await supabase.functions.invoke("send-email", options: .init(body: body))
+                return
             } catch {
             }
             if attempt < 2 {
@@ -138,12 +129,13 @@ public class ProfileService: ObservableObject {
     // MARK: - Delete Account
 
     public func deleteAccount() async throws {
-        let session = try await supabase.auth.session
+        let session = try await supabase.auth.refreshSession()
         let url = TarsyConfig.supabaseURL.appendingPathComponent("functions/v1/delete-account")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(TarsyConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
         request.httpBody = try JSONSerialization.data(withJSONObject: [:] as [String: String])
         let (data, response) = try await URLSession.shared.data(for: request)
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0

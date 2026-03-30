@@ -70,7 +70,7 @@ struct ProfileView: View {
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
             Button("delete", role: .destructive) {
-                if deleteConfirmText == "DELETE" {
+                if deleteConfirmText.uppercased() == "DELETE" {
                     performDeleteAccount()
                 }
             }
