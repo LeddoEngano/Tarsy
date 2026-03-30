@@ -143,3 +143,11 @@ struct QuickDispatchView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    QuickDispatchView(workspaces: [PreviewData.workspace, PreviewData.idleWorkspace])
+        .environmentObject(ConnectionManager())
+        .preferredColorScheme(.dark)
+}
+#endif

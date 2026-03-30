@@ -111,3 +111,10 @@ struct NotificationPrimerView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    NotificationPrimerView {}
+        .preferredColorScheme(.dark)
+}
+#endif

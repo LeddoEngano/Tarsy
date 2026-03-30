@@ -58,3 +58,14 @@ struct AgentActivityView: View {
         .onAppear { pulse = true }
     }
 }
+
+#if DEBUG
+#Preview("Thinking Indicator") {
+    VStack(spacing: 16) {
+        ThinkingIndicator()
+        AgentActivityView(text: "Reading file src/components/App.tsx")
+    }
+    .background(TarsyTheme.backgroundPrimary)
+    .preferredColorScheme(.dark)
+}
+#endif

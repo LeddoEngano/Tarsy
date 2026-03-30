@@ -639,3 +639,11 @@ struct ProfileView: View {
         loadKeys()
     }
 }
+
+#if DEBUG
+#Preview {
+    PreviewWrapper {
+        ProfileView()
+    }
+}
+#endif

@@ -137,6 +137,14 @@ struct LegalWebView: View {
     }
 }
 
+#if DEBUG
+#Preview {
+    NameOnboardingView {}
+        .environmentObject(ProfileService())
+        .preferredColorScheme(.dark)
+}
+#endif
+
 struct WebViewRepresentable: UIViewRepresentable {
     let url: URL
 

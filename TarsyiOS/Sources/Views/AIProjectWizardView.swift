@@ -827,3 +827,11 @@ struct FlowLayout: Layout {
         return (CGSize(width: maxX, height: y + rowHeight), positions)
     }
 }
+
+#if DEBUG
+#Preview {
+    PreviewWrapper {
+        AIProjectWizardView()
+    }
+}
+#endif

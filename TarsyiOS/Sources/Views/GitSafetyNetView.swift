@@ -467,3 +467,11 @@ struct GitCommit: Identifiable {
         self.author = dict["author"] ?? ""
     }
 }
+
+#if DEBUG
+#Preview {
+    GitSafetyNetView(workspace: PreviewData.workspace)
+        .environmentObject(ConnectionManager())
+        .preferredColorScheme(.dark)
+}
+#endif

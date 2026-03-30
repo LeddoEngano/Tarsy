@@ -229,3 +229,14 @@ struct WorkspaceSessionPicker: View {
         return ""
     }
 }
+
+#if DEBUG
+#Preview {
+    WorkspaceSessionPicker(
+        workspace: PreviewData.workspace,
+        detectedAgents: [.claude, .gemini],
+        onSelect: { _, _ in }
+    )
+    .preferredColorScheme(.dark)
+}
+#endif

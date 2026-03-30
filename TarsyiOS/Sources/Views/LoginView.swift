@@ -141,3 +141,10 @@ struct LoginView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    LoginView()
+        .environmentObject(AuthManager())
+}
+#endif

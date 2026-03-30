@@ -326,3 +326,11 @@ struct MCPEntry: Identifiable {
         self.command = dict["command"] ?? ""
     }
 }
+
+#if DEBUG
+#Preview {
+    MCPStoreView(workspacePath: "/Users/dev/projects/tarsy")
+        .environmentObject(ConnectionManager())
+        .preferredColorScheme(.dark)
+}
+#endif

@@ -147,3 +147,11 @@ struct WorkspaceSettingsView: View {
             .textInputAutocapitalization(.never)
     }
 }
+
+#if DEBUG
+#Preview {
+    WorkspaceSettingsView(workspace: PreviewData.workspace)
+        .environmentObject(WorkspaceService())
+        .preferredColorScheme(.dark)
+}
+#endif

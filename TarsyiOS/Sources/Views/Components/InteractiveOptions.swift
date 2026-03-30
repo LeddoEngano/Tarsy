@@ -437,3 +437,44 @@ struct InteractiveParser {
         return nil
     }
 }
+
+#if DEBUG
+#Preview("PaginatedQuestionCard") {
+    PaginatedQuestionCard(
+        questions: [
+            InteractiveQuestion(
+                question: "Which files should I modify?",
+                header: "File Selection",
+                options: ["src/App.swift", "src/Models/User.swift", "src/Views/HomeView.swift"],
+                multiSelect: true
+            ),
+            InteractiveQuestion(
+                question: "What testing framework?",
+                header: "Testing",
+                options: ["XCTest", "Quick/Nimble", "Skip tests"],
+                multiSelect: false
+            )
+        ],
+        onSubmitAll: { _ in },
+        onDismiss: {}
+    )
+    .padding()
+    .background(TarsyTheme.backgroundPrimary)
+    .preferredColorScheme(.dark)
+}
+
+#Preview("InteractiveOptionsView") {
+    InteractiveOptionsView(
+        options: [
+            InteractiveOption(label: "Yes, proceed", value: "y", style: .primary),
+            InteractiveOption(label: "No, cancel", value: "n", style: .secondary),
+            InteractiveOption(label: "Option 1", value: "1", style: .numbered),
+            InteractiveOption(label: "Option 2", value: "2", style: .numbered)
+        ],
+        onSelect: { _ in }
+    )
+    .padding()
+    .background(TarsyTheme.backgroundPrimary)
+    .preferredColorScheme(.dark)
+}
+#endif

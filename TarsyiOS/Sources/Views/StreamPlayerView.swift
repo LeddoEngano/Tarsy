@@ -592,3 +592,26 @@ struct StreamPlayerView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    @Previewable @State var isActive = true
+    @Previewable @State var sessionId: String? = nil
+    @Previewable @State var questions: [InteractiveQuestion]? = nil
+    @Previewable @State var options: [InteractiveOption]? = nil
+    @Previewable @State var isFullscreen = false
+    StreamPlayerView(
+        viewModel: StreamViewModel(),
+        workspace: PreviewData.workspace,
+        isActive: $isActive,
+        activeSessionId: $sessionId,
+        todoManager: VoiceTodoManager(),
+        interactiveQuestions: $questions,
+        interactiveOptions: $options,
+        isFullscreen: $isFullscreen
+    )
+    .environmentObject(MachineService())
+    .environmentObject(ConnectionManager())
+    .preferredColorScheme(.dark)
+}
+#endif

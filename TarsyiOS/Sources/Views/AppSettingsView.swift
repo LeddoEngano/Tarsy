@@ -587,3 +587,11 @@ enum KeychainHelper {
         SecItemDelete(query as CFDictionary)
     }
 }
+
+#if DEBUG
+#Preview {
+    PreviewWrapper {
+        AppSettingsView()
+    }
+}
+#endif

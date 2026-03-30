@@ -55,3 +55,15 @@ struct ConnectionIndicator: View {
         return connectionManager.isReconnecting ? TarsyTheme.statusStarting : TarsyTheme.statusError
     }
 }
+
+#if DEBUG
+#Preview("Status Banner") {
+    VStack(spacing: 0) {
+        StatusBanner()
+        Spacer()
+    }
+    .environmentObject(ConnectionManager())
+    .background(TarsyTheme.backgroundPrimary)
+    .preferredColorScheme(.dark)
+}
+#endif

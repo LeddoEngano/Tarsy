@@ -154,3 +154,11 @@ struct ContentView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    PreviewWrapper {
+        ContentView()
+    }
+}
+#endif

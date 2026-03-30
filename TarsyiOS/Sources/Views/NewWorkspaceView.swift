@@ -528,3 +528,11 @@ struct NewWorkspaceView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    PreviewWrapper {
+        NewWorkspaceView()
+    }
+}
+#endif

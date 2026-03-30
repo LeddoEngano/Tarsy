@@ -153,3 +153,12 @@ private struct ShakingIcon: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    VoiceTodoOverlay(todoManager: VoiceTodoManager())
+        .padding()
+        .background(TarsyTheme.backgroundPrimary)
+        .preferredColorScheme(.dark)
+}
+#endif

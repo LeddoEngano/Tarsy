@@ -19,3 +19,16 @@ struct AgentIcon: View {
         }
     }
 }
+
+#if DEBUG
+#Preview("Agent Icons") {
+    HStack(spacing: 16) {
+        ForEach(AIEngineType.allCases, id: \.self) { engine in
+            AgentIcon(engineType: engine, size: 32)
+        }
+    }
+    .padding()
+    .background(TarsyTheme.backgroundPrimary)
+    .preferredColorScheme(.dark)
+}
+#endif

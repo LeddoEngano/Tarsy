@@ -353,3 +353,11 @@ struct FilePreviewView: View {
         return result
     }
 }
+
+#if DEBUG
+#Preview {
+    FileExplorerView(workspace: PreviewData.workspace)
+        .environmentObject(ConnectionManager())
+        .preferredColorScheme(.dark)
+}
+#endif

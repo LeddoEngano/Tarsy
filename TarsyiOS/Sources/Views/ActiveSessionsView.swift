@@ -532,3 +532,11 @@ private struct SessionDetailView: View {
         .preferredColorScheme(.dark)
     }
 }
+
+#if DEBUG
+#Preview {
+    PreviewWrapper {
+        ActiveSessionsView()
+    }
+}
+#endif

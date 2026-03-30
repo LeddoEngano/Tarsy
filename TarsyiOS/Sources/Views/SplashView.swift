@@ -55,3 +55,9 @@ struct SplashView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    SplashView()
+}
+#endif

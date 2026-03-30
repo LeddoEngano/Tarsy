@@ -129,3 +129,11 @@ struct PermissionOnboardingView: View {
         }
     }
 }
+
+#if DEBUG
+#Preview {
+    PermissionOnboardingView {}
+        .environmentObject(ProfileService())
+        .preferredColorScheme(.dark)
+}
+#endif
