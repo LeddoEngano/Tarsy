@@ -23,6 +23,10 @@ struct OnboardingWindow: View {
     @State private var email = ""
     @State private var password = ""
     @State private var isSignUp = false
+    @State private var appleSignInDelegate: AppleSignInDelegate?
+    @State private var showPassword = false
+    @State private var showEmailForm = false
+    @State private var confirmPassword = ""
 
     enum OnboardingStep: CaseIterable {
         case login
@@ -57,7 +61,7 @@ struct OnboardingWindow: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(width: 500, height: 560)
+        .frame(width: 500, height: 580)
         .task {
             if authManager.isAuthenticated {
                 checkPermissions()
@@ -74,6 +78,8 @@ struct OnboardingWindow: View {
                     step = allPermissionsGranted ? .ready : .permissions
                     await daemonManager.start()
                 }
+            } else {
+                step = .login
             }
         }
     }
@@ -181,146 +187,207 @@ struct OnboardingWindow: View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 6) {
-                Text("welcome to tarsy")
-                    .font(.system(size: 18, weight: .bold, design: .monospaced))
-                    .foregroundColor(Theme.textPrimary)
+            loginHeader
+                .padding(.bottom, 20)
 
-                Text("sign in to connect your devices")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(Theme.textSecondary)
+            if showEmailForm {
+                VStack(spacing: 10) {
+                    loginEmailForm
+
+                    loginSubmitButton
+                        .padding(.top, 10)
+
+                    loginToggle
+
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) { showEmailForm = false }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 9, weight: .medium))
+                            Text("back")
+                                .font(.system(size: 11, design: .monospaced))
+                        }
+                        .foregroundColor(Theme.textMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .pointerOnHover()
+                    .padding(.top, 4)
+                }
+                .frame(maxWidth: 320)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else {
+                VStack(spacing: 10) {
+                    loginOAuthButtons
+
+                    oauthButton(
+                        icon: "envelope",
+                        label: "Sign in with Email",
+                        isSystemImage: true
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.2)) { showEmailForm = true }
+                    }
+                }
+                .frame(maxWidth: 320)
+                .transition(.move(edge: .leading).combined(with: .opacity))
             }
-            .padding(.bottom, 24)
 
-            VStack(spacing: 10) {
-                // Sign in with Apple
-                SignInWithAppleButton(.signIn) { request in
-                    let nonce = authManager.generateNonce()
-                    request.requestedScopes = [.email, .fullName]
-                    request.nonce = authManager.sha256(nonce)
-                } onCompletion: { result in
+            Spacer()
+
+            loginLegal
+        }
+    }
+
+    private var loginHeader: some View {
+        VStack(spacing: 6) {
+            Text("welcome to tarsy")
+                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .foregroundColor(Theme.textPrimary)
+
+            Text("sign in to connect your devices")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Theme.textSecondary)
+        }
+    }
+
+    private var loginOAuthButtons: some View {
+        VStack(spacing: 10) {
+            oauthButton(
+                icon: "apple.logo",
+                label: "Sign in with Apple",
+                isSystemImage: true
+            ) {
+                let provider = ASAuthorizationAppleIDProvider()
+                let request = provider.createRequest()
+                let nonce = authManager.generateNonce()
+                request.requestedScopes = [.email, .fullName]
+                request.nonce = authManager.sha256(nonce)
+                let delegate = AppleSignInDelegate { result in
                     Task { await authManager.handleAppleSignIn(result: result) }
                 }
-                .signInWithAppleButtonStyle(.white)
-                .frame(height: 44)
-                .cornerRadius(8)
+                appleSignInDelegate = delegate
+                let controller = ASAuthorizationController(authorizationRequests: [request])
+                controller.delegate = delegate
+                controller.performRequests()
+            }
 
-                // Sign in with GitHub
-                Button(action: {
-                    Task { await authManager.signInWithGitHub() }
-                }) {
-                    HStack(spacing: 8) {
-                        Image("GitHubIcon")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 18, height: 18)
-                        Text("Sign in with GitHub")
-                            .font(.system(size: 14, weight: .medium))
-                    }
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 44)
-                    .background(Theme.bgCard)
-                    .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-                .pointerOnHover()
+            oauthButton(
+                icon: "GitHubIcon",
+                label: "Sign in with GitHub",
+                isSystemImage: false
+            ) {
+                Task { await authManager.signInWithGitHub() }
+            }
+        }
+    }
 
-                // Divider
-                HStack(spacing: 12) {
-                    Rectangle().fill(Theme.border).frame(height: 1)
-                    Text("or")
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(Theme.textMuted)
-                    Rectangle().fill(Theme.border).frame(height: 1)
-                }
-                .padding(.vertical, 6)
+    @ViewBuilder
+    private func oauthButton(icon: String, label: String, isSystemImage: Bool, action: @escaping () -> Void) -> some View {
+        OAuthButtonView(icon: icon, label: label, isSystemImage: isSystemImage, action: action)
+    }
 
-                // Email / Password
-                VStack(spacing: 8) {
-                    styledTextField("email", text: $email)
-                    styledSecureField("password", text: $password)
-                }
+    private var loginEmailForm: some View {
+        VStack(spacing: 8) {
+            styledTextField("email", text: $email)
+            styledSecureField("password", text: $password)
 
-                if let error = authManager.errorMessage {
+            if isSignUp {
+                styledSecureField("confirm password", text: $confirmPassword)
+
+                if !confirmPassword.isEmpty && confirmPassword != password {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 10))
-                        Text(error)
+                        Text("passwords don't match")
                             .font(.system(size: 11, design: .monospaced))
                     }
                     .foregroundColor(Theme.terracotta)
                     .padding(.top, 2)
                 }
+            }
 
-                Button(action: {
-                    Task {
-                        if isSignUp {
-                            await authManager.signUp(email: email, password: password)
-                        } else {
-                            await authManager.signIn(email: email, password: password)
-                        }
-                    }
-                }) {
-                    HStack(spacing: 6) {
-                        if authManager.isLoading {
-                            ProgressView()
-                                .scaleEffect(0.5)
-                                .frame(width: 14, height: 14)
-                        }
-                        Text(isSignUp ? "create account" : "sign in")
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    }
-                    .foregroundColor(Theme.bg)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 11)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(email.isEmpty || password.isEmpty ? Theme.textMuted : Theme.amber)
-                    )
-                }
-                .buttonStyle(.plain)
-                .pointerOnHover()
-                .disabled(email.isEmpty || password.isEmpty || authManager.isLoading)
-
-                Button(action: { isSignUp.toggle() }) {
-                    Text(isSignUp ? "already have an account? sign in" : "no account? sign up")
+            if let error = authManager.errorMessage {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                    Text(error)
                         .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(Theme.textMuted)
                 }
-                .buttonStyle(.plain)
-                .pointerOnHover()
+                .foregroundColor(Theme.terracotta)
+                .padding(.top, 2)
             }
-            .frame(maxWidth: 320)
-
-            Spacer()
-
-            // Legal
-            HStack(spacing: 0) {
-                Text("by signing in, you agree to our ")
-                    .foregroundColor(Theme.textMuted)
-                Button("Terms") {
-                    if let url = URL(string: "https://www.tarsy.dev/terms") { NSWorkspace.shared.open(url) }
-                }
-                .foregroundColor(Theme.textSecondary)
-                .buttonStyle(.plain)
-                .pointerOnHover()
-                Text(" and ")
-                    .foregroundColor(Theme.textMuted)
-                Button("Privacy Policy") {
-                    if let url = URL(string: "https://www.tarsy.dev/privacy") { NSWorkspace.shared.open(url) }
-                }
-                .foregroundColor(Theme.textSecondary)
-                .buttonStyle(.plain)
-                .pointerOnHover()
-            }
-            .font(.system(size: 10, design: .monospaced))
-            .padding(.bottom, 20)
         }
+    }
+
+    private var loginSubmitButton: some View {
+        Button(action: {
+            Task {
+                if isSignUp {
+                    await authManager.signUp(email: email, password: password)
+                } else {
+                    await authManager.signIn(email: email, password: password)
+                }
+            }
+        }) {
+            HStack(spacing: 6) {
+                if authManager.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 14, height: 14)
+                }
+                Text(isSignUp ? "create account" : "sign in")
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+            }
+            .foregroundColor(Theme.bg)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(submitDisabled ? Theme.textMuted : Theme.amber)
+            )
+        }
+        .buttonStyle(.plain)
+        .pointerOnHover()
+        .disabled(submitDisabled || authManager.isLoading)
+    }
+
+    private var submitDisabled: Bool {
+        if email.isEmpty || password.isEmpty { return true }
+        if isSignUp && confirmPassword != password { return true }
+        return false
+    }
+
+    private var loginToggle: some View {
+        Button(action: { isSignUp.toggle() }) {
+            Text(isSignUp ? "already have an account? sign in" : "no account? sign up")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(Theme.textMuted)
+        }
+        .buttonStyle(.plain)
+        .pointerOnHover()
+    }
+
+    private var loginLegal: some View {
+        HStack(spacing: 0) {
+            Text("by signing in, you agree to our ")
+                .foregroundColor(Theme.textMuted)
+            Button("Terms") {
+                if let url = URL(string: "https://www.tarsy.dev/terms") { NSWorkspace.shared.open(url) }
+            }
+            .foregroundColor(Theme.textSecondary)
+            .buttonStyle(.plain)
+            .pointerOnHover()
+            Text(" and ")
+                .foregroundColor(Theme.textMuted)
+            Button("Privacy Policy") {
+                if let url = URL(string: "https://www.tarsy.dev/privacy") { NSWorkspace.shared.open(url) }
+            }
+            .foregroundColor(Theme.textSecondary)
+            .buttonStyle(.plain)
+            .pointerOnHover()
+        }
+        .font(.system(size: 10, design: .monospaced))
+        .padding(.bottom, 20)
     }
 
     // MARK: - Permissions Step
@@ -343,128 +410,18 @@ struct OnboardingWindow: View {
         VStack(spacing: 0) {
             Spacer()
 
-            VStack(spacing: 6) {
-                Image(systemName: "lock.shield")
-                    .font(.system(size: 32))
-                    .foregroundColor(Theme.amber)
-                    .padding(.bottom, 4)
+            permissionsHeader
+                .padding(.bottom, 20)
 
-                Text("permissions")
-                    .font(.system(size: 18, weight: .bold, design: .monospaced))
-                    .foregroundColor(Theme.textPrimary)
+            permissionsProgressBar
+                .padding(.horizontal, 40)
+                .padding(.bottom, 16)
 
-                Text("tarsy needs a few permissions to work")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(Theme.textSecondary)
-            }
-            .padding(.bottom, 20)
+            permissionsRows
+                .padding(.horizontal, 40)
 
-            // Progress
-            VStack(spacing: 6) {
-                HStack {
-                    Text("\(grantedCount) of 3 granted")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(allPermissionsGranted ? Theme.moss : Theme.textSecondary)
-                    Spacer()
-                }
-
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(Theme.border)
-                            .frame(height: 3)
-
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(allPermissionsGranted ? Theme.moss : Theme.amber)
-                            .frame(width: geo.size.width * CGFloat(grantedCount) / 3.0, height: 3)
-                            .animation(.easeInOut(duration: 0.3), value: grantedCount)
-                    }
-                }
-                .frame(height: 3)
-            }
-            .padding(.horizontal, 40)
-            .padding(.bottom, 16)
-
-            // Permission rows
-            VStack(spacing: 8) {
-                permissionRow(
-                    icon: "rectangle.dashed.badge.record",
-                    name: "screen recording",
-                    description: "stream your screen to iPhone",
-                    granted: hasScreenRecording,
-                    settingsKey: "Privacy_ScreenCapture"
-                )
-
-                permissionRow(
-                    icon: "hand.tap",
-                    name: "accessibility",
-                    description: "control windows and input remotely",
-                    granted: hasAccessibility,
-                    settingsKey: "Privacy_Accessibility"
-                )
-
-                permissionRow(
-                    icon: "folder",
-                    name: "files and folders",
-                    description: "scan projects and read your repos",
-                    granted: hasFilesAccess,
-                    settingsKey: "Privacy_FilesAndFolders"
-                )
-            }
-            .padding(.horizontal, 40)
-
-            // Actions
-            HStack(spacing: 10) {
-                Button(action: { checkPermissions() }) {
-                    HStack(spacing: 6) {
-                        if isCheckingPermissions {
-                            ProgressView()
-                                .scaleEffect(0.4)
-                                .frame(width: 12, height: 12)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 11))
-                        }
-                        Text("refresh")
-                            .font(.system(size: 12, design: .monospaced))
-                    }
-                    .foregroundColor(Theme.textSecondary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Theme.bgCard)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Theme.border, lineWidth: 1)
-                            )
-                    )
-                }
-                .buttonStyle(.plain)
-                .pointerOnHover()
-
-                if allPermissionsGranted {
-                    Button(action: {
-                        withAnimation(.easeInOut(duration: 0.2)) { step = .ready }
-                    }) {
-                        HStack(spacing: 6) {
-                            Text("continue")
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                            Image(systemName: "arrow.right")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(Theme.bg)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 9)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8).fill(Theme.amber)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .pointerOnHover()
-                }
-            }
-            .padding(.top, 20)
+            permissionsActions
+                .padding(.top, 20)
 
             if !allPermissionsGranted {
                 Text("grant permissions above, then click refresh")
@@ -477,6 +434,129 @@ struct OnboardingWindow: View {
         }
         .task {
             checkPermissions()
+        }
+    }
+
+    private var permissionsHeader: some View {
+        VStack(spacing: 6) {
+            Image(systemName: "lock.shield")
+                .font(.system(size: 32))
+                .foregroundColor(Theme.amber)
+                .padding(.bottom, 4)
+
+            Text("permissions")
+                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .foregroundColor(Theme.textPrimary)
+
+            Text("tarsy needs a few permissions to work")
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Theme.textSecondary)
+        }
+    }
+
+    private var permissionsProgressBar: some View {
+        VStack(spacing: 6) {
+            HStack {
+                Text("\(grantedCount) of 3 granted")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(allPermissionsGranted ? Theme.moss : Theme.textSecondary)
+                Spacer()
+            }
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Theme.border)
+                        .frame(height: 3)
+
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(allPermissionsGranted ? Theme.moss : Theme.amber)
+                        .frame(width: geo.size.width * CGFloat(grantedCount) / 3.0, height: 3)
+                        .animation(.easeInOut(duration: 0.3), value: grantedCount)
+                }
+            }
+            .frame(height: 3)
+        }
+    }
+
+    private var permissionsRows: some View {
+        VStack(spacing: 8) {
+            permissionRow(
+                icon: "rectangle.dashed.badge.record",
+                name: "screen recording",
+                description: "stream your screen to iPhone",
+                granted: hasScreenRecording,
+                settingsKey: "Privacy_ScreenCapture"
+            )
+
+            permissionRow(
+                icon: "hand.tap",
+                name: "accessibility",
+                description: "control windows and input remotely",
+                granted: hasAccessibility,
+                settingsKey: "Privacy_Accessibility"
+            )
+
+            permissionRow(
+                icon: "folder",
+                name: "files and folders",
+                description: "scan projects and read your repos",
+                granted: hasFilesAccess,
+                settingsKey: "Privacy_FilesAndFolders"
+            )
+        }
+    }
+
+    private var permissionsActions: some View {
+        HStack(spacing: 10) {
+            Button(action: { checkPermissions() }) {
+                HStack(spacing: 6) {
+                    if isCheckingPermissions {
+                        ProgressView()
+                            .scaleEffect(0.4)
+                            .frame(width: 12, height: 12)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11))
+                    }
+                    Text("refresh")
+                        .font(.system(size: 12, design: .monospaced))
+                }
+                .foregroundColor(Theme.textSecondary)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Theme.bgCard)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Theme.border, lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(.plain)
+            .pointerOnHover()
+
+            if allPermissionsGranted {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) { step = .ready }
+                }) {
+                    HStack(spacing: 6) {
+                        Text("continue")
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(Theme.bg)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8).fill(Theme.amber)
+                    )
+                }
+                .buttonStyle(.plain)
+                .pointerOnHover()
+            }
         }
     }
 
@@ -642,20 +722,8 @@ struct OnboardingWindow: View {
         VStack(spacing: 0) {
             Spacer()
 
-            // Success icon
-            ZStack {
-                Circle()
-                    .fill(Theme.moss.opacity(0.1))
-                    .frame(width: 72, height: 72)
-                Circle()
-                    .fill(Theme.moss.opacity(0.15))
-                    .frame(width: 56, height: 56)
-                HStack(spacing: 4) {
-                    eyeIcon(size: 18)
-                    eyeIcon(size: 18)
-                }
-            }
-            .padding(.bottom, 16)
+            readyIcon
+                .padding(.bottom, 16)
 
             Text("tarsy is ready")
                 .font(.system(size: 20, weight: .bold, design: .monospaced))
@@ -667,15 +735,9 @@ struct OnboardingWindow: View {
                 .foregroundColor(Theme.textSecondary)
                 .padding(.bottom, 24)
 
-            // Status cards
-            VStack(spacing: 6) {
-                readyRow(icon: "person.fill.checkmark", text: "signed in as \(authManager.currentUser?.email ?? "...")")
-                readyRow(icon: "antenna.radiowaves.left.and.right", text: "relay connected — remote access ready")
-                readyRow(icon: "lock.fill", text: "encrypted on port \(TarsyConfig.websocketPort)")
-                readyRow(icon: "video.fill", text: "H.264 streaming ready")
-            }
-            .padding(.horizontal, 48)
-            .padding(.bottom, 28)
+            readyStatusCards
+                .padding(.horizontal, 48)
+                .padding(.bottom, 28)
 
             Text("tarsy runs in your menu bar.\nopen the app on your iPhone to start.")
                 .font(.system(size: 11, design: .monospaced))
@@ -684,25 +746,53 @@ struct OnboardingWindow: View {
                 .lineSpacing(3)
                 .padding(.bottom, 24)
 
-            Button(action: { closeWindow() }) {
-                HStack(spacing: 8) {
-                    Image(systemName: "menubar.arrow.up.rectangle")
-                        .font(.system(size: 12))
-                    Text("minimize to menu bar")
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
-                }
-                .foregroundColor(Theme.bg)
-                .frame(maxWidth: 260)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 8).fill(Theme.amber)
-                )
-            }
-            .buttonStyle(.plain)
-            .pointerOnHover()
+            readyDismissButton
 
             Spacer()
         }
+    }
+
+    private var readyIcon: some View {
+        ZStack {
+            Circle()
+                .fill(Theme.moss.opacity(0.1))
+                .frame(width: 72, height: 72)
+            Circle()
+                .fill(Theme.moss.opacity(0.15))
+                .frame(width: 56, height: 56)
+            HStack(spacing: 4) {
+                eyeIcon(size: 18)
+                eyeIcon(size: 18)
+            }
+        }
+    }
+
+    private var readyStatusCards: some View {
+        VStack(spacing: 6) {
+            readyRow(icon: "person.fill.checkmark", text: "signed in as \(authManager.currentUser?.email ?? "...")")
+            readyRow(icon: "antenna.radiowaves.left.and.right", text: "relay connected — remote access ready")
+            readyRow(icon: "lock.fill", text: "encrypted on port \(TarsyConfig.websocketPort)")
+            readyRow(icon: "video.fill", text: "H.264 streaming ready")
+        }
+    }
+
+    private var readyDismissButton: some View {
+        Button(action: { closeWindow() }) {
+            HStack(spacing: 8) {
+                Image(systemName: "menubar.arrow.up.rectangle")
+                    .font(.system(size: 12))
+                Text("minimize to menu bar")
+                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+            }
+            .foregroundColor(Theme.bg)
+            .frame(maxWidth: 260)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 8).fill(Theme.amber)
+            )
+        }
+        .buttonStyle(.plain)
+        .pointerOnHover()
     }
 
     @ViewBuilder
@@ -747,39 +837,131 @@ struct OnboardingWindow: View {
     }
 
     private func styledTextField(_ placeholder: String, text: Binding<String>) -> some View {
-        TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
-            .textFieldStyle(.plain)
-            .font(.system(size: 13, design: .monospaced))
-            .foregroundColor(Theme.textPrimary)
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Theme.bgField)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Theme.border, lineWidth: 1)
-                    )
-            )
+        HStack(spacing: 10) {
+            Image(systemName: "envelope")
+                .font(.system(size: 12))
+                .foregroundColor(Theme.textMuted)
+                .frame(width: 16)
+            TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
+                .textFieldStyle(.plain)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundColor(Theme.textPrimary)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.bgField)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.border, lineWidth: 1)
+                )
+        )
     }
 
     private func styledSecureField(_ placeholder: String, text: Binding<String>) -> some View {
-        SecureField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
-            .textFieldStyle(.plain)
-            .font(.system(size: 13, design: .monospaced))
-            .foregroundColor(Theme.textPrimary)
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Theme.bgField)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Theme.border, lineWidth: 1)
-                    )
-            )
+        HStack(spacing: 10) {
+            Image(systemName: "lock")
+                .font(.system(size: 12))
+                .foregroundColor(Theme.textMuted)
+                .frame(width: 16)
+
+            if showPassword {
+                TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
+            } else {
+                SecureField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
+            }
+
+            Button(action: { showPassword.toggle() }) {
+                Image(systemName: showPassword ? "eye.slash" : "eye")
+                    .font(.system(size: 12))
+                    .foregroundColor(Theme.textMuted)
+            }
+            .buttonStyle(.plain)
+            .pointerOnHover()
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.bgField)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.border, lineWidth: 1)
+                )
+        )
     }
 
     private func closeWindow() {
         NSApplication.shared.keyWindow?.close()
+    }
+}
+
+// MARK: - OAuth Button
+
+private struct OAuthButtonView: View {
+    let icon: String
+    let label: String
+    let isSystemImage: Bool
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 8) {
+                if isSystemImage {
+                    Image(systemName: icon)
+                        .font(.system(size: 18, weight: .medium))
+                        .frame(width: 18, height: 18)
+                } else {
+                    Image(icon)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 18, height: 18)
+                }
+                Text(label)
+                    .font(.system(size: 14, weight: .medium))
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .frame(height: 36)
+            .background(isHovered ? Theme.border : Theme.bgCard)
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isHovered ? Theme.amber.opacity(0.5) : Color.white.opacity(0.15), lineWidth: 1)
+            )
+            .shadow(color: isHovered ? Theme.amber.opacity(0.2) : .clear, radius: 6, y: 0)
+        }
+        .buttonStyle(.plain)
+        .pointerOnHover()
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+    }
+}
+
+// MARK: - Apple Sign In Delegate
+
+class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
+    let onCompletion: (Result<ASAuthorization, Error>) -> Void
+
+    init(onCompletion: @escaping (Result<ASAuthorization, Error>) -> Void) {
+        self.onCompletion = onCompletion
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
+        onCompletion(.success(authorization))
+    }
+
+    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
+        onCompletion(.failure(error))
     }
 }
 

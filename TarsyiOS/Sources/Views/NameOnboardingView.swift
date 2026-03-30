@@ -6,8 +6,6 @@ struct NameOnboardingView: View {
     @EnvironmentObject var profileService: ProfileService
     @State private var name = ""
     @State private var isSaving = false
-    @State private var showTerms = false
-    @State private var showPrivacy = false
     var onComplete: () -> Void
 
     var body: some View {
@@ -73,39 +71,9 @@ struct NameOnboardingView: View {
                 .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSaving)
                 .padding(.horizontal, 32)
 
-                // Legal links
-                legalText
-                    .padding(.horizontal, 32)
-
                 Spacer()
                 Spacer()
             }
-        }
-        .sheet(isPresented: $showTerms) {
-            LegalWebView(title: "Terms of Use", url: URL(string: "https://www.tarsy.dev/terms")!)
-        }
-        .sheet(isPresented: $showPrivacy) {
-            LegalWebView(title: "Privacy Policy", url: URL(string: "https://www.tarsy.dev/privacy")!)
-        }
-    }
-
-    private var legalText: some View {
-        HStack(spacing: 0) {
-            Text("by continuing, you agree to our ")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(TarsyTheme.textSecondary)
-
-            Button("Terms") { showTerms = true }
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundColor(TarsyTheme.accentAmber)
-
-            Text(" and ")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(TarsyTheme.textSecondary)
-
-            Button("Privacy Policy") { showPrivacy = true }
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundColor(TarsyTheme.accentAmber)
         }
     }
 }
