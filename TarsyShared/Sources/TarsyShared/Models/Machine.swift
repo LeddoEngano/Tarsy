@@ -6,7 +6,6 @@ public struct Machine: Codable, Identifiable, Sendable {
     public let hostname: String
     public let hardwareUuid: String?
     public let displayName: String?
-    public let tailscaleIp: String?
     public let localIp: String?
     public let modelIdentifier: String?
     public let status: MachineStatus
@@ -50,7 +49,6 @@ public struct Machine: Codable, Identifiable, Sendable {
         case hostname
         case hardwareUuid = "hardware_uuid"
         case displayName = "display_name"
-        case tailscaleIp = "tailscale_ip"
         case localIp = "local_ip"
         case modelIdentifier = "model_identifier"
         case status

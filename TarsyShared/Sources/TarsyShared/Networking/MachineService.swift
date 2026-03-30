@@ -7,7 +7,6 @@ public class MachineService: ObservableObject {
     @Published public var machines: [Machine] = []
     @Published public var selectedMachineId: UUID?
     @Published public var isOnline = false
-    @Published public var hasTailscale = false
 
     public init() {}
 
@@ -58,32 +57,12 @@ public class MachineService: ObservableObject {
         isOnline = machine?.status == .online
     }
 
-    public func setTailscaleInstalled(_ installed: Bool) {
-        hasTailscale = installed
-    }
-
-    public var tailscaleIP: String? {
-        machine?.tailscaleIp
-    }
-
     public var localIP: String? {
         machine?.localIp
     }
 
-    /// Returns the best IP to connect to the Mac.
-    /// Uses local IP only when iPhone is on the same subnet.
-    /// Falls back to Tailscale for remote access.
+    /// Returns the best IP to connect to the Mac (local network).
     public var bestIP: String? {
-        // Check if we're on the same local network as the Mac
-        if let macLocalIP = localIP, isOnSameSubnet(as: macLocalIP) {
-            return macLocalIP
-        }
-
-        // Remote — use Tailscale
-        if let tsIP = tailscaleIP {
-            return tsIP
-        }
-
         return localIP
     }
 

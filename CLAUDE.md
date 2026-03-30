@@ -26,7 +26,7 @@ Menu bar app (LSUIElement) that runs on the Mac being controlled. `DaemonManager
 - **Remote input** — `RemoteInputService` dispatches tap/scroll/keyboard/drag/pinch to browser (CGEvent) or iOS Simulator (idb) with coordinate mapping.
 - **AI engines** — `TerminalSessionManager` (zsh sessions with rich PATH enrichment: nvm, fnm, asdf, cargo, etc.) + `ClaudeCodeSession` (dedicated Claude Code subprocess with token tracking) + `GenericCLIEngine` (wraps any CLI agent). All conform to `AIEngineProtocol` (actor protocol). `AgentDetector` scans standard paths for installed AI binaries.
 - **Workspace orchestration** — `WorkspaceOrchestrator` (git clone, stack detection, dependency install, dev server start), `RepoScanner` (async scan of ~10 standard directories)
-- **Networking** — `RelayClient` (machine-to-cloud WebSocket with exponential backoff, token refresh), `WebSocketServer` (local LAN server on port 8642), `TailscaleManager` (VPN discovery)
+- **Networking** — `RelayClient` (machine-to-cloud WebSocket with exponential backoff, token refresh), `WebSocketServer` (local LAN server on port 8642)
 - **Sudo handling** — `SudoPasswordManager` (actor) bridges sudo requests to iOS via WebSocket, caches password (60s TTL), rewrites commands with SUDO_ASKPASS wrapper. Hardened with command whitelist (word-boundary matching), no-shell execution, and printf wrapper.
 - **Background services** — `UltraContextDaemon` (CLI daemon lifecycle), `OpenClawService` (local LLM gateway on port 18789 with SSE streaming), `PushNotificationService` (local + remote via Supabase)
 - **System** — Sleep prevention (IOKit assertions), heartbeat (30s machine status update), onboarding window (3-step setup)

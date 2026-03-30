@@ -11,15 +11,12 @@ class DaemonManager: ObservableObject {
     @Published var activeWorkspaces: [Workspace] = []
     private var registeredWorkspacePaths: Set<String> = []
     @Published var connectedClients = 0
-    @Published var tailscaleStatus: String = "checking..."
-    @Published var tailscaleIP: String?
     @Published var machineId: UUID?
     @Published var lastError: String?
     private var ownerUserId: UUID?
     @Published var debugLog: String = ""
 
     private var wsServer: WebSocketServer?
-    let tailscale = TailscaleManager()
     private let terminalManager = TerminalSessionManager()
     private var orchestrator: WorkspaceOrchestrator?
     private let screenCapture = ScreenCaptureService()
@@ -90,19 +87,16 @@ class DaemonManager: ObservableObject {
             await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
         }
 
-        // 1. Check/install Tailscale
-        await setupTailscale()
-
-        // 2. Start WebSocket server
+        // 1. Start WebSocket server
         await startWSServer()
 
-        // 3. Register machine in Supabase
+        // 2. Register machine in Supabase
         await registerMachine()
 
-        // 4. Connect to relay for remote access
+        // 3. Connect to relay for remote access
         await connectRelay()
 
-        // 5. Start heartbeat
+        // 4. Start heartbeat
         startHeartbeat()
 
         preventSleep()
@@ -181,60 +175,6 @@ class DaemonManager: ObservableObject {
             systemSleepAssertionID = IOPMAssertionID(0)
         }
         log("Sleep prevention disabled")
-    }
-
-    // MARK: - Tailscale
-
-    func setupTailscale() async {
-        let status = await tailscale.checkStatus()
-        switch status {
-        case .notInstalled:
-            tailscaleStatus = "not installed"
-        case .installed:
-            tailscaleStatus = "installed - open Tailscale app and sign in"
-        case .running(let ip):
-            tailscaleIP = ip
-            tailscaleStatus = "connected (\(ip))"
-        case .error(let msg):
-            tailscaleStatus = "error: \(msg)"
-        }
-    }
-
-    func installTailscale() async {
-        tailscaleStatus = "installing..."
-        do {
-            try await tailscale.install { [weak self] output in
-                Task { @MainActor in
-                    self?.tailscaleStatus = "installing..."
-                }
-            }
-            tailscaleStatus = "installed - open Tailscale app and sign in"
-            // Re-check after install and register if IP available
-            await setupTailscale()
-            if tailscaleIP != nil && machineId == nil {
-                await registerMachine()
-                if !isRunning {
-                    await startWSServer()
-                    startHeartbeat()
-                    isRunning = true
-                }
-            }
-        } catch {
-            tailscaleStatus = error.localizedDescription
-        }
-    }
-
-    func refreshTailscale() async {
-        await setupTailscale()
-        // If we now have an IP, register the machine
-        if tailscaleIP != nil && machineId == nil {
-            await registerMachine()
-            if !isRunning {
-                await startWSServer()
-                startHeartbeat()
-                isRunning = true
-            }
-        }
     }
 
     // MARK: - WebSocket Server
@@ -1806,9 +1746,9 @@ class DaemonManager: ObservableObject {
 
         log("registerMachine: starting")
 
-        guard tailscaleIP != nil || localIp != nil else {
-            log("registerMachine: skipped — no IPs available")
-            lastError = "No IPs available to register"
+        guard localIp != nil else {
+            log("registerMachine: skipped — no local IP available")
+            lastError = "No local IP available to register"
             return
         }
 
@@ -1831,7 +1771,6 @@ class DaemonManager: ObservableObject {
                 "status": "online",
                 "last_seen_at": ISO8601DateFormatter().string(from: Date())
             ]
-            if let ip = tailscaleIP { updateData["tailscale_ip"] = ip }
             if let lip = localIp { updateData["local_ip"] = lip }
             if let hw = hwUuid { updateData["hardware_uuid"] = hw }
             if let model = getModelIdentifier() { updateData["model_identifier"] = model }

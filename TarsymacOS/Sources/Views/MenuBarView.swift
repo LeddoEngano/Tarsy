@@ -112,14 +112,6 @@ struct MenuBarView: View {
                 // Stats
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("tailscale:")
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.secondary)
-                        Text(daemonManager.tailscaleStatus)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.secondary)
-                    }
-                    HStack {
                         Text("ws port:")
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.secondary)

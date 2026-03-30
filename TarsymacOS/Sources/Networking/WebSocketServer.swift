@@ -152,7 +152,7 @@ actor WebSocketServer {
         }
     }
 
-    /// Checks if a remote endpoint is from a local/private network (RFC 1918, loopback, Tailscale).
+    /// Checks if a remote endpoint is from a local/private network (RFC 1918, loopback, CGNAT).
     /// Rejects connections from public IPs to prevent exposure if the Mac lacks a firewall.
     private nonisolated func isLocalNetwork(_ endpoint: NWEndpoint) -> Bool {
         guard case let .hostPort(host, _) = endpoint else { return true }
@@ -170,7 +170,7 @@ actor WebSocketServer {
         // Link-local
         if hostStr.hasPrefix("169.254.") { return true }
         if hostStr.hasPrefix("fe80:") { return true }
-        // Tailscale CGNAT range (100.64.0.0/10)
+        // CGNAT range (100.64.0.0/10)
         if hostStr.hasPrefix("100.") {
             let parts = hostStr.split(separator: ".")
             if parts.count >= 2, let second = Int(parts[1]), (64...127).contains(second) { return true }

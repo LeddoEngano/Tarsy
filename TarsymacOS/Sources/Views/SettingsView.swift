@@ -114,24 +114,6 @@ struct SettingsView: View {
             // Connection tab
             VStack(spacing: 16) {
                 HStack {
-                    Text("Tailscale:")
-                        .font(.system(size: 12, design: .monospaced))
-                    Spacer()
-                    Text(daemonManager.tailscaleStatus)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
-
-                HStack {
-                    Text("Tailscale IP:")
-                        .font(.system(size: 12, design: .monospaced))
-                    Spacer()
-                    Text(daemonManager.tailscaleIP ?? "n/a")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
-
-                HStack {
                     Text("WebSocket Port:")
                         .font(.system(size: 12, design: .monospaced))
                     Spacer()
