@@ -75,15 +75,17 @@ struct SettingsView: View {
     }
 
     private var authenticatedView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 0) {
+            Spacer()
+
             // Profile card
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 ZStack {
                     Circle()
                         .fill(Theme.border)
-                        .frame(width: 48, height: 48)
+                        .frame(width: 52, height: 52)
                     Text(initials)
-                        .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 20, weight: .semibold, design: .monospaced))
                         .foregroundColor(Theme.amber)
                 }
 
@@ -91,10 +93,10 @@ struct SettingsView: View {
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
                     .foregroundColor(Theme.textPrimary)
             }
-            .padding(.top, 24)
+            .padding(.bottom, 24)
 
             // Actions
-            VStack(spacing: 8) {
+            VStack(spacing: 12) {
                 settingsButton(label: "Sign Out", icon: "rectangle.portrait.and.arrow.right") {
                     Task { await authManager.signOut() }
                 }
@@ -115,7 +117,6 @@ struct SettingsView: View {
                         }
                     }
                 }
-                .padding(.top, 4)
             }
             .padding(.horizontal, 24)
 
@@ -146,7 +147,7 @@ struct SettingsView: View {
                         .lineLimit(2)
                 }
             }
-            .padding(.bottom, 16)
+            .padding(.bottom, 20)
         }
     }
 
@@ -201,7 +202,6 @@ struct SettingsView: View {
 
             VStack(spacing: 12) {
                 connectionRow(label: "WebSocket Port", value: "\(TarsyConfig.websocketPort)")
-                connectionRow(label: "Connected Clients", value: "\(daemonManager.connectedClients)")
                 connectionRow(
                     label: "Status",
                     value: daemonManager.isRunning ? "running" : "stopped",

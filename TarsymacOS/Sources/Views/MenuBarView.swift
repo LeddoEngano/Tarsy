@@ -81,6 +81,9 @@ struct MenuBarView: View {
                 }
                 .buttonStyle(.plain)
                 .pointerOnHover()
+                .simultaneousGesture(TapGesture().onEnded {
+                    NSApp.activate(ignoringOtherApps: true)
+                })
 
                 checkForUpdatesItem
 
