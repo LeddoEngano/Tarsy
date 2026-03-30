@@ -41,13 +41,12 @@ targets:
         com.apple.security.network.client: true
         com.apple.security.network.server: true
         com.apple.security.automation.apple-events: true
-        com.apple.developer.applesignin:
-          - Default
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tarsy.macos
         DEVELOPMENT_TEAM: "J2M334NJ3L"
         CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_STYLE: "Automatic"
+        ENABLE_HARDENED_RUNTIME: YES
     dependencies:
       - package: TarsyShared
