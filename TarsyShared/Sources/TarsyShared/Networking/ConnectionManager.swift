@@ -221,63 +221,94 @@ public class ConnectionManager: ObservableObject {
             return
         }
 
-        let parameters = createLANTLSParameters()
-        let conn = NWConnection(to: .url(url), using: parameters)
-
-        // Timeout: if LAN doesn't connect in 3 seconds, try relay
+        // Race TLS and non-TLS connections — use whichever connects first.
+        // This handles both cases: server with TLS (normal) and without (Keychain failure).
         var lanConnected = false
+
+        let tlsConn = NWConnection(to: .url(url), using: createLANTLSParameters())
+
+        let plainParams = NWParameters.tcp
+        let wsOpts = NWProtocolWebSocket.Options()
+        wsOpts.autoReplyPing = true
+        plainParams.defaultProtocolStack.applicationProtocols.insert(wsOpts, at: 0)
+        let plainConn = NWConnection(to: .url(url), using: plainParams)
+
+        // Timeout: if neither connects in 3 seconds, try relay
         let timeoutTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             if !lanConnected && !self.isConnected {
-                conn.cancel()
+                tlsConn.cancel()
+                plainConn.cancel()
                 self.connection = nil
                 self.performRelayConnect()
             }
         }
 
-        conn.stateUpdateHandler = { [weak self] state in
+        // Handler called when either connection reaches .ready
+        let onReady: @MainActor (NWConnection, NWConnection) -> Void = { [weak self] winner, loser in
+            guard !lanConnected else { return } // Only first wins
+            lanConnected = true
+            timeoutTask.cancel()
+            loser.cancel()
+            // If relay already connected while we were waiting, tear it down
+            if self?.relayTask != nil {
+                self?.relayTask?.cancel(with: .goingAway, reason: nil)
+                self?.relayTask = nil
+                self?.relaySession = nil
+                self?.pingTimer?.invalidate()
+                self?.pingTimer = nil
+            }
+            self?.connection = winner
+            self?.isConnected = true
+            self?.reconnectAttempts = 0
+            self?.errorMessage = nil
+            self?.connectionMode = .lan
+            if let token = self?.authToken {
+                self?.send(WSPacket(action: .auth, payload: ["token": token, "e2ePublicKey": self?.e2e.publicKeyBase64 ?? ""]))
+            }
+            self?.receiveLANLoop()
+            self?.startPing()
+        }
+
+        var tlsFailed = false
+        var plainFailed = false
+
+        tlsConn.stateUpdateHandler = { [weak self] state in
             Task { @MainActor in
                 switch state {
                 case .ready:
-                    lanConnected = true
-                    timeoutTask.cancel()
-                    // If relay already connected while we were waiting, tear it down
-                    if self?.relayTask != nil {
-                        self?.relayTask?.cancel(with: .goingAway, reason: nil)
-                        self?.relayTask = nil
-                        self?.relaySession = nil
-                        self?.pingTimer?.invalidate()
-                        self?.pingTimer = nil
-                    }
-                    self?.isConnected = true
-                    // Don't reset isReconnecting here — let authSuccess handle it
-                    // so onReconnected fires correctly on lifecycle reconnections
-                    self?.reconnectAttempts = 0
-                    self?.errorMessage = nil
-                    self?.connectionMode = .lan
-                    if let token = self?.authToken {
-                        self?.send(WSPacket(action: .auth, payload: ["token": token, "e2ePublicKey": self?.e2e.publicKeyBase64 ?? ""]))
-                    }
-                    self?.receiveLANLoop()
-                    self?.startPing()
+                    onReady(tlsConn, plainConn)
                 case .failed:
-                    lanConnected = false
-                    timeoutTask.cancel()
-                    // Only fall back to relay if relay isn't already connected
-                    if self?.isConnected != true {
+                    tlsFailed = true
+                    if plainFailed && !lanConnected && self?.isConnected != true {
+                        timeoutTask.cancel()
                         self?.connection = nil
                         self?.performRelayConnect()
                     }
-                case .waiting:
-                    break
-                default:
-                    break
+                default: break
                 }
             }
         }
 
-        conn.start(queue: .global(qos: .userInitiated))
-        self.connection = conn
+        plainConn.stateUpdateHandler = { [weak self] state in
+            Task { @MainActor in
+                switch state {
+                case .ready:
+                    onReady(plainConn, tlsConn)
+                case .failed:
+                    plainFailed = true
+                    if tlsFailed && !lanConnected && self?.isConnected != true {
+                        timeoutTask.cancel()
+                        self?.connection = nil
+                        self?.performRelayConnect()
+                    }
+                default: break
+                }
+            }
+        }
+
+        tlsConn.start(queue: .global(qos: .userInitiated))
+        plainConn.start(queue: .global(qos: .userInitiated))
     }
 
     private func receiveLANLoop() {
@@ -328,10 +359,26 @@ public class ConnectionManager: ObservableObject {
 
     // MARK: - Relay Transport
 
+    private var relaySendCount = 0
+
     private func sendViaRelay(_ data: Data) {
-        guard let relayTask, let str = String(data: data, encoding: .utf8) else { return }
+        guard let relayTask else {
+            print("[Relay:TX] sendViaRelay: relayTask is nil!")
+            return
+        }
+        guard let str = String(data: data, encoding: .utf8) else {
+            print("[Relay:TX] sendViaRelay: failed to convert \(data.count)B to string")
+            return
+        }
+        relaySendCount += 1
+        if relaySendCount <= 10 || relaySendCount % 50 == 0 {
+            // Parse action for logging
+            let action = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["action"] as? String ?? "?"
+            print("[Relay:TX] send #\(relaySendCount): action=\(action), \(data.count)B")
+        }
         relayTask.send(.string(str)) { [weak self] error in
-            if error != nil {
+            if let error {
+                print("[Relay:TX] send error: \(error)")
                 Task { @MainActor in self?.handleDisconnect() }
             }
         }
@@ -378,51 +425,76 @@ public class ConnectionManager: ObservableObject {
         }
     }
 
+    private var relayMsgCount = 0
+    private var relayBinaryCount = 0
+    private var relayTextCount = 0
+
     private func receiveRelayLoop() {
-        guard let relayTask else { return }
+        guard let relayTask else {
+            print("[Relay:RX] receiveRelayLoop: relayTask is nil, stopping")
+            return
+        }
 
         relayTask.receive { [weak self] result in
             Task { @MainActor in
+                guard let self else {
+                    print("[Relay:RX] self is nil in receive callback")
+                    return
+                }
+                self.relayMsgCount += 1
+
                 switch result {
                 case .success(let message):
                     switch message {
                     case .string(let text):
+                        self.relayTextCount += 1
                         if let data = text.data(using: .utf8),
                            let packet = try? WSPacket.decode(from: data) {
-                            self?.handlePacket(packet)
+                            if self.relayTextCount <= 10 || self.relayTextCount % 50 == 0 {
+                                print("[Relay:RX] text #\(self.relayTextCount): action=\(packet.action.rawValue)")
+                            }
+                            self.handlePacket(packet)
+                        } else {
+                            print("[Relay:RX] text #\(self.relayTextCount): failed to decode, len=\(text.count), preview=\(String(text.prefix(80)))")
                         }
                     case .data(let data):
+                        self.relayBinaryCount += 1
                         let prefix = data.prefix(4)
                         let prefixStr = prefix.count == 4 ? String(data: prefix, encoding: .utf8) : nil
 
+                        if self.relayBinaryCount <= 5 || self.relayBinaryCount % 100 == 0 {
+                            print("[Relay:RX] binary #\(self.relayBinaryCount): \(data.count)B, prefix=\(prefixStr ?? "nil"), hasStreamHandler=\(self.onStreamFrameReceived != nil)")
+                        }
+
                         if prefixStr == "H264" {
-                            // Decrypt E2E-encrypted video frame (binary AES-GCM)
                             let payload = Data(data.dropFirst(4))
-                            if let decrypted = self?.e2e.decryptBinary(payload) {
+                            if let decrypted = self.e2e.decryptBinary(payload) {
                                 var frameData = Data("H264".utf8)
                                 frameData.append(decrypted)
-                                self?.onStreamFrameReceived?(frameData)
+                                self.onStreamFrameReceived?(frameData)
                             } else {
-                                // Fallback: try as unencrypted
-                                self?.onStreamFrameReceived?(data)
+                                self.onStreamFrameReceived?(data)
                             }
                         } else if prefixStr == "SCRN" {
                             let payload = Data(data.dropFirst(4))
-                            if let decrypted = self?.e2e.decryptBinary(payload) {
-                                self?.onScreenshotReceived?(decrypted)
+                            if let decrypted = self.e2e.decryptBinary(payload) {
+                                self.onScreenshotReceived?(decrypted)
                             } else {
-                                self?.onScreenshotReceived?(payload)
+                                self.onScreenshotReceived?(payload)
                             }
                         } else {
-                            self?.onStreamFrameReceived?(data)
+                            print("[Relay:RX] binary unknown prefix: \(prefixStr ?? "nil"), \(data.count)B")
+                            self.onStreamFrameReceived?(data)
                         }
                     @unknown default:
+                        print("[Relay:RX] unknown message type")
                         break
                     }
-                    self?.receiveRelayLoop()
+                    self.receiveRelayLoop()
 
-                case .failure:
-                    self?.handleDisconnect()
+                case .failure(let error):
+                    print("[Relay:RX] receive FAILED after \(self.relayMsgCount) msgs (\(self.relayTextCount) text, \(self.relayBinaryCount) binary): \(error)")
+                    self.handleDisconnect()
                 }
             }
         }

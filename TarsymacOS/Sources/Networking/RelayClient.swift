@@ -79,16 +79,47 @@ actor RelayClient {
         } catch { }
     }
 
+    private var binarySendCount = 0
+
     func sendBinary(_ data: Data) {
-        guard let ws = webSocket else { return }
+        guard let ws = webSocket else {
+            print("[RelayClient] sendBinary: webSocket is nil! (\(data.count)B)")
+            return
+        }
+        binarySendCount += 1
+        if binarySendCount <= 5 || binarySendCount % 200 == 0 {
+            let prefix = data.prefix(4)
+            let prefixStr = String(data: prefix, encoding: .utf8) ?? "?"
+            print("[RelayClient] sendBinary #\(binarySendCount): \(data.count)B, prefix=\(prefixStr), connected=\(isConnected)")
+        }
         let message = URLSessionWebSocketTask.Message.data(data)
-        ws.send(message) { _ in }
+        ws.send(message) { [weak self] error in
+            if let error {
+                print("[RelayClient] sendBinary error: \(error)")
+                Task { await self?.scheduleReconnect() }
+            }
+        }
     }
 
     func sendBinary(_ data: Data, completion: @escaping @Sendable () -> Void) {
-        guard let ws = webSocket else { completion(); return }
+        guard let ws = webSocket else {
+            print("[RelayClient] sendBinary(completion): webSocket is nil! (\(data.count)B)")
+            completion()
+            return
+        }
+        binarySendCount += 1
+        if binarySendCount <= 5 || binarySendCount % 200 == 0 {
+            let prefix = data.prefix(4)
+            let prefixStr = String(data: prefix, encoding: .utf8) ?? "?"
+            print("[RelayClient] sendBinary #\(binarySendCount): \(data.count)B, prefix=\(prefixStr), connected=\(isConnected)")
+        }
         let message = URLSessionWebSocketTask.Message.data(data)
-        ws.send(message) { _ in completion() }
+        ws.send(message) { error in
+            if let error {
+                print("[RelayClient] sendBinary(completion) error: \(error)")
+            }
+            completion()
+        }
     }
 
     // MARK: - Receive Loop
