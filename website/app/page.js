@@ -34,9 +34,15 @@ export default function Home() {
         <p className={styles.heroDesc}>
           Control your Mac dev environment from your iPhone. Live streaming, AI assistance, and remote access in your pocket.
         </p>
-        <a href="https://apps.apple.com/app/tarsy" className={styles.cta}>
-          Download on the App Store
-        </a>
+        <div className={styles.heroCtas}>
+          <a href="https://apps.apple.com/app/tarsy" className={styles.cta}>
+            iPhone &amp; iPad
+          </a>
+          <a href="https://xtblbghhlkroskzljqcl.supabase.co/storage/v1/object/public/tarsy-releases/Tarsy.dmg" className={styles.ctaSecondary}>
+            Download for Mac
+          </a>
+        </div>
+        <p className={styles.heroHint}>macOS 14+ &middot; Apple Silicon &amp; Intel</p>
       </section>
 
       <section className={styles.features} id="features">
