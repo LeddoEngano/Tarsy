@@ -155,8 +155,10 @@ struct OnboardingWindow: View {
                     Task { await authManager.signInWithGitHub() }
                 }) {
                     HStack(spacing: 8) {
-                        Image(systemName: "chevron.left.forwardslash.chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
+                        Image("GitHubIcon")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 18, height: 18)
                         Text("Sign in with GitHub")
                             .font(.system(size: 14, weight: .medium))
                     }

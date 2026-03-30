@@ -49,8 +49,10 @@ struct LoginView: View {
                         Task { await authManager.signInWithGitHub() }
                     }) {
                         HStack(spacing: 8) {
-                            Image(systemName: "chevron.left.forwardslash.chevron.right")
-                                .font(.system(size: 16, weight: .semibold))
+                            Image("GitHubIcon")
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 20, height: 20)
                             Text("Sign in with GitHub")
                                 .font(.system(size: 17, weight: .medium))
                         }
