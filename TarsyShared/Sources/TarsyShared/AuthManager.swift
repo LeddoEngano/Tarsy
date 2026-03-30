@@ -147,6 +147,8 @@ public class AuthManager: ObservableObject {
                 }
                 #if os(macOS)
                 session.presentationContextProvider = MacAuthPresenter.shared
+                #elseif os(iOS)
+                session.presentationContextProvider = IOSAuthPresenter.shared
                 #endif
                 session.prefersEphemeralWebBrowserSession = false
                 session.start()
@@ -211,6 +213,20 @@ class MacAuthPresenter: NSObject, ASWebAuthenticationPresentationContextProvidin
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         NSApplication.shared.keyWindow ?? ASPresentationAnchor()
+    }
+}
+#elseif os(iOS)
+import UIKit
+
+class IOSAuthPresenter: NSObject, ASWebAuthenticationPresentationContextProviding {
+    static let shared = IOSAuthPresenter()
+
+    func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = scene.windows.first(where: { $0.isKeyWindow }) else {
+            return ASPresentationAnchor()
+        }
+        return window
     }
 }
 #endif
