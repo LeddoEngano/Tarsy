@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 // Update these values when releasing a new version of the macOS app.
 const LATEST_VERSION = "1.0.0";
-const DOWNLOAD_URL = "https://xtblbghhlkroskzljqcl.supabase.co/storage/v1/object/public/tarsy-releases/Tarsy.dmg";
+const DOWNLOAD_URL = "https://www.tarsy.dev/download/macos";
 const RELEASE_NOTES = null; // e.g. "Bug fixes and performance improvements"
 
 export async function GET() {
