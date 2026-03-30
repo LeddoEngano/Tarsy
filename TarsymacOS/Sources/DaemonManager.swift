@@ -30,6 +30,7 @@ class DaemonManager: ObservableObject {
     private var displaySleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var systemSleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var lastActiveClientId: String = "relay"
+    private var cachedAuthToken: String?
     private var detectedAgents: [AIEngineType] = []
     private let e2e = E2ECrypto()       // LAN E2E
     private let relayE2E = E2ECrypto() // Relay E2E (separate key pair)
@@ -94,6 +95,11 @@ class DaemonManager: ObservableObject {
         // 2. Register machine in Supabase
         await registerMachine()
 
+        // Cache auth token for sync shutdown
+        if let token = try? await supabase.auth.session.accessToken {
+            cachedAuthToken = token
+        }
+
         // 3. Connect to relay for remote access
         await connectRelay()
 
@@ -132,11 +138,59 @@ class DaemonManager: ObservableObject {
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
         Task {
-            await wsServer?.stop()
             await updateMachineStatus("offline")
+            await wsServer?.stop()
         }
         isRunning = false
     }
+
+    /// Synchronous offline update for app termination — runs on a background queue
+    /// to avoid deadlocking the main thread with a semaphore.
+    nonisolated func markOfflineSync() {
+        // Capture values we need off the main actor
+        let id: UUID?
+        let token: String?
+        if Thread.isMainThread {
+            id = MainActor.assumeIsolated { self.machineId }
+            token = MainActor.assumeIsolated { self.cachedAuthToken }
+        } else {
+            // Fallback — should not happen in normal flow
+            return
+        }
+
+        guard let id, let token else { return }
+
+        let baseURL = TarsyConfig.supabaseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(baseURL)/rest/v1/machines?id=eq.\(id.uuidString)") else { return }
+
+        var request = URLRequest(url: url, timeoutInterval: 3)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(TarsyConfig.supabaseAnonKey, forHTTPHeaderField: "apikey")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let body: [String: String] = [
+            "status": "offline",
+            "last_seen_at": ISO8601DateFormatter().string(from: Date())
+        ]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        // Use a dedicated session with delegateQueue on a background queue
+        // to avoid deadlocking the main thread
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 3
+        let bgQueue = OperationQueue()
+        bgQueue.maxConcurrentOperationCount = 1
+        let session = URLSession(configuration: config, delegate: nil, delegateQueue: bgQueue)
+
+        let semaphore = DispatchSemaphore(value: 0)
+        session.dataTask(with: request) { _, _, _ in
+            semaphore.signal()
+        }.resume()
+        _ = semaphore.wait(timeout: .now() + 3)
+        session.invalidateAndCancel()
+    }
+
 
     // MARK: - Sleep Prevention
 
@@ -1935,6 +1989,10 @@ class DaemonManager: ObservableObject {
 
     private func updateMachineStatus(_ status: String) async {
         guard let id = machineId else { return }
+        // Cache the auth token for use during synchronous shutdown
+        if let token = try? await supabase.auth.session.accessToken {
+            cachedAuthToken = token
+        }
         do {
             try await supabase
                 .from("machines")

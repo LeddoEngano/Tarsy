@@ -53,6 +53,13 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .onChange(of: machineService.isOnline) { _, isOnline in
+            if !isOnline && connectionManager.isConnected {
+                connectionManager.disconnect()
+            } else if isOnline && !connectionManager.isConnected && authManager.isAuthenticated {
+                Task { await connectToMachine() }
+            }
+        }
         .onChange(of: authManager.isAuthenticated) { _, isAuth in
             if isAuth {
                 Task {
@@ -137,10 +144,18 @@ struct ContentView: View {
     private func autoConnect() async {
         await machineService.fetchMachine()
 
+        guard machineService.isOnline else {
+            print("[AutoConnect] Mac is offline, skipping connection")
+            return
+        }
+
+        await connectToMachine()
+    }
+
+    /// Connect without re-fetching machine status (used when onChange already confirmed online)
+    private func connectToMachine() async {
         do {
             let session = try await supabase.auth.session
-
-            // Smart connect: try LAN first (if on same subnet), fallback to relay
             let lanHost = machineService.bestIP
             print("[AutoConnect] LAN host: \(lanHost ?? "none"), using smart connect...")
 

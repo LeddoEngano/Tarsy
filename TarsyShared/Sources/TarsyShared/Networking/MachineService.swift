@@ -45,7 +45,7 @@ public class MachineService: ObservableObject {
                 machine = allMachines.first
                 selectedMachineId = machine?.id
             }
-            isOnline = machine?.status == .online
+            isOnline = machine?.isRecentlyOnline ?? false
         } catch {
             print("[MachineService] Fetch error: \(error)")
         }
@@ -54,7 +54,7 @@ public class MachineService: ObservableObject {
     public func selectMachine(_ id: UUID) {
         selectedMachineId = id
         machine = machines.first { $0.id == id }
-        isOnline = machine?.status == .online
+        isOnline = machine?.isRecentlyOnline ?? false
     }
 
     public var localIP: String? {

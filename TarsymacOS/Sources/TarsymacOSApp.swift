@@ -1,8 +1,10 @@
 import SwiftUI
 import TarsyShared
+import AppKit
 
 @main
 struct TarsymacOSApp: App {
+    @NSApplicationDelegateAdaptor(TarsyAppDelegate.self) var appDelegate
     @StateObject private var authManager = AuthManager()
     @StateObject private var daemonManager = DaemonManager()
     @StateObject private var updateChecker = UpdateChecker()
@@ -43,6 +45,7 @@ struct TarsymacOSApp: App {
                 .environmentObject(updateChecker)
                 .onAppear {
                     updateChecker.startPeriodicChecks()
+                    appDelegate.daemonManager = daemonManager
                 }
         } label: {
             Image(systemName: updateChecker.shouldShowBanner
@@ -57,5 +60,13 @@ struct TarsymacOSApp: App {
                 .environmentObject(authManager)
                 .environmentObject(daemonManager)
         }
+    }
+}
+
+class TarsyAppDelegate: NSObject, NSApplicationDelegate {
+    var daemonManager: DaemonManager?
+
+    func applicationWillTerminate(_ notification: Notification) {
+        daemonManager?.markOfflineSync()
     }
 }
