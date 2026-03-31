@@ -1,0 +1,81 @@
+{
+  "fill" : {
+    "automatic-gradient" : "display-p3:0.00000,0.00000,0.00000,1.00000"
+  },
+  "groups" : [
+    {
+      "hidden" : false,
+      "layers" : [
+        {
+          "image-name" : "image (9).png",
+          "name" : "image (9)"
+        },
+        {
+          "hidden" : true,
+          "image-name" : "app-logo-white 3.png",
+          "name" : "app-logo-white 3"
+        },
+        {
+          "hidden" : true,
+          "image-name" : "app-logo-white 2.png",
+          "name" : "app-logo-white 2"
+        },
+        {
+          "hidden" : true,
+          "image-name" : "white-tarsy-logo.svg",
+          "name" : "white-tarsy-logo"
+        },
+        {
+          "hidden" : true,
+          "image-name" : "white-tarsy-logo.png",
+          "name" : "white-tarsy-logo"
+        },
+        {
+          "hidden" : true,
+          "image-name" : "app-logo-white.png",
+          "name" : "app-logo-white"
+        },
+        {
+          "blend-mode" : "normal",
+          "fill" : "none",
+          "glass" : true,
+          "hidden" : true,
+          "image-name" : "app-logo.png",
+          "name" : "app-logo"
+        }
+      ],
+      "lighting" : "individual",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    },
+    {
+      "blur-material" : null,
+      "layers" : [
+
+      ],
+      "lighting" : "individual",
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    }
+  ],
+  "supported-platforms" : {
+    "circles" : [
+      "watchOS"
+    ],
+    "squares" : "shared"
+  }
+}
