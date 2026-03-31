@@ -83,6 +83,7 @@ public enum WSAction: String, Codable, Sendable {
     case engineOutput = "engine:output"
     case engineComplete = "engine:complete"
     case engineClose = "engine:close"
+    case engineError = "engine:error"
     case engineAskUser = "engine:ask_user"
     case engineUserResponse = "engine:user_response"
 
