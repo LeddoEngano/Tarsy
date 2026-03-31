@@ -561,12 +561,26 @@ class DaemonManager: ObservableObject {
     private func handleScanRepos(clientId: String, packet: WSPacket) async {
         let scanner = RepoScanner()
         let repos = await scanner.scan()
+        log("scanRepos: found \(repos.count) repos")
 
-        // Encode repos as JSON string in payload
-        if let data = try? JSONEncoder().encode(repos),
-           let json = String(data: data, encoding: .utf8) {
+        do {
+            let data = try JSONEncoder().encode(repos)
+            guard let json = String(data: data, encoding: .utf8) else {
+                log("scanRepos: failed to convert encoded data to UTF-8 string")
+                await sendToClientOrRelay(
+                    WSPacket(action: .workspaceScanResult, payload: ["error": "Failed to encode repos"], id: packet.id),
+                    to: clientId
+                )
+                return
+            }
             await sendToClientOrRelay(
                 WSPacket(action: .workspaceScanResult, payload: ["repos": json], id: packet.id),
+                to: clientId
+            )
+        } catch {
+            log("scanRepos: encoding error: \(error.localizedDescription)")
+            await sendToClientOrRelay(
+                WSPacket(action: .workspaceScanResult, payload: ["error": "Encoding error: \(error.localizedDescription)"], id: packet.id),
                 to: clientId
             )
         }
@@ -984,29 +998,23 @@ class DaemonManager: ObservableObject {
             let sessionId = try await terminalManager.createSession(workingDirectory: expandedPath)
             devServerSessions[expandedPath] = sessionId
 
-            // Monitor terminal output for server-ready signals and port detection
+            // Monitor terminal output for server-ready signals, port detection, and conflict PIDs
             let serverReady = DevServerReadySignal()
+            let conflictDetector = DevServerConflictDetector()
             await terminalManager.setOutputHandler(for: sessionId) { [weak self] output in
                 guard let strongSelf = self else { return }
                 Task {
                     let wasReady = await serverReady.isReady
                     await serverReady.check(output)
+                    await conflictDetector.check(output)
                     await strongSelf.detectSudoPromptInOutput(output, sessionId: sessionId)
                     await MainActor.run { strongSelf.log("devServer[\(sessionId.prefix(8))]: \(output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))") }
 
-                    // Detect port from output and notify iOS
+                    // Store detected port for later verification (don't notify iOS yet — wait for process stability check)
                     if !wasReady, await serverReady.isReady {
                         let detectedPort = strongSelf.extractPort(from: output)
                         if let port = detectedPort {
                             await MainActor.run { strongSelf.devServerDetectedPorts[expandedPath] = port }
-                            await strongSelf.sendToClientOrRelay(
-                                WSPacket(action: .devServerStart, payload: [
-                                    "status": "ready",
-                                    "port": "\(port)",
-                                    "sessionId": sessionId
-                                ]),
-                                to: strongSelf.lastActiveClientId
-                            )
                         }
                     }
                 }
@@ -1053,14 +1061,79 @@ class DaemonManager: ObservableObject {
             let confirmed = await waitForDevServer(signal: serverReady, port: targetPort, timeout: timeout)
 
             if confirmed {
-                log("devServerStart: confirmed running")
-                await sendToClientOrRelay(
-                    WSPacket(action: .devServerStart, payload: ["status": "running", "sessionId": sessionId], id: packet.id),
-                    to: clientId
-                )
-                // Open browser to streamUrl
-                if let url = streamUrl, !url.isEmpty {
-                    await openBrowserToUrl(url)
+                // Wait briefly then verify the process actually survived (e.g. Next.js may exit after detecting a duplicate)
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                let stillAlive = await terminalManager.isSessionAlive(sessionId)
+                let detectedPort = await MainActor.run { devServerDetectedPorts[expandedPath] }
+
+                if stillAlive, let port = detectedPort, isPortListening(port: UInt16(port)) {
+                    log("devServerStart: confirmed running on port \(port)")
+                    await sendToClientOrRelay(
+                        WSPacket(action: .devServerStart, payload: [
+                            "status": "ready",
+                            "port": "\(port)",
+                            "sessionId": sessionId
+                        ], id: packet.id),
+                        to: clientId
+                    )
+                    if let url = streamUrl, !url.isEmpty {
+                        await openBrowserToUrl(url)
+                    }
+                } else {
+                    // Process died — check if there was a conflict with another dev server
+                    let conflictPID = await conflictDetector.conflictPID
+                    log("devServerStart: process died after startup (conflictPID=\(conflictPID?.description ?? "none"))")
+                    devServerSessions.removeValue(forKey: expandedPath)
+
+                    if let pid = conflictPID {
+                        // Kill the conflicting process and retry once
+                        log("devServerStart: killing conflicting process PID \(pid)")
+                        kill(pid, SIGTERM)
+                        // Wait for process to die
+                        try? await Task.sleep(nanoseconds: 1_000_000_000)
+                        // Force kill if still alive
+                        if kill(pid, 0) == 0 {
+                            log("devServerStart: SIGTERM didn't work, sending SIGKILL to PID \(pid)")
+                            kill(pid, SIGKILL)
+                            try? await Task.sleep(nanoseconds: 500_000_000)
+                        }
+                        log("devServerStart: retrying after killing conflicting process")
+                        // Retry by calling ourselves recursively (conflict is now resolved)
+                        await handleDevServerStart(clientId: clientId, packet: packet)
+                        return
+                    }
+
+                    // No conflict PID — try to find an existing server on a common port
+                    log("devServerStart: scanning for existing server on common ports")
+                    let commonPorts: [UInt16] = [3000, 3001, 3002, 4200, 5173, 5174, 8000, 8080, 8888]
+                    var foundPort: Int? = nil
+                    for p in commonPorts {
+                        if isPortListening(port: p) && isHTTPResponding(port: p) {
+                            foundPort = Int(p)
+                            log("devServerStart: port \(p) — TCP=true, HTTP=true")
+                            break
+                        } else if isPortListening(port: p) {
+                            log("devServerStart: port \(p) — TCP=true, HTTP=false (zombie)")
+                        }
+                    }
+                    if let port = foundPort {
+                        log("devServerStart: found existing server on port \(port)")
+                        await MainActor.run { devServerDetectedPorts[expandedPath] = port }
+                        await sendToClientOrRelay(
+                            WSPacket(action: .devServerStart, payload: [
+                                "status": "ready",
+                                "port": "\(port)",
+                                "sessionId": sessionId
+                            ], id: packet.id),
+                            to: clientId
+                        )
+                    } else {
+                        log("devServerStart: no server found after process died")
+                        await sendToClientOrRelay(
+                            WSPacket(action: .devServerStart, payload: ["status": "error", "error": "Dev server exited unexpectedly"], id: packet.id),
+                            to: clientId
+                        )
+                    }
                 }
             } else {
                 log("devServerStart: could not confirm, assuming started")
@@ -1428,6 +1501,23 @@ class DaemonManager: ObservableObject {
         var pollFd = pollfd(fd: sock, events: Int16(POLLOUT), revents: 0)
         let pollResult = poll(&pollFd, 1, 200)
         return pollResult > 0 && (pollFd.revents & Int16(POLLOUT)) != 0
+    }
+
+    private nonisolated func isHTTPResponding(port: UInt16, host: String = "127.0.0.1") -> Bool {
+        let sem = DispatchSemaphore(value: 0)
+        var responding = false
+        guard let url = URL(string: "http://\(host):\(port)/") else { return false }
+        var request = URLRequest(url: url, timeoutInterval: 2)
+        request.httpMethod = "HEAD"
+        let task = URLSession.shared.dataTask(with: request) { _, response, _ in
+            if let http = response as? HTTPURLResponse, (200...599).contains(http.statusCode) {
+                responding = true
+            }
+            sem.signal()
+        }
+        task.resume()
+        _ = sem.wait(timeout: .now() + 3)
+        return responding
     }
 
     // MARK: - Remote Input
@@ -3665,6 +3755,32 @@ actor DevServerReadySignal {
             if lower.contains(pattern.lowercased()) {
                 isReady = true
                 return
+            }
+        }
+    }
+}
+
+/// Detects "Another dev server is already running" messages and extracts the conflicting PID
+actor DevServerConflictDetector {
+    private(set) var conflictPID: pid_t? = nil
+
+    func check(_ output: String) {
+        guard conflictPID == nil else { return }
+        // Match "PID:  31279" or "- PID: 31279" patterns from Next.js/Vite conflict messages
+        if output.contains("already running") || output.contains("PID") {
+            let patterns = [
+                "PID:\\s*(\\d+)",
+                "pid\\s+(\\d+)",
+                "kill\\s+(\\d+)"
+            ]
+            for pattern in patterns {
+                if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+                   let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
+                   let range = Range(match.range(at: 1), in: output),
+                   let pid = pid_t(output[range]) {
+                    conflictPID = pid
+                    return
+                }
             }
         }
     }
