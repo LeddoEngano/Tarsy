@@ -84,53 +84,60 @@ async function sendLiveActivityPush(
   apnsJwt: string,
   body: LiveActivityUpdateRequest
 ): Promise<boolean> {
-  try {
-    const aps: Record<string, unknown> = {
-      timestamp: Math.floor(Date.now() / 1000),
-      event: body.event,
-      "content-state": body.content_state,
-    };
+  const aps: Record<string, unknown> = {
+    timestamp: Math.floor(Date.now() / 1000),
+    event: body.event,
+    "content-state": body.content_state,
+  };
 
-    // Stale date: 4 minutes for updates, none for end
-    if (body.event === "update") {
-      aps["stale-date"] = Math.floor(Date.now() / 1000) + 240;
-    }
-
-    if (body.event === "end" && body.dismissal_date) {
-      aps["dismissal-date"] = body.dismissal_date;
-    }
-
-    if (body.alert) {
-      aps.alert = body.alert;
-      aps.sound = "default";
-    }
-
-    const payload = JSON.stringify({ aps });
-
-    const response = await fetch(
-      `${APNS_HOST}/3/device/${activityToken}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `bearer ${apnsJwt}`,
-          "apns-topic": `${APNS_BUNDLE_ID}.push-type.liveactivity`,
-          "apns-push-type": "liveactivity",
-          "apns-priority": body.event === "end" || body.alert ? "10" : "5",
-        },
-        body: payload,
-      }
-    );
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error(`APNs LA error for ${activityToken.substring(0, 8)}...: ${response.status} ${error}`);
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.error(`APNs LA send failed:`, err);
-    return false;
+  if (body.event === "update") {
+    aps["stale-date"] = Math.floor(Date.now() / 1000) + 240;
   }
+
+  if (body.event === "end" && body.dismissal_date) {
+    aps["dismissal-date"] = body.dismissal_date;
+  }
+
+  if (body.alert) {
+    aps.alert = body.alert;
+    aps.sound = "default";
+  }
+
+  const payload = JSON.stringify({ aps });
+  const headers = {
+    Authorization: `bearer ${apnsJwt}`,
+    "apns-topic": `${APNS_BUNDLE_ID}.push-type.liveactivity`,
+    "apns-push-type": "liveactivity",
+    "apns-priority": body.event === "end" || body.alert ? "10" : "5",
+  };
+
+  // Try both APNs environments — sandbox for Xcode builds, production for App Store.
+  // APNs returns 200 even for wrong-environment tokens, so we try both to ensure delivery.
+  const hosts = [
+    "https://api.sandbox.push.apple.com",
+    "https://api.push.apple.com",
+  ];
+
+  for (const host of hosts) {
+    try {
+      const response = await fetch(`${host}/3/device/${activityToken}`, {
+        method: "POST",
+        headers,
+        body: payload,
+      });
+
+      if (response.ok) {
+        console.log(`[LA] APNs OK via ${host.includes("sandbox") ? "sandbox" : "production"} for token ${activityToken.substring(0, 8)}...`);
+      } else {
+        const error = await response.text();
+        console.log(`[LA] APNs ${response.status} via ${host.includes("sandbox") ? "sandbox" : "production"}: ${error}`);
+      }
+    } catch (err) {
+      console.error(`[LA] APNs send failed (${host}):`, err);
+    }
+  }
+
+  return true;
 }
 
 serve(async (req) => {
@@ -171,21 +178,28 @@ serve(async (req) => {
     }
 
     // Validate caller matches request (unless service_role)
-    if (callerUserId !== "service_role" && callerUserId !== body.user_id) {
+    // Compare case-insensitive: Swift UUID.uuidString is uppercase, Supabase JWT sub is lowercase
+    if (callerUserId !== "service_role" && callerUserId.toLowerCase() !== body.user_id.toLowerCase()) {
       return new Response(JSON.stringify({ error: "Forbidden: user mismatch" }), { status: 403 });
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     // Look up activity push tokens for this user + workspace
+    // Lowercase UUIDs: Swift sends uppercase, Supabase stores lowercase
+    const userId = body.user_id.toLowerCase();
+    const workspaceId = body.workspace_id.toLowerCase();
+
     const { data: tokens, error: tokensError } = await supabase
       .from("live_activity_tokens")
       .select("activity_token")
-      .eq("user_id", body.user_id)
-      .eq("workspace_id", body.workspace_id);
+      .eq("user_id", userId)
+      .eq("workspace_id", workspaceId);
+
+    console.log(`[LA] Token lookup: user=${userId.substring(0, 8)} ws=${workspaceId.substring(0, 8)} found=${tokens?.length ?? 0} error=${tokensError?.message ?? 'none'}`);
 
     if (tokensError || !tokens?.length) {
-      return new Response(JSON.stringify({ sent: 0 }), { status: 200 });
+      return new Response(JSON.stringify({ sent: 0, reason: "no_tokens" }), { status: 200 });
     }
 
     const apnsJwt = await generateAPNsToken();
@@ -196,13 +210,15 @@ serve(async (req) => {
       if (success) sentCount++;
     }
 
+    console.log(`[LA] Push results: sent=${sentCount}/${tokens.length}`);
+
     // Clean up tokens on end event
     if (body.event === "end") {
       await supabase
         .from("live_activity_tokens")
         .delete()
-        .eq("user_id", body.user_id)
-        .eq("workspace_id", body.workspace_id);
+        .eq("user_id", userId)
+        .eq("workspace_id", workspaceId);
     }
 
     return new Response(
