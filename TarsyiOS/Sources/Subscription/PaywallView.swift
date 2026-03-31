@@ -148,6 +148,7 @@ struct PaywallView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .alert("Something went wrong", isPresented: $showError) {
             Button("OK") {}
         } message: {
