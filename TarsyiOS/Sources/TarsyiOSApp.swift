@@ -109,12 +109,13 @@ struct TarsyiOSApp: App {
                     subscriptionManager.start()
                 }
                 .onOpenURL { url in
-                    guard url.scheme == "com.tarsy.ios",
-                          url.host == "login-callback" else {
-                        return
-                    }
-                    Task {
-                        await authManager.handleOAuthCallback(url: url)
+                    guard url.scheme == "com.tarsy.ios" else { return }
+                    if url.host == "login-callback" {
+                        Task { await authManager.handleOAuthCallback(url: url) }
+                    } else if url.host == "workspace",
+                              let idStr = url.pathComponents.dropFirst().first,
+                              let workspaceId = UUID(uuidString: idStr) {
+                        deepLinkRouter.pendingWorkspaceId = workspaceId
                     }
                 }
                 .onChange(of: scenePhase) { _, newPhase in
