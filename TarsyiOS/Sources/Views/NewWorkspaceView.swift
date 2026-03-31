@@ -366,17 +366,20 @@ struct NewWorkspaceView: View {
 
     private func scanRepos() {
         isScanning = true
-        connectionManager.send(WSPacket(action: .workspaceScanRepos))
 
+        // Register listener BEFORE sending to avoid race condition
         connectionManager.addListener("scan_repos") { packet in
-            guard packet.action == .workspaceScanResult,
-                  let json = packet.payload?["repos"],
-                  let data = json.data(using: .utf8) else { return }
+            guard packet.action == .workspaceScanResult else { return }
 
             Task { @MainActor in
                 self.connectionManager.removeListener("scan_repos")
-                if let repos = try? JSONDecoder().decode([ScannedRepo].self, from: data) {
+
+                if let json = packet.payload?["repos"],
+                   let data = json.data(using: .utf8),
+                   let repos = try? JSONDecoder().decode([ScannedRepo].self, from: data) {
                     self.scannedRepos = repos
+                } else if let errorMsg = packet.payload?["error"] {
+                    self.error = errorMsg
                 } else {
                     self.error = "failed to parse repo list from mac"
                 }
@@ -384,13 +387,16 @@ struct NewWorkspaceView: View {
             }
         }
 
+        connectionManager.send(WSPacket(action: .workspaceScanRepos))
+
         // Timeout
         Task {
-            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
             await MainActor.run {
                 if isScanning {
                     isScanning = false
                     connectionManager.removeListener("scan_repos")
+                    self.error = "scan timed out — mac may be unreachable"
                 }
             }
         }
