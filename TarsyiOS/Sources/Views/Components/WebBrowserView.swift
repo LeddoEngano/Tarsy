@@ -342,6 +342,7 @@ struct WebBrowserView: View {
                 engineType: activeEngineType,
                 workspacePath: workspace.localPath,
                 workspaceId: workspace.id.uuidString,
+                workspaceName: workspace.name,
                 aiContext: workspace.aiContext ?? "",
                 onSessionCreated: onSessionCreated,
                 todoManager: todoManager,
@@ -626,6 +627,7 @@ struct FullscreenWebBrowser: View {
     var engineType: AIEngineType
     var workspacePath: String
     var workspaceId: String = ""
+    var workspaceName: String = ""
     var aiContext: String
     var onSessionCreated: ((String) -> Void)?
     @ObservedObject var todoManager: VoiceTodoManager
@@ -882,6 +884,15 @@ struct FullscreenWebBrowser: View {
         3. Make reasonable assumptions and proceed.]
         """
         let fullMessage = voiceDirective + "\n\n<user-voice-input>\n" + transcription + "\n</user-voice-input>"
+
+        // Start Live Activity for voice command
+        if !workspaceId.isEmpty {
+            LiveActivityManager.shared.startActivity(
+                workspaceId: workspaceId,
+                workspaceName: workspaceName,
+                engineType: engineType
+            )
+        }
 
         if let sessionId = engineSessionId {
             connectionManager.send(WSPacket(

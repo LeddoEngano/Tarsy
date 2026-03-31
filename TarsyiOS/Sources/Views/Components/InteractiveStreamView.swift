@@ -82,6 +82,7 @@ struct InteractiveStreamView: View {
     var engineType: AIEngineType
     var workspacePath: String
     var workspaceId: String = ""
+    var workspaceName: String = ""
     var aiContext: String
     var onSessionCreated: ((String) -> Void)?
     @ObservedObject var todoManager: VoiceTodoManager
@@ -1035,6 +1036,15 @@ struct InteractiveStreamView: View {
         3. Make reasonable assumptions and proceed.]
         """
         let fullMessage = voiceDirective + "\n\n<user-voice-input>\n" + transcription + "\n</user-voice-input>"
+
+        // Start Live Activity for voice command
+        if !workspaceId.isEmpty {
+            LiveActivityManager.shared.startActivity(
+                workspaceId: workspaceId,
+                workspaceName: workspaceName,
+                engineType: engineType
+            )
+        }
 
         if let sessionId = engineSessionId {
             connectionManager.send(WSPacket(

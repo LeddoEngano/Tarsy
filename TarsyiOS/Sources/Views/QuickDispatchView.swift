@@ -124,6 +124,13 @@ struct QuickDispatchView: View {
 
         isSending = true
 
+        // Start Live Activity for dispatched task
+        LiveActivityManager.shared.startActivity(
+            workspaceId: ws.id.uuidString,
+            workspaceName: ws.name,
+            engineType: .claude
+        )
+
         // Send engineCreate with initial message — the macOS side will create the session
         connectionManager.send(WSPacket(
             action: .engineCreate,

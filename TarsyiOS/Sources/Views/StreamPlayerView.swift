@@ -278,6 +278,7 @@ struct StreamPlayerView: View {
                 engineType: activeEngineType,
                 workspacePath: workspace.localPath,
                 workspaceId: workspace.id.uuidString,
+                workspaceName: workspace.name,
                 aiContext: workspace.aiContext ?? "",
                 onSessionCreated: onSessionCreated,
                 todoManager: todoManager,
