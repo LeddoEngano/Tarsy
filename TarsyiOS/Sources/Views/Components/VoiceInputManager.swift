@@ -60,7 +60,9 @@ class VoiceInputManager: ObservableObject {
         SFSpeechRecognizer.requestAuthorization { [weak self] status in
             Task { @MainActor in
                 guard status == .authorized else {
+#if DEBUG
                     print("[Voice] Speech recognition not authorized: \(status.rawValue)")
+#endif
                     return
                 }
                 self?.committedText = ""
@@ -98,7 +100,9 @@ class VoiceInputManager: ObservableObject {
                 try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
                 try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
             } catch {
+#if DEBUG
                 print("[Voice] Audio session error: \(error)")
+#endif
                 return
             }
         }
@@ -152,7 +156,9 @@ class VoiceInputManager: ObservableObject {
                         }
                         return
                     }
+#if DEBUG
                     print("[Voice] Recognition error: \(error)")
+#endif
                     self.stopRecording()
                 }
             }
@@ -171,7 +177,9 @@ class VoiceInputManager: ObservableObject {
                 isRecording = true
                 transcription = ""
             } catch {
+#if DEBUG
                 print("[Voice] Audio engine error: \(error)")
+#endif
                 stopRecording()
             }
         } else {

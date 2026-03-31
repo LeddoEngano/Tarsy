@@ -447,7 +447,9 @@ struct InteractiveStreamView: View {
             Button("cancel", role: .cancel) { urlText = "" }
         }
         .onAppear {
+#if DEBUG
             print("[InteractiveStream] onAppear — fps=\(viewModel.fps) isConnected=\(viewModel.isConnected)")
+#endif
             requestHighQuality()
             setupVoiceTodoListener()
             if isWebMode {
@@ -458,7 +460,9 @@ struct InteractiveStreamView: View {
             }
         }
         .onDisappear {
+#if DEBUG
             print("[InteractiveStream] onDisappear — fps=\(viewModel.fps) isConnected=\(viewModel.isConnected)")
+#endif
             requestNormalQuality()
             stopAnalogScroll()
             voiceInput.stopRecording()
@@ -493,7 +497,9 @@ struct InteractiveStreamView: View {
     }
 
     private func requestHighQuality() {
+#if DEBUG
         print("[InteractiveStream] requestHighQuality — sending stream:start quality=high")
+#endif
         connectionManager.send(WSPacket(
             action: .streamStart,
             payload: ["quality": "high"]
@@ -501,7 +507,9 @@ struct InteractiveStreamView: View {
     }
 
     private func requestNormalQuality() {
+#if DEBUG
         print("[InteractiveStream] requestNormalQuality — sending stream:start quality=normal")
+#endif
         connectionManager.send(WSPacket(
             action: .streamStart,
             payload: ["quality": "normal"]

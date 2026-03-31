@@ -415,7 +415,9 @@ class H264Decoder: ObservableObject {
         lastFrameLock.unlock()
 
         guard let pb else {
+#if DEBUG
             print("[Screenshot] no decoded pixel buffer")
+#endif
             return nil
         }
 
@@ -424,10 +426,14 @@ class H264Decoder: ObservableObject {
         let w = CVPixelBufferGetWidth(pb)
         let h = CVPixelBufferGetHeight(pb)
         guard let cg = ctx.createCGImage(ci, from: CGRect(x: 0, y: 0, width: w, height: h)) else {
+#if DEBUG
             print("[Screenshot] CIContext.createCGImage failed")
+#endif
             return nil
         }
+#if DEBUG
         print("[Screenshot] captured \(w)x\(h)")
+#endif
         return UIImage(cgImage: cg)
     }
 

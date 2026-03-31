@@ -988,7 +988,9 @@ struct WebViewContainer: UIViewRepresentable {
             encodedContentRuleList: cspRuleListJSON
         ) { ruleList, error in
             if let error = error {
+#if DEBUG
                 print("[WebBrowser] CSP rule compilation error: \(error.localizedDescription)")
+#endif
             }
             DispatchQueue.main.async {
                 completion(ruleList)
@@ -1035,7 +1037,9 @@ struct WebViewContainer: UIViewRepresentable {
             }
 
             if url.scheme == "https" || url.scheme == "http" {
+#if DEBUG
                 print("[WebBrowser] Opening external URL: \(url.absoluteString)")
+#endif
                 UIApplication.shared.open(url)
                 decisionHandler(.cancel)
                 return

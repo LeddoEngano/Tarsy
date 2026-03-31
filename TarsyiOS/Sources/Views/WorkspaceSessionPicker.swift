@@ -211,7 +211,9 @@ struct WorkspaceSessionPicker: View {
                 showAgentPicker = true
             }
         } catch {
+#if DEBUG
             print("[SessionPicker] Load error: \(error)")
+#endif
         }
         isLoadingDetail = false
     }

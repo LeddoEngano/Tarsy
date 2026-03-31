@@ -254,7 +254,9 @@ struct ActiveSessionsView: View {
             selectedIds.removeAll()
             if visibleSessions.isEmpty { isEditing = false }
         } catch {
+#if DEBUG
             print("[ActiveSessions] Delete error: \(error)")
+#endif
         }
         isDeleting = false
     }
@@ -280,7 +282,9 @@ struct ActiveSessionsView: View {
             loadedSession = full
         } catch {
             loadedSession = session
+#if DEBUG
             print("[ActiveSessions] Load detail error: \(error)")
+#endif
         }
         isLoadingDetail = false
     }

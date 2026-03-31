@@ -61,7 +61,9 @@ class LiveActivityManager: ObservableObject {
             activities[activityKey] = activity
             startDates[activityKey] = now
         } catch {
+#if DEBUG
             print("[LiveActivity] Failed to start: \(error)")
+#endif
         }
     }
 
@@ -127,7 +129,9 @@ class LiveActivityManager: ObservableObject {
                     startedAt: activity.content.state.startedAt
                 )
                 Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 60)) }
+#if DEBUG
                 print("[LiveActivity] Ended orphaned system activity for workspace \(workspaceId)")
+#endif
             }
         }
     }
