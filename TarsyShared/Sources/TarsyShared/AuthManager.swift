@@ -59,7 +59,7 @@ public class AuthManager: ObservableObject {
 
     public func signOut() async {
         do {
-            try await supabase.auth.signOut()
+            try await supabase.auth.signOut(scope: .local)
             isAuthenticated = false
             currentUser = nil
         } catch {
