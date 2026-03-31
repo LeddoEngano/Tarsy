@@ -739,12 +739,12 @@ struct WorkspaceView: View {
                             .allowsHitTesting(viewMode == .stream)
                     }
                     .frame(maxWidth: .infinity)
-                    .frame(height: max(UIScreen.main.bounds.height, UIScreen.main.bounds.width) * 0.25)
+                    .frame(height: UIScreen.main.bounds.height * 0.35)
                     .clipped()
                 } else {
                     streamPlayerContent
                         .frame(maxWidth: .infinity)
-                        .frame(height: max(UIScreen.main.bounds.height, UIScreen.main.bounds.width) * 0.25)
+                        .frame(height: UIScreen.main.bounds.height * 0.35)
                         .clipped()
                 }
 
