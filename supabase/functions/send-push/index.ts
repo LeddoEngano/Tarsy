@@ -89,6 +89,7 @@ async function sendAPNs(
   title: string,
   body: string,
   token: string,
+  badgeCount: number,
   workspaceId?: string
 ): Promise<boolean> {
   try {
@@ -96,7 +97,7 @@ async function sendAPNs(
       aps: {
         alert: { title, body },
         sound: "default",
-        badge: 1,
+        badge: badgeCount,
       },
     };
     if (workspaceId) {
@@ -183,6 +184,10 @@ serve(async (req) => {
       return new Response(JSON.stringify({ sent: 0 }), { status: 200 });
     }
 
+    // Compute dynamic badge count (current unread + this new one)
+    const { data: currentUnread } = await supabase.rpc("get_total_unread_count", { p_user_id: record.user_id });
+    const badgeCount = (currentUnread ?? 0) + 1;
+
     // Generate APNs JWT
     console.log(`APNS_PRIVATE_KEY starts with: "${APNS_PRIVATE_KEY_B64.substring(0, 20)}" len=${APNS_PRIVATE_KEY_B64.length}`);
     const apnsToken = await generateAPNsToken();
@@ -195,6 +200,7 @@ serve(async (req) => {
         record.title,
         record.body,
         apnsToken,
+        badgeCount,
         record.workspace_id
       );
       if (success) sentCount++;
