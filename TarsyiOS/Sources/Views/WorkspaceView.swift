@@ -62,7 +62,7 @@ struct WorkspaceView: View {
     private var detectedAgents: [AIEngineType] {
         connectionManager.detectedAgents.isEmpty ? [.claude] : connectionManager.detectedAgents
     }
-    @State private var viewMode: ViewMode = .browser
+    @State private var viewMode: ViewMode = .stream
     @State private var showSessionPicker = false
     @State private var showCommitConfirmation = false
     @State private var isFullscreenStream = false
