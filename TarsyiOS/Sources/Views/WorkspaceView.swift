@@ -281,6 +281,7 @@ struct WorkspaceView: View {
             // Activities end naturally via engineComplete/engineError packets.
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
+            guard isInputFocused else { return }
             let info = notification.userInfo
             let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.3
             let curveRaw = (info?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt) ?? 7
@@ -295,6 +296,7 @@ struct WorkspaceView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { notification in
+            guard keyboardHeight > 0 else { return }
             let info = notification.userInfo
             let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.3
             let curveRaw = (info?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt) ?? 7
@@ -704,50 +706,50 @@ struct WorkspaceView: View {
 
     private var standardLayout: some View {
         VStack(spacing: 0) {
-            // Stream area — collapses when keyboard is up
-            if keyboardHeight == 0 {
-                if workspace.stack == .web || workspace.stack == .fullstack {
-                    ZStack {
-                        WebBrowserView(
-                            workspace: workspace,
-                            onScreenshot: { image in
-                                let data = image.jpegData(compressionQuality: 0.8)
-                                attachments.append(Attachment(
-                                    name: "screenshot",
-                                    type: .image,
-                                    thumbnail: image,
-                                    data: data
-                                ))
-                            },
-                            activeSessionId: activeSessionIdBinding,
-                            activeEngineType: currentTab.engineType ?? .claude,
-                            onSessionCreated: handleSessionCreated,
-                            todoManager: todoManager,
-                            interactiveQuestions: $interactiveQuestions,
-                            interactiveOptions: $interactiveOptions,
-                            onInteractiveChoice: { sendInteractiveChoice($0) },
-                            onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) },
-                            onVoiceMessage: { persistVoiceMessage($0) },
-                            isFullscreen: $isFullscreenBrowser,
-                            isActive: $isBrowserActive
-                        )
-                        .opacity(viewMode == .browser ? 1 : 0)
-                        .allowsHitTesting(viewMode == .browser)
+            // Stream area — collapses (but stays in hierarchy) when chat input is focused
+            if workspace.stack == .web || workspace.stack == .fullstack {
+                ZStack {
+                    WebBrowserView(
+                        workspace: workspace,
+                        onScreenshot: { image in
+                            let data = image.jpegData(compressionQuality: 0.8)
+                            attachments.append(Attachment(
+                                name: "screenshot",
+                                type: .image,
+                                thumbnail: image,
+                                data: data
+                            ))
+                        },
+                        activeSessionId: activeSessionIdBinding,
+                        activeEngineType: currentTab.engineType ?? .claude,
+                        onSessionCreated: handleSessionCreated,
+                        todoManager: todoManager,
+                        interactiveQuestions: $interactiveQuestions,
+                        interactiveOptions: $interactiveOptions,
+                        onInteractiveChoice: { sendInteractiveChoice($0) },
+                        onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) },
+                        onVoiceMessage: { persistVoiceMessage($0) },
+                        isFullscreen: $isFullscreenBrowser,
+                        isActive: $isBrowserActive
+                    )
+                    .opacity(viewMode == .browser ? 1 : 0)
+                    .allowsHitTesting(viewMode == .browser)
 
-                        streamPlayerContent
-                            .opacity(viewMode == .stream ? 1 : 0)
-                            .allowsHitTesting(viewMode == .stream)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: UIScreen.main.bounds.height * 0.35)
-                    .clipped()
-                } else {
                     streamPlayerContent
-                        .frame(maxWidth: .infinity)
-                        .frame(height: UIScreen.main.bounds.height * 0.35)
-                        .clipped()
+                        .opacity(viewMode == .stream ? 1 : 0)
+                        .allowsHitTesting(viewMode == .stream)
                 }
+                .frame(maxWidth: .infinity)
+                .frame(height: keyboardHeight == 0 ? UIScreen.main.bounds.height * 0.35 : 0)
+                .clipped()
+            } else {
+                streamPlayerContent
+                    .frame(maxWidth: .infinity)
+                    .frame(height: keyboardHeight == 0 ? UIScreen.main.bounds.height * 0.35 : 0)
+                    .clipped()
+            }
 
+            if keyboardHeight == 0 {
                 // Tabs bar
                 tabBar
 
