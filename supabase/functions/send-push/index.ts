@@ -185,11 +185,13 @@ serve(async (req) => {
     }
 
     // Compute dynamic badge count (current unread + this new one)
-    const { data: currentUnread } = await supabase.rpc("get_total_unread_count", { p_user_id: record.user_id });
+    const { data: currentUnread, error: countError } = await supabase.rpc("get_total_unread_count", { p_user_id: record.user_id });
+    if (countError) {
+      console.error(`Failed to get unread count: ${countError.message}`);
+    }
     const badgeCount = (currentUnread ?? 0) + 1;
 
     // Generate APNs JWT
-    console.log(`APNS_PRIVATE_KEY starts with: "${APNS_PRIVATE_KEY_B64.substring(0, 20)}" len=${APNS_PRIVATE_KEY_B64.length}`);
     const apnsToken = await generateAPNsToken();
 
     // Send to all devices
@@ -220,6 +222,6 @@ serve(async (req) => {
     const errorMsg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     const stack = err instanceof Error ? err.stack : "";
     console.error("Edge function error:", errorMsg, stack);
-    return new Response(JSON.stringify({ error: errorMsg, stack: stack?.split("\n").slice(0, 3) }), { status: 500 });
+    return new Response(JSON.stringify({ error: "Internal server error" }), { status: 500 });
   }
 });

@@ -22,9 +22,11 @@ RETURNS TABLE(workspace_id uuid, unread_count bigint) AS $$
     AND pn.sent = true
     AND pn.workspace_id IS NOT NULL
   GROUP BY pn.workspace_id;
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+$$ LANGUAGE sql SECURITY INVOKER STABLE;
 
 -- Returns total unread count for a user (for APNs badge number)
+-- SECURITY INVOKER: RLS applies, so authenticated users can only count their own rows.
+-- The edge function uses service_role which bypasses RLS, so the p_user_id filter still works.
 CREATE OR REPLACE FUNCTION get_total_unread_count(p_user_id uuid)
 RETURNS integer AS $$
   SELECT coalesce(count(*), 0)::integer
@@ -32,4 +34,4 @@ RETURNS integer AS $$
   WHERE user_id = p_user_id
     AND read_at IS NULL
     AND sent = true;
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+$$ LANGUAGE sql SECURITY INVOKER STABLE;
