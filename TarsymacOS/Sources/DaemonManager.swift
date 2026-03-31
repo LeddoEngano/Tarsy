@@ -393,7 +393,10 @@ class DaemonManager: ObservableObject {
         event: String = "update",
         alert: [String: String]? = nil
     ) {
+        // Capture all state values NOW before any cleanup can delete them
         guard let wsId = sessionWorkspaceId[sessionId] else { return }
+        let startedAt = sessionStartTimes[sessionId] ?? Date().timeIntervalSince1970
+        let contextPct = sessionContextPercent[sessionId] ?? 0
 
         let now = Date()
         if event == "update", status != "waiting",
@@ -407,10 +410,13 @@ class DaemonManager: ObservableObject {
             "status": status,
             "currentTool": toolName,
             "currentToolIcon": toolIcon,
-            "startedAt": sessionStartTimes[sessionId] ?? now.timeIntervalSince1970,
-            "contextPercent": sessionContextPercent[sessionId] ?? 0
+            "startedAt": startedAt,
+            "contextPercent": contextPct
         ]
         if let message { contentState["message"] = message }
+
+        // For "end" events, clean up state AFTER push is sent (not before)
+        let shouldCleanup = (event == "end")
 
         Task {
             await PushNotificationService.shared.sendLiveActivityUpdate(
@@ -419,6 +425,9 @@ class DaemonManager: ObservableObject {
                 event: event,
                 alert: alert
             )
+            if shouldCleanup {
+                await MainActor.run { self.cleanupLAState(sessionId: sessionId) }
+            }
         }
     }
 
@@ -2314,9 +2323,8 @@ class DaemonManager: ObservableObject {
                             let packet = WSPacket(action: .engineComplete, payload: payload)
                             self.sessionLastEvent[sid] = packet
                             await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
-                            // Push Live Activity end
+                            // Push Live Activity end (cleanup happens inside sendLAPush after push completes)
                             self.sendLAPush(sessionId: sid, status: "completed", toolName: "Done", toolIcon: "checkmark.circle", event: "end", alert: ["title": "Tarsy", "body": "Agent task completed"])
-                            self.cleanupLAState(sessionId: sid)
                             PushNotificationService.shared.notifyTaskComplete(
                                 workspace: workspaceName,
                                 summary: String(message.prefix(200)),
@@ -2434,7 +2442,6 @@ class DaemonManager: ObservableObject {
                         self.sessionLastEvent[sid] = packet
                         await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                         self.sendLAPush(sessionId: sid, status: "completed", toolName: "Done", toolIcon: "checkmark.circle", event: "end", alert: ["title": "Tarsy", "body": "Agent task completed"])
-                        self.cleanupLAState(sessionId: sid)
                         await UltraContextSync.shared.engineCompleted(sessionId: sid, summary: message)
                     }
                 },
