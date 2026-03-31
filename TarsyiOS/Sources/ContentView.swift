@@ -97,6 +97,27 @@ struct ContentView: View {
                 // Re-request workspace state so UI syncs after reconnection
                 connectionManager?.send(WSPacket(action: .workspaceList))
             }
+
+            // Global listener for Live Activity updates — runs even when WorkspaceView is not on screen.
+            // This catches engineComplete/engineError replayed on reconnect so activities don't stay stuck.
+            connectionManager.addListener("live-activity-global") { packet in
+                Task { @MainActor in
+                    switch packet.action {
+                    case .engineComplete, .claudeComplete:
+                        let wsId = packet.payload?["workspaceId"] ?? ""
+                        if !wsId.isEmpty {
+                            LiveActivityManager.shared.endActivity(workspaceId: wsId)
+                        }
+                    case .engineError:
+                        let wsId = packet.payload?["workspaceId"] ?? ""
+                        if !wsId.isEmpty {
+                            LiveActivityManager.shared.endActivity(workspaceId: wsId, status: "error")
+                        }
+                    default:
+                        break
+                    }
+                }
+            }
         }
         .alert("Administrator Password", isPresented: $showSudoAlert) {
             SecureField("Password", text: $sudoPassword)
