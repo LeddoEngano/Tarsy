@@ -2309,7 +2309,9 @@ class DaemonManager: ObservableObject {
                     onComplete: { [weak self] (message: String) in
                         Task { @MainActor in
                             guard let self else { return }
-                            let packet = WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": "claude"])
+                            var payload = ["sessionId": sid, "message": message, "engineType": "claude"]
+                            if let wsIdStr { payload["workspaceId"] = wsIdStr }
+                            let packet = WSPacket(action: .engineComplete, payload: payload)
                             self.sessionLastEvent[sid] = packet
                             await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                             // Push Live Activity end
@@ -2426,7 +2428,9 @@ class DaemonManager: ObservableObject {
                 onComplete: { [weak self] (message: String) in
                     Task { @MainActor in
                         guard let self else { return }
-                        let packet = WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": engineTypeRaw])
+                        var genPayload = ["sessionId": sid, "message": message, "engineType": engineTypeRaw]
+                        if let wsIdStr { genPayload["workspaceId"] = wsIdStr }
+                        let packet = WSPacket(action: .engineComplete, payload: genPayload)
                         self.sessionLastEvent[sid] = packet
                         await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                         self.sendLAPush(sessionId: sid, status: "completed", toolName: "Done", toolIcon: "checkmark.circle", event: "end", alert: ["title": "Tarsy", "body": "Agent task completed"])
