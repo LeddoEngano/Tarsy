@@ -47,7 +47,7 @@ targets:
           - CFBundleURLSchemes:
               - com.tarsy.ios
         NSSupportsLiveActivities: true
-        ITSAppUsesNonExemptEncryption: true
+        ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     entitlements:
