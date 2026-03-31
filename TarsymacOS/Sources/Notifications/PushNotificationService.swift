@@ -75,6 +75,25 @@ class PushNotificationService {
 
     // MARK: - Live Activity Push Updates
 
+    /// Encodable wrapper for Live Activity push payloads
+    private struct LAUpdateBody: Encodable {
+        let user_id: String
+        let workspace_id: String
+        let content_state: LAContentState
+        let event: String
+        let alert: [String: String]?
+        let dismissal_date: Int?
+    }
+
+    private struct LAContentState: Encodable {
+        let status: String
+        let currentTool: String
+        let currentToolIcon: String
+        let startedAt: Double
+        let contextPercent: Double
+        let message: String?
+    }
+
     func sendLiveActivityUpdate(
         workspaceId: String,
         contentState: [String: Any],
@@ -83,20 +102,28 @@ class PushNotificationService {
     ) async {
         do {
             let userId = try await supabase.auth.session.user.id.uuidString
-            var body: [String: Any] = [
-                "user_id": userId,
-                "workspace_id": workspaceId,
-                "content_state": contentState,
-                "event": event
-            ]
-            if let alert { body["alert"] = alert }
-            if event == "end" {
-                body["dismissal_date"] = Int(Date().timeIntervalSince1970) + 60
-            }
-            let jsonData = try JSONSerialization.data(withJSONObject: body)
+
+            let state = LAContentState(
+                status: contentState["status"] as? String ?? "running",
+                currentTool: contentState["currentTool"] as? String ?? "Working",
+                currentToolIcon: contentState["currentToolIcon"] as? String ?? "wrench",
+                startedAt: contentState["startedAt"] as? Double ?? Date().timeIntervalSince1970,
+                contextPercent: contentState["contextPercent"] as? Double ?? 0,
+                message: contentState["message"] as? String
+            )
+
+            let body = LAUpdateBody(
+                user_id: userId,
+                workspace_id: workspaceId,
+                content_state: state,
+                event: event,
+                alert: alert,
+                dismissal_date: event == "end" ? Int(Date().timeIntervalSince1970) + 60 : nil
+            )
+
             try await supabase.functions.invoke(
                 "update-live-activity",
-                options: .init(body: jsonData)
+                options: .init(body: body)
             )
         } catch {
             print("[Push] Live Activity update failed: \(error)")
