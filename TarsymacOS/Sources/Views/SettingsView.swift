@@ -1,5 +1,6 @@
 import SwiftUI
 import TarsyShared
+import AuthenticationServices
 
 private enum Theme {
     static let bg = Color(hex: "1a1a1a")
@@ -19,6 +20,11 @@ struct SettingsView: View {
     @EnvironmentObject var daemonManager: DaemonManager
     @State private var email = ""
     @State private var password = ""
+    @State private var confirmPassword = ""
+    @State private var isSignUp = false
+    @State private var showEmailForm = false
+    @State private var showPassword = false
+    @State private var appleSignInDelegate: AppleSignInDelegate?
     @State private var showDeleteConfirmation = false
     @State private var deleteConfirmText = ""
     @State private var isDeleting = false
@@ -34,7 +40,12 @@ struct SettingsView: View {
             connectionTab
                 .tabItem { Label("Connection", systemImage: "network") }
         }
-        .frame(width: 420, height: 340)
+        .frame(width: 420, height: 380)
+        .onChange(of: authManager.isAuthenticated) { _, isAuth in
+            if isAuth && !daemonManager.isRunning {
+                Task { await daemonManager.start() }
+            }
+        }
     }
 
     // MARK: - Account
@@ -98,7 +109,10 @@ struct SettingsView: View {
             // Actions
             VStack(spacing: 12) {
                 settingsButton(label: "Sign Out", icon: "rectangle.portrait.and.arrow.right") {
-                    Task { await authManager.signOut() }
+                    Task {
+                        daemonManager.stop()
+                        await authManager.signOut()
+                    }
                 }
 
                 HStack(spacing: 12) {
@@ -152,46 +166,241 @@ struct SettingsView: View {
     }
 
     private var signInView: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 0) {
             Spacer()
 
-            Text("sign in")
-                .font(.system(size: 16, weight: .bold, design: .monospaced))
-                .foregroundColor(Theme.textPrimary)
+            VStack(spacing: 6) {
+                Text("sign in")
+                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
 
-            VStack(spacing: 10) {
-                styledTextField("email", text: $email)
-                styledSecureField("password", text: $password)
-            }
-            .padding(.horizontal, 40)
-
-            if let error = authManager.errorMessage {
-                Text(error)
+                Text("sign in to connect your devices")
                     .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(Theme.terracotta)
-                    .padding(.horizontal, 40)
+                    .foregroundColor(Theme.textSecondary)
             }
+            .padding(.bottom, 16)
 
-            Button {
-                Task { await authManager.signIn(email: email, password: password) }
-            } label: {
-                Text("Sign In")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(Theme.bg)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(email.isEmpty || password.isEmpty ? Theme.textMuted : Theme.amber)
-                    )
+            if showEmailForm {
+                VStack(spacing: 8) {
+                    signInEmailForm
+
+                    signInSubmitButton
+                        .padding(.top, 6)
+
+                    signInToggle
+
+                    Button(action: {
+                        withAnimation(.easeInOut(duration: 0.2)) { showEmailForm = false }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 9, weight: .medium))
+                            Text("back")
+                                .font(.system(size: 11, design: .monospaced))
+                        }
+                        .foregroundColor(Theme.textMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .pointerOnHover()
+                    .padding(.top, 2)
+                }
+                .frame(maxWidth: 300)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else {
+                VStack(spacing: 8) {
+                    signInOAuthButtons
+
+                    oauthButton(
+                        icon: "envelope",
+                        label: "Sign in with Email",
+                        isSystemImage: true
+                    ) {
+                        withAnimation(.easeInOut(duration: 0.2)) { showEmailForm = true }
+                    }
+                }
+                .frame(maxWidth: 300)
+                .transition(.move(edge: .leading).combined(with: .opacity))
             }
-            .buttonStyle(.plain)
-            .pointerOnHover()
-            .disabled(email.isEmpty || password.isEmpty)
-            .padding(.horizontal, 40)
 
             Spacer()
         }
+    }
+
+    private var signInOAuthButtons: some View {
+        VStack(spacing: 8) {
+            oauthButton(
+                icon: "apple.logo",
+                label: "Sign in with Apple",
+                isSystemImage: true
+            ) {
+                let provider = ASAuthorizationAppleIDProvider()
+                let request = provider.createRequest()
+                let nonce = authManager.generateNonce()
+                request.requestedScopes = [.email, .fullName]
+                request.nonce = authManager.sha256(nonce)
+                let delegate = AppleSignInDelegate { result in
+                    Task { await authManager.handleAppleSignIn(result: result) }
+                }
+                appleSignInDelegate = delegate
+                let controller = ASAuthorizationController(authorizationRequests: [request])
+                controller.delegate = delegate
+                controller.performRequests()
+            }
+
+            oauthButton(
+                icon: "GitHubIcon",
+                label: "Sign in with GitHub",
+                isSystemImage: false
+            ) {
+                Task { await authManager.signInWithGitHub() }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func oauthButton(icon: String, label: String, isSystemImage: Bool, action: @escaping () -> Void) -> some View {
+        OAuthButtonView(icon: icon, label: label, isSystemImage: isSystemImage, action: action)
+    }
+
+    private var signInEmailForm: some View {
+        VStack(spacing: 8) {
+            signInStyledTextField("email", text: $email)
+            signInStyledSecureField("password", text: $password)
+
+            if isSignUp {
+                signInStyledSecureField("confirm password", text: $confirmPassword)
+
+                if !confirmPassword.isEmpty && confirmPassword != password {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 10))
+                        Text("passwords don't match")
+                            .font(.system(size: 11, design: .monospaced))
+                    }
+                    .foregroundColor(Theme.terracotta)
+                    .padding(.top, 2)
+                }
+            }
+
+            if let error = authManager.errorMessage {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                    Text(error)
+                        .font(.system(size: 11, design: .monospaced))
+                }
+                .foregroundColor(Theme.terracotta)
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    private var signInSubmitButton: some View {
+        Button(action: {
+            Task {
+                if isSignUp {
+                    await authManager.signUp(email: email, password: password)
+                } else {
+                    await authManager.signIn(email: email, password: password)
+                }
+            }
+        }) {
+            HStack(spacing: 6) {
+                if authManager.isLoading {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 14, height: 14)
+                }
+                Text(isSignUp ? "create account" : "sign in")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+            }
+            .foregroundColor(Theme.bg)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(signInSubmitDisabled ? Theme.textMuted : Theme.amber)
+            )
+        }
+        .buttonStyle(.plain)
+        .pointerOnHover()
+        .disabled(signInSubmitDisabled || authManager.isLoading)
+    }
+
+    private var signInSubmitDisabled: Bool {
+        if email.isEmpty || password.isEmpty { return true }
+        if isSignUp && confirmPassword != password { return true }
+        return false
+    }
+
+    private var signInToggle: some View {
+        Button(action: { isSignUp.toggle() }) {
+            Text(isSignUp ? "already have an account? sign in" : "no account? sign up")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(Theme.textMuted)
+        }
+        .buttonStyle(.plain)
+        .pointerOnHover()
+    }
+
+    private func signInStyledTextField(_ placeholder: String, text: Binding<String>) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "envelope")
+                .font(.system(size: 12))
+                .foregroundColor(Theme.textMuted)
+                .frame(width: 16)
+            TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
+                .textFieldStyle(.plain)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Theme.textPrimary)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Theme.bgField)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Theme.border, lineWidth: 1)
+                )
+        )
+    }
+
+    private func signInStyledSecureField(_ placeholder: String, text: Binding<String>) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "lock")
+                .font(.system(size: 12))
+                .foregroundColor(Theme.textMuted)
+                .frame(width: 16)
+
+            if showPassword {
+                TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
+            } else {
+                SecureField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
+            }
+
+            Button(action: { showPassword.toggle() }) {
+                Image(systemName: showPassword ? "eye.slash" : "eye")
+                    .font(.system(size: 11))
+                    .foregroundColor(Theme.textMuted)
+            }
+            .buttonStyle(.plain)
+            .pointerOnHover()
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Theme.bgField)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Theme.border, lineWidth: 1)
+                )
+        )
     }
 
     // MARK: - Connection
@@ -270,39 +479,6 @@ struct SettingsView: View {
             .underline(color: Theme.textMuted.opacity(0.5))
     }
 
-    private func styledTextField(_ placeholder: String, text: Binding<String>) -> some View {
-        TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
-            .font(.system(size: 12, design: .monospaced))
-            .foregroundColor(Theme.textPrimary)
-            .textFieldStyle(.plain)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Theme.bgField)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Theme.border, lineWidth: 1)
-                    )
-            )
-    }
-
-    private func styledSecureField(_ placeholder: String, text: Binding<String>) -> some View {
-        SecureField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
-            .font(.system(size: 12, design: .monospaced))
-            .foregroundColor(Theme.textPrimary)
-            .textFieldStyle(.plain)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Theme.bgField)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Theme.border, lineWidth: 1)
-                    )
-            )
-    }
 
     private var initials: String {
         let email = authManager.currentUser?.email ?? ""

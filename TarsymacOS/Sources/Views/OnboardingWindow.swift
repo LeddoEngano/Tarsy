@@ -903,7 +903,7 @@ struct OnboardingWindow: View {
 
 // MARK: - OAuth Button
 
-private struct OAuthButtonView: View {
+struct OAuthButtonView: View {
     let icon: String
     let label: String
     let isSystemImage: Bool
