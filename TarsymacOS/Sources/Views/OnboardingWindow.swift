@@ -35,10 +35,18 @@ struct OnboardingWindow: View {
     }
 
     enum PermissionSubStep: Int, CaseIterable {
-        case screenRecording = 0
-        case accessibility = 1
-        case filesAndFolders = 2
-        case automation = 3
+        case screenRecording
+        case accessibility
+        case filesAndFolders
+        case automation
+    }
+
+    struct PermissionInfo {
+        let icon: String
+        let title: String
+        let why: String
+        let isGranted: Bool
+        let settingsKey: String?
     }
 
     var body: some View {
@@ -82,7 +90,7 @@ struct OnboardingWindow: View {
             }
         }
         .onChange(of: step) { _, newStep in
-            if newStep == .ready {
+            if newStep == .ready && !daemonManager.isRunning {
                 Task { await daemonManager.start() }
             }
         }
@@ -403,35 +411,36 @@ struct OnboardingWindow: View {
     @State private var hasAccessibility = false
     @State private var hasFilesAccess = false
     @State private var hasAutomation = false
-    @State private var isCheckingPermissions = false
     @State private var permissionSubStep: PermissionSubStep = .screenRecording
 
     private var allPermissionsGranted: Bool {
         hasScreenRecording && hasAccessibility && hasFilesAccess && hasAutomation
     }
 
+    private var totalPermissions: Int { PermissionSubStep.allCases.count }
+
     private var grantedCount: Int {
         [hasScreenRecording, hasAccessibility, hasFilesAccess, hasAutomation].filter { $0 }.count
     }
 
-    private func permissionInfo(for subStep: PermissionSubStep) -> (icon: String, title: String, why: String, isGranted: Bool, settingsKey: String?) {
+    private func permissionInfo(for subStep: PermissionSubStep) -> PermissionInfo {
         switch subStep {
         case .screenRecording:
-            return ("rectangle.dashed.badge.record", "screen recording",
-                    "tarsy streams your mac screen to your iphone so you can see and control it remotely.",
-                    hasScreenRecording, "Privacy_ScreenCapture")
+            return PermissionInfo(icon: "rectangle.dashed.badge.record", title: "screen recording",
+                    why: "tarsy streams your mac screen to your iphone so you can see and control it remotely.",
+                    isGranted: hasScreenRecording, settingsKey: "Privacy_ScreenCapture")
         case .accessibility:
-            return ("hand.tap", "accessibility",
-                    "tarsy needs accessibility access to move windows, type, and handle remote input from your iphone.",
-                    hasAccessibility, "Privacy_Accessibility")
+            return PermissionInfo(icon: "hand.tap", title: "accessibility",
+                    why: "tarsy needs accessibility access to move windows, type, and handle remote input from your iphone.",
+                    isGranted: hasAccessibility, settingsKey: "Privacy_Accessibility")
         case .filesAndFolders:
-            return ("folder", "files and folders",
-                    "tarsy scans your project directories to list repos and provide file context to AI agents.",
-                    hasFilesAccess, "Privacy_FilesAndFolders")
+            return PermissionInfo(icon: "folder", title: "files and folders",
+                    why: "tarsy scans your project directories to list repos and provide file context to AI agents.",
+                    isGranted: hasFilesAccess, settingsKey: "Privacy_FilesAndFolders")
         case .automation:
-            return ("gearshape.2", "automation",
-                    "tarsy uses apple events to control browser tabs so it can manage dev server previews remotely.",
-                    hasAutomation, nil)
+            return PermissionInfo(icon: "gearshape.2", title: "automation",
+                    why: "tarsy uses apple events to control browser tabs so it can manage dev server previews remotely.",
+                    isGranted: hasAutomation, settingsKey: nil)
         }
     }
 
@@ -463,77 +472,108 @@ struct OnboardingWindow: View {
         return VStack(spacing: 0) {
             Spacer()
 
-            // Icon
-            ZStack {
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(info.isGranted ? Theme.moss.opacity(0.1) : Theme.amber.opacity(0.1))
-                    .frame(width: 64, height: 64)
-                Image(systemName: info.isGranted ? "checkmark" : info.icon)
-                    .font(.system(size: info.isGranted ? 22 : 26, weight: info.isGranted ? .bold : .regular))
-                    .foregroundColor(info.isGranted ? Theme.moss : Theme.amber)
-            }
-            .padding(.bottom, 16)
-
-            // Title
-            Text(info.title)
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
-                .foregroundColor(Theme.textPrimary)
-                .padding(.bottom, 4)
-
-            // Step indicator
-            Text("step \(permissionSubStep.rawValue + 1) of 4")
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundColor(Theme.textMuted)
-                .padding(.bottom, 14)
-
-            // Why explanation
-            Text(info.why)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-                .frame(maxWidth: 340)
-                .padding(.bottom, 20)
-
-            // Progress bar
-            permissionsProgressBar
-                .padding(.horizontal, 60)
-                .padding(.bottom, 24)
-
-            // Grant button or granted indicator
-            if info.isGranted {
-                HStack(spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14))
-                    Text("granted")
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+            // Permission content with crossfade between sub-steps
+            VStack(spacing: 0) {
+                // Icon
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16)
+                        .fill(info.isGranted ? Theme.moss.opacity(0.1) : Theme.amber.opacity(0.1))
+                        .frame(width: 64, height: 64)
+                    Image(systemName: info.isGranted ? "checkmark" : info.icon)
+                        .font(.system(size: info.isGranted ? 22 : 26, weight: info.isGranted ? .bold : .regular))
+                        .foregroundColor(info.isGranted ? Theme.moss : Theme.amber)
                 }
-                .foregroundColor(Theme.moss)
-            } else {
-                Button(action: { grantCurrentPermission() }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "lock.open")
-                            .font(.system(size: 11))
-                        Text("grant permission")
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .padding(.bottom, 16)
+
+                // Title
+                Text(info.title)
+                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
+                    .padding(.bottom, 4)
+
+                // Step indicator
+                Text("step \(permissionSubStep.rawValue + 1) of \(totalPermissions)")
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(Theme.textMuted)
+                    .padding(.bottom, 14)
+
+                // Why explanation
+                Text(info.why)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+                    .frame(maxWidth: 340)
+                    .padding(.bottom, 20)
+
+                // Progress bar
+                permissionsProgressBar
+                    .padding(.horizontal, 60)
+                    .padding(.bottom, 24)
+
+                // Grant button or granted indicator
+                if info.isGranted {
+                    VStack(spacing: 10) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .font(.system(size: 14))
+                            Text("granted")
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        }
+                        .foregroundColor(Theme.moss)
+
+                        Button(action: { advanceToNextUngranted() }) {
+                            HStack(spacing: 5) {
+                                Text(allPermissionsGranted ? "continue" : "next")
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                Image(systemName: "arrow.right")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundColor(Theme.textSecondary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Theme.border, lineWidth: 1)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .pointerOnHover()
                     }
-                    .foregroundColor(Theme.bg)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 11)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8).fill(Theme.amber)
-                    )
+                } else {
+                    Button(action: { grantCurrentPermission() }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "lock.open")
+                                .font(.system(size: 11))
+                            Text("grant permission")
+                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        }
+                        .foregroundColor(Theme.bg)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 11)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8).fill(Theme.amber)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .pointerOnHover()
                 }
-                .buttonStyle(.plain)
-                .pointerOnHover()
             }
+            .id(permissionSubStep)
+            .transition(.opacity)
 
             // Dot indicators
             HStack(spacing: 8) {
                 ForEach(PermissionSubStep.allCases, id: \.self) { subStep in
+                    let granted: Bool = switch subStep {
+                    case .screenRecording: hasScreenRecording
+                    case .accessibility: hasAccessibility
+                    case .filesAndFolders: hasFilesAccess
+                    case .automation: hasAutomation
+                    }
                     Circle()
                         .fill(subStep == permissionSubStep ? Theme.amber :
-                              permissionInfo(for: subStep).isGranted ? Theme.moss : Theme.border)
+                              granted ? Theme.moss : Theme.border)
                         .frame(width: 6, height: 6)
                 }
             }
@@ -549,10 +589,13 @@ struct OnboardingWindow: View {
             // Poll every 2s for permission changes
             while !Task.isCancelled && !allPermissionsGranted {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
+                guard !Task.isCancelled else { break }
                 await checkPermissionsAsync()
                 if allPermissionsGranted {
                     withAnimation(.easeInOut(duration: 0.2)) { step = .ready }
-                } else {
+                } else if permissionInfo(for: permissionSubStep).isGranted {
+                    // Only auto-advance when the current step becomes granted,
+                    // not on arbitrary changes — avoids jarring jumps while user is in System Preferences
                     advanceToNextUngranted()
                 }
             }
@@ -562,7 +605,7 @@ struct OnboardingWindow: View {
     private var permissionsProgressBar: some View {
         VStack(spacing: 6) {
             HStack {
-                Text("\(grantedCount) of 4 granted")
+                Text("\(grantedCount) of \(totalPermissions) granted")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(allPermissionsGranted ? Theme.moss : Theme.textSecondary)
                 Spacer()
@@ -576,7 +619,7 @@ struct OnboardingWindow: View {
 
                     RoundedRectangle(cornerRadius: 2)
                         .fill(allPermissionsGranted ? Theme.moss : Theme.amber)
-                        .frame(width: geo.size.width * CGFloat(grantedCount) / 4.0, height: 3)
+                        .frame(width: geo.size.width * CGFloat(grantedCount) / CGFloat(totalPermissions), height: 3)
                         .animation(.easeInOut(duration: 0.3), value: grantedCount)
                 }
             }
@@ -588,7 +631,7 @@ struct OnboardingWindow: View {
         NSApp.activate(ignoringOtherApps: true)
 
         // Run a harmless AppleScript targeting System Events to trigger the macOS permission dialog
-        DispatchQueue.global(qos: .userInitiated).async {
+        Task.detached(priority: .userInitiated) {
             var error: NSDictionary?
             let script = NSAppleScript(source: """
                 tell application "System Events"
@@ -598,7 +641,7 @@ struct OnboardingWindow: View {
             let result = script?.executeAndReturnError(&error)
             let succeeded = result != nil && error == nil
 
-            DispatchQueue.main.async {
+            await MainActor.run {
                 hasAutomation = succeeded
             }
         }
@@ -612,8 +655,6 @@ struct OnboardingWindow: View {
     }
 
     private func checkPermissionsAsync() async {
-        isCheckingPermissions = true
-
         do {
             let _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             hasScreenRecording = true
@@ -624,7 +665,6 @@ struct OnboardingWindow: View {
         hasAccessibility = AXIsProcessTrusted()
         hasFilesAccess = preAccessDirectories()
         hasAutomation = checkAutomationPermission()
-        isCheckingPermissions = false
     }
 
     private func preAccessDirectories() -> Bool {
