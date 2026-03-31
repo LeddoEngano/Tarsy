@@ -29,19 +29,12 @@ class LiveActivityManager: ObservableObject {
     // MARK: - Public API
 
     func startActivity(workspaceId: String, workspaceName: String, engineType: AIEngineType, tabId: String? = nil) {
-        print("[LA] startActivity wsId=\(workspaceId.prefix(8)) tab=\(tabId ?? "nil") engine=\(engineType.rawValue)")
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
-            print("[LA] ❌ Activities NOT enabled on device")
-            return
-        }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
 
         let activityKey = key(workspaceId: workspaceId, tabId: tabId)
 
         // Don't create duplicate
-        if activities[activityKey] != nil {
-            print("[LA] ⚠️ Duplicate — activity already exists for key=\(activityKey.prefix(16))")
-            return
-        }
+        if activities[activityKey] != nil { return }
 
         // Clean up zombie activities from previous sessions before creating new one
         let knownIds = Set(activities.values.map(\.id))
@@ -73,30 +66,25 @@ class LiveActivityManager: ObservableObject {
             activities[activityKey] = activity
             startDates[activityKey] = now
             contextPercents[activityKey] = 0
-            print("[LA] ✅ Activity STARTED id=\(activity.id) key=\(activityKey.prefix(16)) pushType=token")
 
             // Observe push token updates and store in Supabase for APNs Live Activity pushes
             Task {
                 for await tokenData in activity.pushTokenUpdates {
                     let token = tokenData.map { String(format: "%02x", $0) }.joined()
-                    print("[LA] 🔑 Push token received: \(token.prefix(16))... for ws=\(workspaceId.prefix(8))")
                     await self.storeLiveActivityToken(token, workspaceId: workspaceId)
                 }
-                print("[LA] pushTokenUpdates stream ended for key=\(activityKey.prefix(16))")
             }
         } catch {
-            print("[LA] ❌ Failed to start activity: \(error)")
+#if DEBUG
+            print("[LiveActivity] Failed to start: \(error)")
+#endif
         }
     }
 
     func updateTool(workspaceId: String, tool: AgentToolType, tabId: String? = nil, contextPercent: Double? = nil) {
         let activityKey = key(workspaceId: workspaceId, tabId: tabId)
         guard let activity = activities[activityKey],
-              let startDate = startDates[activityKey] else {
-            print("[LA] ⚠️ updateTool SKIPPED — no activity for key=\(activityKey.prefix(16)) tool=\(tool.displayName) (tracked keys: \(activities.keys.map { String($0.prefix(16)) }))")
-            return
-        }
-        print("[LA] updateTool key=\(activityKey.prefix(16)) tool=\(tool.displayName)")
+              let startDate = startDates[activityKey] else { return }
 
         if let cp = contextPercent { contextPercents[activityKey] = cp }
         let cp = contextPercents[activityKey] ?? 0
@@ -192,7 +180,6 @@ class LiveActivityManager: ObservableObject {
             startDates.removeValue(forKey: activityKey)
             contextPercents.removeValue(forKey: activityKey)
 
-            // Clean up push token from Supabase
             Task { await removeLiveActivityToken(workspaceId: workspaceId) }
             return
         }
@@ -266,7 +253,6 @@ class LiveActivityManager: ObservableObject {
             Task { await activity.end(nil, dismissalPolicy: .immediate) }
         }
 
-        // Clean up all tokens
         Task { await removeAllLiveActivityTokens() }
     }
 
@@ -293,9 +279,6 @@ class LiveActivityManager: ObservableObject {
                     onConflict: "activity_token"
                 )
                 .execute()
-#if DEBUG
-            print("[LiveActivity] Stored push token \(token.prefix(8))... for workspace \(workspaceId.prefix(8))")
-#endif
         } catch {
 #if DEBUG
             print("[LiveActivity] Failed to store push token: \(error)")
