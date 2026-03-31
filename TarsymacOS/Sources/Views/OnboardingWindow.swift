@@ -101,7 +101,7 @@ struct OnboardingWindow: View {
     private var header: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image("TarsyLogo")
+                Image("WhiteTarsyLogo")
                     .resizable()
                     .interpolation(.high)
                     .antialiased(true)
@@ -736,33 +736,23 @@ struct OnboardingWindow: View {
         }
     }
 
-    @State private var readyIconPulse = false
+    @State private var readyLogoVisible = false
 
     private var readyIcon: some View {
-        ZStack {
-            Circle()
-                .fill(Theme.moss.opacity(0.1))
-                .frame(width: 72, height: 72)
-                .scaleEffect(readyIconPulse ? 1.15 : 1.0)
-                .opacity(readyIconPulse ? 0.6 : 1.0)
-            Circle()
-                .fill(Theme.moss.opacity(0.15))
-                .frame(width: 56, height: 56)
-                .scaleEffect(readyIconPulse ? 1.1 : 1.0)
-                .opacity(readyIconPulse ? 0.8 : 1.0)
-            Image("TarsyLogo")
-                .resizable()
-                .interpolation(.high)
-                .antialiased(true)
-                .scaledToFit()
-                .frame(width: 40, height: 40)
-                .clipShape(RoundedRectangle(cornerRadius: 9))
-        }
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) {
-                readyIconPulse = true
+        Image("WhiteTarsyLogo")
+            .resizable()
+            .interpolation(.high)
+            .antialiased(true)
+            .scaledToFit()
+            .frame(width: 48, height: 48)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .scaleEffect(readyLogoVisible ? 1.0 : 0.3)
+            .opacity(readyLogoVisible ? 1.0 : 0.0)
+            .onAppear {
+                withAnimation(.spring(response: 0.6, dampingFraction: 0.7)) {
+                    readyLogoVisible = true
+                }
             }
-        }
     }
 
     private var readyStatusCards: some View {

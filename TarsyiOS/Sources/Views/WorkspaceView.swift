@@ -277,6 +277,11 @@ struct WorkspaceView: View {
             await chatService.loadFromUltraContext(workspacePath: workspace.localPath, client: ultraContextClient)
             setupOutputHandler()
             await waitForConnectionAndStartClaude()
+
+            // Auto-start stream since stream mode is default
+            if viewMode == .stream {
+                isStreamActive = true
+            }
         }
         .onDisappear {
             cleanupHandler()
@@ -421,6 +426,10 @@ struct WorkspaceView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
+                    if chatService.isLoading {
+                        ChatSkeletonView()
+                    }
+
                     ForEach(chatService.messages) { message in
                         MessageBubble(message: message)
                             .id(message.id)
@@ -1812,5 +1821,49 @@ struct MessageBubble: View {
 
             if message.role == .assistant { Spacer(minLength: 60) }
         }
+    }
+}
+
+private struct ChatSkeletonView: View {
+    @State private var shimmer = false
+
+    private let lines: [(isUser: Bool, widths: [CGFloat])] = [
+        (false, [180, 140]),
+        (true, [120]),
+        (false, [200, 160, 100]),
+        (true, [150]),
+        (false, [170, 130]),
+    ]
+
+    var body: some View {
+        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+            HStack {
+                if line.isUser { Spacer(minLength: 60) }
+
+                VStack(alignment: line.isUser ? .trailing : .leading, spacing: 4) {
+                    skeletonPill(width: 36, height: 8)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(line.widths.enumerated()), id: \.offset) { _, w in
+                            skeletonPill(width: w, height: 10)
+                        }
+                    }
+                    .padding(10)
+                    .background(line.isUser ? TarsyTheme.accentAmber.opacity(0.15) : TarsyTheme.backgroundSecondary)
+                    .cornerRadius(10)
+                }
+
+                if !line.isUser { Spacer(minLength: 60) }
+            }
+        }
+        .onAppear { shimmer = true }
+    }
+
+    private func skeletonPill(width: CGFloat, height: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: 4)
+            .fill(TarsyTheme.backgroundTertiary)
+            .frame(width: width, height: height)
+            .opacity(shimmer ? 0.4 : 0.8)
+            .animation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true), value: shimmer)
     }
 }
