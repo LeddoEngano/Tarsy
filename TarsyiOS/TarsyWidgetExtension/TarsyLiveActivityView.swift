@@ -10,8 +10,16 @@ struct TarsyLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 // MARK: - Expanded Dynamic Island
-                DynamicIslandExpandedRegion(.leading) { EmptyView() }
-                DynamicIslandExpandedRegion(.trailing) { EmptyView() }
+                DynamicIslandExpandedRegion(.leading) {
+                    Image(systemName: context.attributes.engineIcon)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(warmBeige)
+                }
+                DynamicIslandExpandedRegion(.trailing) {
+                    Text("\(Int(context.state.contextPercent))%")
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundColor(contextBarColor(context.state.contextPercent))
+                }
                 DynamicIslandExpandedRegion(.center) {
                     HStack {
                         statusDot(context.state.status)
@@ -86,9 +94,7 @@ struct TarsyLiveActivityWidget: Widget {
             }
 
             // Context usage bar
-            if context.state.contextPercent > 0 {
-                contextBar(percent: context.state.contextPercent)
-            }
+            contextBar(percent: context.state.contextPercent)
         }
     }
 
@@ -267,13 +273,14 @@ struct TarsyLiveActivityWidget: Widget {
     private var warmBeige: Color { Color(red: 232/255, green: 224/255, blue: 212/255) }
     private var secondaryText: Color { Color(red: 168/255, green: 158/255, blue: 145/255) }
     private var amberColor: Color { Color(red: 212/255, green: 165/255, blue: 116/255) }
+    private var warmGoldColor: Color { Color(red: 240/255, green: 200/255, blue: 140/255) }
     private var mossColor: Color { Color(red: 122/255, green: 139/255, blue: 111/255) }
     private var terracottaColor: Color { Color(red: 196/255, green: 112/255, blue: 75/255) }
 
     private func statusColor(_ status: String) -> Color {
         switch status {
         case "running": return amberColor
-        case "waiting": return amberColor
+        case "waiting": return warmGoldColor
         case "completed": return mossColor
         case "error": return terracottaColor
         default: return secondaryText

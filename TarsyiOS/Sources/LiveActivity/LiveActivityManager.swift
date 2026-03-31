@@ -13,6 +13,9 @@ class LiveActivityManager: ObservableObject {
     /// Tracked context percent per activity
     private var contextPercents: [String: Double] = [:]
 
+    /// Activities go stale after this interval without updates, triggering the "Updating…" fallback UI
+    private let staleTTL: TimeInterval = 120
+
     private init() {}
 
     // MARK: - Keys
@@ -57,7 +60,7 @@ class LiveActivityManager: ObservableObject {
         do {
             let activity = try Activity.request(
                 attributes: attributes,
-                content: .init(state: state, staleDate: nil),
+                content: .init(state: state, staleDate: .now.addingTimeInterval(staleTTL)),
                 pushType: nil
             )
             activities[activityKey] = activity
@@ -86,7 +89,7 @@ class LiveActivityManager: ObservableObject {
             contextPercent: cp
         )
 
-        Task { await activity.update(.init(state: state, staleDate: nil)) }
+        Task { await activity.update(.init(state: state, staleDate: .now.addingTimeInterval(staleTTL))) }
     }
 
     func updateContext(workspaceId: String, contextPercent: Double, tabId: String? = nil) {
@@ -106,7 +109,7 @@ class LiveActivityManager: ObservableObject {
             message: currentState.message
         )
 
-        Task { await activity.update(.init(state: state, staleDate: nil)) }
+        Task { await activity.update(.init(state: state, staleDate: .now.addingTimeInterval(staleTTL))) }
     }
 
     func updateStatus(workspaceId: String, status: String, tabId: String? = nil, message: String? = nil) {
@@ -125,7 +128,7 @@ class LiveActivityManager: ObservableObject {
             message: status == "waiting" ? message : nil
         )
 
-        let content = ActivityContent(state: state, staleDate: nil)
+        let content = ActivityContent(state: state, staleDate: .now.addingTimeInterval(staleTTL))
 
         Task {
             // Send alert when agent needs user input so the user notices
@@ -155,7 +158,19 @@ class LiveActivityManager: ObservableObject {
                 startedAt: startDate,
                 contextPercent: cp
             )
-            Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 60)) }
+            Task {
+                // Send completion/error alert so user is notified even when away
+                let alertBody = status == "error" ? "Agent encountered an error" : "Agent task completed"
+                await activity.update(
+                    .init(state: finalState, staleDate: nil),
+                    alertConfiguration: .init(
+                        title: LocalizedStringResource(stringLiteral: "Tarsy"),
+                        body: LocalizedStringResource(stringLiteral: alertBody),
+                        sound: .default
+                    )
+                )
+                await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 60))
+            }
             activities.removeValue(forKey: activityKey)
             startDates.removeValue(forKey: activityKey)
             contextPercents.removeValue(forKey: activityKey)
