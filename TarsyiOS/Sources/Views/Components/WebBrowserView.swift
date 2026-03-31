@@ -43,6 +43,7 @@ struct WebBrowserView: View {
     @StateObject private var webViewRef = WebViewRef()
 
     @Binding var isActive: Bool
+    @State private var didAttemptAutoStart = false
 
     var body: some View {
         ZStack {
@@ -66,6 +67,11 @@ struct WebBrowserView: View {
             setupListeners()
             detectPorts()
             checkDevServerStatus()
+        }
+        .onChange(of: state) { oldState, newState in
+            if newState == .idle && !isDevServerRunning {
+                autoStartDevServerIfNeeded()
+            }
         }
         .onDisappear {
             connectionManager.removeListener("web-browser-\(workspace.id)")
@@ -384,15 +390,20 @@ struct WebBrowserView: View {
                     if status == "starting" {
                         progressText = "Starting dev server..."
                     } else if status == "ready", let portStr = packet.payload?["port"], let port = Int(portStr) {
-                        // Server started by Tarsy — we know the exact port
                         progressText = "Connecting to localhost:\(port)..."
                         selectPort(port)
                     } else if status == "running" {
-                        // Already running — detect port
                         isDevServerRunning = true
-                        if state == .starting {
+                        if let portStr = packet.payload?["port"], let port = Int(portStr) {
+                            selectPort(port)
+                        } else {
                             progressText = "Server running, detecting port..."
+                            connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.localPath]))
                         }
+                    } else if status == "error" {
+                        isDevServerRunning = false
+                        state = .idle
+                        progressText = packet.payload?["error"] ?? "Dev server failed"
                     }
 
                 default:
@@ -446,6 +457,11 @@ struct WebBrowserView: View {
     }
 
     private func handlePortsDetected(_ packet: WSPacket) {
+        // Ignore port scan results while dev server is starting — we'll get the port from devServerStart response
+        guard state != .starting else {
+            return
+        }
+
         guard let json = packet.payload?["ports"],
               let data = json.data(using: .utf8),
               let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] else {
@@ -473,6 +489,17 @@ struct WebBrowserView: View {
         }
 
         userRequestedScan = false
+    }
+
+    private func autoStartDevServerIfNeeded() {
+        guard !didAttemptAutoStart else {
+            return
+        }
+        guard let cmd = workspace.devServerCommand, !cmd.isEmpty else {
+            return
+        }
+        didAttemptAutoStart = true
+        startDevServer()
     }
 
     private func startDevServer() {
