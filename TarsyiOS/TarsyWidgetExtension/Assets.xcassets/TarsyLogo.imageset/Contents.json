@@ -1,8 +1,19 @@
 {
   "images" : [
     {
-      "filename" : "white-tarsy-logo.png",
-      "idiom" : "universal"
+      "filename" : "white-tarsy-logo@1x.png",
+      "idiom" : "universal",
+      "scale" : "1x"
+    },
+    {
+      "filename" : "white-tarsy-logo@2x.png",
+      "idiom" : "universal",
+      "scale" : "2x"
+    },
+    {
+      "filename" : "white-tarsy-logo@3x.png",
+      "idiom" : "universal",
+      "scale" : "3x"
     }
   ],
   "info" : {
