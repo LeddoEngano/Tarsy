@@ -59,14 +59,16 @@ rm -f "$DMG_PATH"
 create-dmg \
     --volname "$APP_NAME" \
     --volicon "$ROOT_DIR/TarsymacOS/Sources/Assets.xcassets/AppIcon.appiconset/icon_512.png" \
+    --background "$ROOT_DIR/scripts/dmg-background.png" \
     --window-size 600 400 \
     --icon-size 128 \
+    --text-size 14 \
     --icon "$APP_NAME.app" 150 200 \
     --app-drop-link 450 200 \
     --no-internet-enable \
     "$DMG_PATH" \
     "$APP_PATH" \
-    || true  # create-dmg exits 2 on success when no background is set
+    || true  # create-dmg may exit non-zero even on success
 
 # Verify DMG was created
 if [ ! -f "$DMG_PATH" ]; then
