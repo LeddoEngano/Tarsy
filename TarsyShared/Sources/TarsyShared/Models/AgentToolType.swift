@@ -35,19 +35,19 @@ public enum AgentToolType: String, Codable, Sendable {
 
     public var iconName: String {
         switch self {
-        case .read: return "doc.text"
-        case .edit: return "pencil"
-        case .write: return "square.and.pencil"
+        case .read: return "doc.text.magnifyingglass"
+        case .edit: return "pencil.line"
+        case .write: return "doc.badge.plus"
         case .bash: return "terminal"
         case .grep: return "magnifyingglass"
-        case .glob: return "folder.badge.questionmark"
+        case .glob: return "folder.fill"
         case .thinking: return "brain"
         case .todoWrite: return "checklist"
         case .agent: return "person.2"
         case .webSearch: return "globe"
-        case .webFetch: return "arrow.down.circle"
+        case .webFetch: return "globe"
         case .idle: return "pause.circle"
-        case .unknown: return "gearshape"
+        case .unknown: return "wrench"
         }
     }
 
