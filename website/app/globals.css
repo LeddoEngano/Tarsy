@@ -1,5 +1,45 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
 
+@theme {
+  --color-surface: #1a1a1a;
+  --color-surface-raised: #2a2a2a;
+  --color-surface-overlay: #3a3a3a;
+  --color-cream: #e8e0d4;
+  --color-taupe: #a89e91;
+  --color-amber: #d4a574;
+  --color-terracotta: #c4704b;
+  --color-moss: #7a8b6f;
+}
+
+@utility font-display {
+  font-family: var(--font-outfit, "Outfit"), sans-serif;
+}
+
+html {
+  overflow-x: hidden;
+}
+
+body {
+  font-family: var(--font-jetbrains, "JetBrains Mono"), monospace;
+  background-color: var(--color-surface);
+  color: var(--color-cream);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer base {
+  a {
+    color: var(--color-amber);
+    text-decoration: none;
+    transition: opacity 0.2s;
+  }
+
+  a:hover {
+    opacity: 0.8;
+  }
+}
+
+/* Legacy CSS variables for pages still using CSS modules (contact, legal) */
 :root {
   --bg-primary: #1a1a1a;
   --bg-secondary: #2a2a2a;
@@ -9,32 +49,4 @@
   --accent-amber: #d4a574;
   --accent-terracotta: #c4704b;
   --accent-moss: #7a8b6f;
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-html {
-  scroll-behavior: smooth;
-}
-
-body {
-  font-family: 'JetBrains Mono', monospace;
-  background-color: var(--bg-primary);
-  color: var(--text-primary);
-  line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
-}
-
-a {
-  color: var(--accent-amber);
-  text-decoration: none;
-  transition: opacity 0.2s;
-}
-
-a:hover {
-  opacity: 0.8;
 }
