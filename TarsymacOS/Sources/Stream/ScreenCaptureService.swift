@@ -72,14 +72,16 @@ class ScreenCaptureService: NSObject, ObservableObject {
         }
 
         for appName in targetApps {
-            if let window = availableWindows.first(where: {
+            let appWindows = availableWindows.filter {
                 $0.owningApplication?.applicationName == appName
-            }) {
+            }
+            // Pick the largest window — avoids grabbing small widget/preview windows
+            if let window = appWindows.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) {
                 return window
             }
         }
 
-        return availableWindows.first
+        return nil
     }
 
     func findWindow(appName: String, preferSmall: Bool) async -> SCWindow? {

@@ -1634,8 +1634,20 @@ class DaemonManager: ObservableObject {
                 } else {
                     await openAppForStack(stack)
                 }
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                window = await screenCapture.findWindow(forStack: stack)
+
+                // Simulator boot can take several seconds — poll up to 8s
+                let maxAttempts = stack == "mobile" ? 4 : 1
+                for attempt in 1...maxAttempts {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    window = await screenCapture.findWindow(forStack: stack)
+                    if window != nil {
+                        log("streamStart: window found on attempt \(attempt)")
+                        break
+                    }
+                    if attempt < maxAttempts {
+                        log("streamStart: waiting for simulator window (attempt \(attempt)/\(maxAttempts))...")
+                    }
+                }
             }
 
             guard let window else {
@@ -1752,6 +1764,7 @@ class DaemonManager: ObservableObject {
                 bundleId = "com.apple.Safari"
             }
         case "mobile":
+            await bootSimulatorIfNeeded()
             bundleId = "com.apple.iphonesimulator"
         case "backend":
             bundleId = "com.apple.Terminal"
@@ -1762,6 +1775,91 @@ class DaemonManager: ObservableObject {
         log("streamStart: opening \(bundleId)")
         if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) {
             _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+
+    /// Boots an iOS Simulator if none is currently running.
+    /// Picks the first available iPhone device found via `simctl list devices available`.
+    private func bootSimulatorIfNeeded() async {
+        // Check if any simulator is already booted
+        let bootedCheck = Process()
+        bootedCheck.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        bootedCheck.arguments = ["simctl", "list", "devices", "booted", "-j"]
+        let bootedPipe = Pipe()
+        bootedCheck.standardOutput = bootedPipe
+        bootedCheck.standardError = Pipe()
+
+        do {
+            try bootedCheck.run()
+            bootedCheck.waitUntilExit()
+            let data = bootedPipe.fileHandleForReading.readDataToEndOfFile()
+            if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let devices = json["devices"] as? [String: [[String: Any]]] {
+                for (_, deviceList) in devices {
+                    for device in deviceList {
+                        if let state = device["state"] as? String, state == "Booted" {
+                            log("streamStart: simulator already booted")
+                            return
+                        }
+                    }
+                }
+            }
+        } catch {
+            log("streamStart: failed to check booted simulators: \(error)")
+        }
+
+        // No simulator booted — find an available iPhone to boot
+        log("streamStart: no simulator booted, looking for available device...")
+        let listAll = Process()
+        listAll.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        listAll.arguments = ["simctl", "list", "devices", "available", "-j"]
+        let listPipe = Pipe()
+        listAll.standardOutput = listPipe
+        listAll.standardError = Pipe()
+
+        do {
+            try listAll.run()
+            listAll.waitUntilExit()
+            let data = listPipe.fileHandleForReading.readDataToEndOfFile()
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let devices = json["devices"] as? [String: [[String: Any]]] else { return }
+
+            // Find the first available iPhone (prefer latest iOS runtime)
+            var bestUDID: String?
+            let sortedRuntimes = devices.keys.sorted().reversed() // Latest runtimes first
+            for runtime in sortedRuntimes {
+                guard runtime.contains("iOS") else { continue }
+                if let deviceList = devices[runtime] {
+                    for device in deviceList {
+                        if let name = device["name"] as? String,
+                           let udid = device["udid"] as? String,
+                           let isAvailable = device["isAvailable"] as? Bool,
+                           isAvailable,
+                           name.contains("iPhone") {
+                            bestUDID = udid
+                            log("streamStart: booting simulator '\(name)' (\(udid))")
+                            break
+                        }
+                    }
+                }
+                if bestUDID != nil { break }
+            }
+
+            guard let udid = bestUDID else {
+                log("streamStart: no available iPhone simulator found")
+                return
+            }
+
+            let boot = Process()
+            boot.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+            boot.arguments = ["simctl", "boot", udid]
+            boot.standardOutput = Pipe()
+            boot.standardError = Pipe()
+            try boot.run()
+            boot.waitUntilExit()
+            log("streamStart: simulator booted (exit code \(boot.terminationStatus))")
+        } catch {
+            log("streamStart: failed to boot simulator: \(error)")
         }
     }
 
