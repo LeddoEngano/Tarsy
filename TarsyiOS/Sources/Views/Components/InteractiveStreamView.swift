@@ -83,6 +83,7 @@ struct InteractiveStreamView: View {
     var workspacePath: String
     var workspaceId: String = ""
     var workspaceName: String = ""
+    var tabId: String = ""
     var aiContext: String
     var onSessionCreated: ((String) -> Void)?
     @ObservedObject var todoManager: VoiceTodoManager
@@ -1042,7 +1043,8 @@ struct InteractiveStreamView: View {
             LiveActivityManager.shared.startActivity(
                 workspaceId: workspaceId,
                 workspaceName: workspaceName,
-                engineType: engineType
+                engineType: engineType,
+                tabId: tabId.isEmpty ? nil : tabId
             )
         }
 

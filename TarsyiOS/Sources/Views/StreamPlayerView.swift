@@ -69,6 +69,7 @@ struct StreamPlayerView: View {
     @Binding var activeSessionId: String?
     var activeEngineType: AIEngineType = .claude
     var onSessionCreated: ((String) -> Void)? = nil
+    var activeTabId: String = ""
     @ObservedObject var todoManager: VoiceTodoManager
     @Binding var interactiveQuestions: [InteractiveQuestion]?
     @Binding var interactiveOptions: [InteractiveOption]?
@@ -279,6 +280,7 @@ struct StreamPlayerView: View {
                 workspacePath: workspace.localPath,
                 workspaceId: workspace.id.uuidString,
                 workspaceName: workspace.name,
+                tabId: activeTabId,
                 aiContext: workspace.aiContext ?? "",
                 onSessionCreated: onSessionCreated,
                 todoManager: todoManager,

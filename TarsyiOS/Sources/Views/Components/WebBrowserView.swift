@@ -19,6 +19,7 @@ struct WebBrowserView: View {
     @Binding var activeSessionId: String?
     var activeEngineType: AIEngineType = .claude
     var onSessionCreated: ((String) -> Void)? = nil
+    var activeTabId: String = ""
     @ObservedObject var todoManager: VoiceTodoManager
     @Binding var interactiveQuestions: [InteractiveQuestion]?
     @Binding var interactiveOptions: [InteractiveOption]?
@@ -343,6 +344,7 @@ struct WebBrowserView: View {
                 workspacePath: workspace.localPath,
                 workspaceId: workspace.id.uuidString,
                 workspaceName: workspace.name,
+                tabId: activeTabId,
                 aiContext: workspace.aiContext ?? "",
                 onSessionCreated: onSessionCreated,
                 todoManager: todoManager,
@@ -628,6 +630,7 @@ struct FullscreenWebBrowser: View {
     var workspacePath: String
     var workspaceId: String = ""
     var workspaceName: String = ""
+    var tabId: String = ""
     var aiContext: String
     var onSessionCreated: ((String) -> Void)?
     @ObservedObject var todoManager: VoiceTodoManager
@@ -890,7 +893,8 @@ struct FullscreenWebBrowser: View {
             LiveActivityManager.shared.startActivity(
                 workspaceId: workspaceId,
                 workspaceName: workspaceName,
-                engineType: engineType
+                engineType: engineType,
+                tabId: tabId.isEmpty ? nil : tabId
             )
         }
 

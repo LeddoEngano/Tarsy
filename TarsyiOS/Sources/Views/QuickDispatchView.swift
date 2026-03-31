@@ -124,11 +124,14 @@ struct QuickDispatchView: View {
 
         isSending = true
 
+        let dispatchTabId = "dispatch-\(UUID().uuidString.prefix(8))"
+
         // Start Live Activity for dispatched task
         LiveActivityManager.shared.startActivity(
             workspaceId: ws.id.uuidString,
             workspaceName: ws.name,
-            engineType: .claude
+            engineType: .claude,
+            tabId: dispatchTabId
         )
 
         // Send engineCreate with initial message — the macOS side will create the session
@@ -140,7 +143,7 @@ struct QuickDispatchView: View {
                 "aiContext": ws.aiContext ?? "",
                 "message": msg,
                 "workspaceId": ws.id.uuidString,
-                "tabId": "dispatch-\(UUID().uuidString.prefix(8))"
+                "tabId": dispatchTabId
             ]
         ))
 
