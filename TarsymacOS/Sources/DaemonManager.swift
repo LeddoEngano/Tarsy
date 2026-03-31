@@ -39,6 +39,14 @@ class DaemonManager: ObservableObject {
     /// Last terminal-state packet per session (engineComplete, engineAskUser).
     /// Re-sent to clients on reconnect so they can sync missed state transitions.
     private var sessionLastEvent: [String: WSPacket] = [:]
+
+    // MARK: - Live Activity Push State
+    private var lastLAPushTime: [String: Date] = [:]          // sessionId -> last push sent time
+    private var sessionStartTimes: [String: Double] = [:]     // sessionId -> Unix timestamp
+    private var sessionContextPercent: [String: Double] = [:]  // sessionId -> context %
+    private var sessionWorkspaceId: [String: String] = [:]     // sessionId -> workspaceId string
+    private let laPushThrottle: TimeInterval = 4.0             // max 1 push per 4 seconds
+
     let profileService = ProfileService()
     private var machineSecret: String?
 
@@ -370,6 +378,56 @@ class DaemonManager: ObservableObject {
             // LAN: TLS protects the channel, no E2E needed for text
             await wsServer?.send(packet, to: clientId)
         }
+    }
+
+    // MARK: - Live Activity Push
+
+    /// Send a throttled Live Activity push update via APNs (max 1 per laPushThrottle seconds).
+    /// Bypasses throttle for "end" and "waiting" events.
+    private func sendLAPush(
+        sessionId: String,
+        status: String,
+        toolName: String,
+        toolIcon: String,
+        message: String? = nil,
+        event: String = "update",
+        alert: [String: String]? = nil
+    ) {
+        guard let wsId = sessionWorkspaceId[sessionId] else { return }
+
+        let now = Date()
+        if event == "update", status != "waiting",
+           let last = lastLAPushTime[sessionId],
+           now.timeIntervalSince(last) < laPushThrottle {
+            return // Throttled
+        }
+        lastLAPushTime[sessionId] = now
+
+        var contentState: [String: Any] = [
+            "status": status,
+            "currentTool": toolName,
+            "currentToolIcon": toolIcon,
+            "startedAt": sessionStartTimes[sessionId] ?? now.timeIntervalSince1970,
+            "contextPercent": sessionContextPercent[sessionId] ?? 0
+        ]
+        if let message { contentState["message"] = message }
+
+        Task {
+            await PushNotificationService.shared.sendLiveActivityUpdate(
+                workspaceId: wsId,
+                contentState: contentState,
+                event: event,
+                alert: alert
+            )
+        }
+    }
+
+    /// Clean up all Live Activity push state for a session
+    private func cleanupLAState(sessionId: String) {
+        lastLAPushTime.removeValue(forKey: sessionId)
+        sessionStartTimes.removeValue(forKey: sessionId)
+        sessionContextPercent.removeValue(forKey: sessionId)
+        sessionWorkspaceId.removeValue(forKey: sessionId)
     }
 
     // MARK: - Packet Handling
@@ -2219,6 +2277,8 @@ class DaemonManager: ObservableObject {
         }()
         let sid = UUID().uuidString
         let workspaceName = path.components(separatedBy: "/").last ?? "workspace"
+        sessionStartTimes[sid] = Date().timeIntervalSince1970
+        if let wsIdStr { sessionWorkspaceId[sid] = wsIdStr }
         let expandedEnginePath = (path as NSString).expandingTildeInPath
         registeredWorkspacePaths.insert(URL(fileURLWithPath: expandedEnginePath).resolvingSymlinksInPath().path)
 
@@ -2240,6 +2300,10 @@ class DaemonManager: ObservableObject {
                                 to: self.lastActiveClientId
                             )
                             await UltraContextSync.shared.agentOutput(sessionId: sid, content: output)
+                            // Push Live Activity tool update (throttled)
+                            if let tool = AgentToolType.parse(from: output) {
+                                await self.sendLAPush(sessionId: sid, status: "running", toolName: tool.displayName, toolIcon: tool.iconName)
+                            }
                         }
                     },
                     onComplete: { [weak self] (message: String) in
@@ -2248,6 +2312,9 @@ class DaemonManager: ObservableObject {
                             let packet = WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": "claude"])
                             self.sessionLastEvent[sid] = packet
                             await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
+                            // Push Live Activity end
+                            self.sendLAPush(sessionId: sid, status: "completed", toolName: "Done", toolIcon: "checkmark.circle", event: "end", alert: ["title": "Tarsy", "body": "Agent task completed"])
+                            self.cleanupLAState(sessionId: sid)
                             PushNotificationService.shared.notifyTaskComplete(
                                 workspace: workspaceName,
                                 summary: String(message.prefix(200)),
@@ -2265,6 +2332,8 @@ class DaemonManager: ObservableObject {
                             let packet = WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": "claude"])
                             self.sessionLastEvent[sid] = packet
                             await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
+                            // Push Live Activity waiting status (bypasses throttle)
+                            self.sendLAPush(sessionId: sid, status: "waiting", toolName: "Needs input", toolIcon: "questionmark.circle", message: String(questionsJson.prefix(100)), alert: ["title": "Tarsy", "body": "Your agent needs input"])
                             PushNotificationService.shared.notifyAgentQuestion(
                                 workspace: workspaceName,
                                 question: questionsJson,
@@ -2290,6 +2359,12 @@ class DaemonManager: ObservableObject {
                             ]),
                             to: self.lastActiveClientId
                         )
+                        // Track context percent for Live Activity push updates
+                        let total = inputTokens + outputTokens
+                        let windowSize = model.contains("opus") ? 1_000_000 : 200_000
+                        await MainActor.run {
+                            self.sessionContextPercent[sid] = Double(total) / Double(windowSize) * 100
+                        }
                     }
                 }
 
@@ -2343,6 +2418,9 @@ class DaemonManager: ObservableObject {
                             to: self.lastActiveClientId
                         )
                         await UltraContextSync.shared.agentOutput(sessionId: sid, content: output)
+                        if let tool = AgentToolType.parse(from: output) {
+                            await self.sendLAPush(sessionId: sid, status: "running", toolName: tool.displayName, toolIcon: tool.iconName)
+                        }
                     }
                 },
                 onComplete: { [weak self] (message: String) in
@@ -2351,6 +2429,8 @@ class DaemonManager: ObservableObject {
                         let packet = WSPacket(action: .engineComplete, payload: ["sessionId": sid, "message": message, "engineType": engineTypeRaw])
                         self.sessionLastEvent[sid] = packet
                         await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
+                        self.sendLAPush(sessionId: sid, status: "completed", toolName: "Done", toolIcon: "checkmark.circle", event: "end", alert: ["title": "Tarsy", "body": "Agent task completed"])
+                        self.cleanupLAState(sessionId: sid)
                         await UltraContextSync.shared.engineCompleted(sessionId: sid, summary: message)
                     }
                 },
@@ -2360,6 +2440,7 @@ class DaemonManager: ObservableObject {
                         let packet = WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": engineTypeRaw])
                         self.sessionLastEvent[sid] = packet
                         await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
+                        self.sendLAPush(sessionId: sid, status: "waiting", toolName: "Needs input", toolIcon: "questionmark.circle", message: String(questionsJson.prefix(100)), alert: ["title": "Tarsy", "body": "Your agent needs input"])
                     }
                 }
             )

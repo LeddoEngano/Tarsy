@@ -73,6 +73,36 @@ class PushNotificationService {
         }
     }
 
+    // MARK: - Live Activity Push Updates
+
+    func sendLiveActivityUpdate(
+        workspaceId: String,
+        contentState: [String: Any],
+        event: String = "update",
+        alert: [String: String]? = nil
+    ) async {
+        do {
+            let userId = try await supabase.auth.session.user.id.uuidString
+            var body: [String: Any] = [
+                "user_id": userId,
+                "workspace_id": workspaceId,
+                "content_state": contentState,
+                "event": event
+            ]
+            if let alert { body["alert"] = alert }
+            if event == "end" {
+                body["dismissal_date"] = Int(Date().timeIntervalSince1970) + 60
+            }
+            let jsonData = try JSONSerialization.data(withJSONObject: body)
+            try await supabase.functions.invoke(
+                "update-live-activity",
+                options: .init(body: jsonData)
+            )
+        } catch {
+            print("[Push] Live Activity update failed: \(error)")
+        }
+    }
+
     private func sendRemotePush(title: String, body: String, workspaceId: String? = nil) async {
         do {
             var payload: [String: String] = [
