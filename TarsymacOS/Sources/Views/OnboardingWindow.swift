@@ -630,21 +630,16 @@ struct OnboardingWindow: View {
     private func requestAutomationPermission() {
         NSApp.activate(ignoringOtherApps: true)
 
-        // Run a harmless AppleScript targeting System Events to trigger the macOS permission dialog
-        Task.detached(priority: .userInitiated) {
-            var error: NSDictionary?
-            let script = NSAppleScript(source: """
-                tell application "System Events"
-                    return name of first process whose frontmost is true
-                end tell
-            """)
-            let result = script?.executeAndReturnError(&error)
-            let succeeded = result != nil && error == nil
-
-            await MainActor.run {
-                hasAutomation = succeeded
-            }
-        }
+        // Execute an AppleScript targeting System Events to trigger the macOS automation consent dialog.
+        // This must run on the main thread so the permission dialog can attach to our app.
+        var error: NSDictionary?
+        let script = NSAppleScript(source: """
+            tell application "System Events"
+                return name of first process whose frontmost is true
+            end tell
+        """)
+        let result = script?.executeAndReturnError(&error)
+        hasAutomation = result != nil && error == nil
     }
 
     private func checkAutomationPermission() -> Bool {
@@ -655,16 +650,44 @@ struct OnboardingWindow: View {
     }
 
     private func checkPermissionsAsync() async {
-        do {
-            let _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-            hasScreenRecording = true
-        } catch {
-            hasScreenRecording = false
-        }
-
-        hasAccessibility = AXIsProcessTrusted()
+        hasScreenRecording = checkScreenRecordingPermission()
+        hasAccessibility = checkAccessibilityPermission()
         hasFilesAccess = preAccessDirectories()
         hasAutomation = checkAutomationPermission()
+    }
+
+    /// Check accessibility permission by attempting a real AX query.
+    /// AXIsProcessTrusted() caches its result per-process on macOS 15+,
+    /// so we test by querying the frontmost app's AX element instead.
+    private func checkAccessibilityPermission() -> Bool {
+        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+            return AXIsProcessTrusted()
+        }
+        let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(appElement, kAXRoleAttribute as CFString, &value)
+        // .apiDisabled means accessibility is not enabled for this process.
+        // Any other result (success, noValue, etc.) means accessibility is granted.
+        return result != .apiDisabled
+    }
+
+    /// Check screen recording permission without triggering the system dialog.
+    /// CGPreflightScreenCaptureAccess() is unreliable on macOS 15+.
+    /// Instead, check if we can read window names from other processes —
+    /// this only works when screen recording permission is granted.
+    private func checkScreenRecordingPermission() -> Bool {
+        guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
+            return false
+        }
+        let myPID = ProcessInfo.processInfo.processIdentifier
+        for window in windowList {
+            guard let ownerPID = window[kCGWindowOwnerPID as String] as? Int32,
+                  ownerPID != myPID else { continue }
+            if let name = window[kCGWindowName as String] as? String, !name.isEmpty {
+                return true
+            }
+        }
+        return false
     }
 
     private func preAccessDirectories() -> Bool {
