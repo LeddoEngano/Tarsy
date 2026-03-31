@@ -51,25 +51,46 @@ public enum AgentToolType: String, Codable, Sendable {
         }
     }
 
-    /// Parse tool type from engine output text
+    /// Parse tool type from engine output text.
+    /// Matches formats: "🔧 Read: path", "⏺ Read(path)", "Read path", "Read(path)"
     public static func parse(from output: String) -> AgentToolType? {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Match patterns like "⏺ Read(file.swift)" or "Read file.swift"
-        if trimmed.contains("Read(") || trimmed.hasPrefix("Read ") { return .read }
-        if trimmed.contains("Edit(") || trimmed.hasPrefix("Edit ") { return .edit }
-        if trimmed.contains("Write(") || trimmed.hasPrefix("Write ") { return .write }
-        if trimmed.contains("Bash(") || trimmed.hasPrefix("Bash ") { return .bash }
-        if trimmed.contains("Grep(") || trimmed.hasPrefix("Grep ") { return .grep }
-        if trimmed.contains("Glob(") || trimmed.hasPrefix("Glob ") { return .glob }
-        if trimmed.contains("TodoWrite(") || trimmed.hasPrefix("TodoWrite ") { return .todoWrite }
-        if trimmed.contains("Agent(") || trimmed.hasPrefix("Agent ") { return .agent }
-        if trimmed.contains("WebSearch(") || trimmed.hasPrefix("WebSearch ") { return .webSearch }
-        if trimmed.contains("WebFetch(") || trimmed.hasPrefix("WebFetch ") { return .webFetch }
+        // Extract the tool name from common formats:
+        //   "🔧 Read: /path/to/file"  →  "Read"
+        //   "⏺ Read(file.swift)"      →  "Read"
+        //   "Read file.swift"          →  "Read"
+        for tool in allToolNames {
+            if trimmed.contains("\(tool)(") || trimmed.contains("\(tool):") ||
+               trimmed.hasPrefix("\(tool) ") || trimmed.hasPrefix("\(tool)\t") {
+                return fromName(tool)
+            }
+        }
 
         // Thinking indicator
-        if trimmed.contains("⏺ Thinking") || trimmed.hasPrefix("Thinking") { return .thinking }
+        if trimmed.contains("Thinking") { return .thinking }
 
         return nil
+    }
+
+    private static let allToolNames = [
+        "Read", "Edit", "Write", "Bash", "Grep", "Glob",
+        "TodoWrite", "Agent", "WebSearch", "WebFetch"
+    ]
+
+    private static func fromName(_ name: String) -> AgentToolType? {
+        switch name {
+        case "Read": return .read
+        case "Edit": return .edit
+        case "Write": return .write
+        case "Bash": return .bash
+        case "Grep": return .grep
+        case "Glob": return .glob
+        case "TodoWrite": return .todoWrite
+        case "Agent": return .agent
+        case "WebSearch": return .webSearch
+        case "WebFetch": return .webFetch
+        default: return nil
+        }
     }
 }
