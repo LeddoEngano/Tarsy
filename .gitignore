@@ -53,3 +53,7 @@ supabase/.temp/
 
 # App secrets (xcconfig with API keys)
 Secrets.xcconfig
+
+# Claude Code skills
+.agents/
+.claude/skills/
