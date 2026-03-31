@@ -222,14 +222,16 @@ actor WebSocketServer {
     }
 
     private func handleNewConnection(_ connection: NWConnection) {
+        let remote = connection.currentPath?.remoteEndpoint
+
         // Reject connections from public IPs
-        if let remote = connection.currentPath?.remoteEndpoint, !isLocalNetwork(remote) {
+        if let remote, !isLocalNetwork(remote) {
             connection.cancel()
             return
         }
 
         // Check if IP is banned due to auth failure rate limiting
-        let ip = extractIP(from: connection.currentPath?.remoteEndpoint)
+        let ip = extractIP(from: remote)
         if isIPBanned(ip) {
             connection.cancel()
             return

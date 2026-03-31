@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var showPermissionOnboarding = !AgentPermissionConfig.hasBeenConfigured
     @State private var showNameOnboarding = false
     @State private var showNotificationPrimer = false
+    @State private var isAutoConnecting = false
     @AppStorage("hasSeenNotificationPrimer") private var hasSeenNotificationPrimer = false
 
     var body: some View {
@@ -142,6 +143,10 @@ struct ContentView: View {
     }
 
     private func autoConnect() async {
+        guard !isAutoConnecting && !connectionManager.isConnected else { return }
+        isAutoConnecting = true
+        defer { isAutoConnecting = false }
+
         await machineService.fetchMachine()
 
         guard machineService.isOnline else {
@@ -154,10 +159,11 @@ struct ContentView: View {
 
     /// Connect without re-fetching machine status (used when onChange already confirmed online)
     private func connectToMachine() async {
+        guard !connectionManager.isConnected else { return }
         do {
             let session = try await supabase.auth.session
             let lanHost = machineService.bestIP
-            print("[AutoConnect] LAN host: \(lanHost ?? "none"), using smart connect...")
+            print("[AutoConnect] LAN host: \(lanHost ?? "none")")
 
             connectionManager.smartConnect(
                 lanHost: lanHost,

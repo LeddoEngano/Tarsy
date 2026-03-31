@@ -28,12 +28,14 @@ public class ConnectionManager: ObservableObject {
 
     private var pingTimer: Timer?
     private var reconnectTimer: Timer?
+    private var lanTimeoutTask: Task<Void, Never>?
     private var lastPingTime: Date?
     private var lastPongTime: Date?
     private var authToken: String?
     private var host: String?
     private var port: UInt16?
     private var reconnectAttempts = 0
+    private var isConnecting = false
     private let maxReconnectAttempts = Int.max
 
     public var onPacketReceived: ((WSPacket) -> Void)?
@@ -88,6 +90,20 @@ public class ConnectionManager: ObservableObject {
     // MARK: - Smart Connect (try LAN first, fallback to relay)
 
     public func smartConnect(lanHost: String?, port: UInt16, token: String) {
+        guard !isConnecting && !isConnected else { return }
+        isConnecting = true
+
+        // Cancel any in-flight connections before starting a new one
+        lanTimeoutTask?.cancel()
+        lanTimeoutTask = nil
+        connection?.cancel()
+        connection = nil
+        relayTask?.cancel(with: .goingAway, reason: nil)
+        relayTask = nil
+        relaySession = nil
+        reconnectTimer?.invalidate()
+        reconnectTimer = nil
+
         self.authToken = token
         self.port = port
         reconnectAttempts = 0
@@ -104,21 +120,21 @@ public class ConnectionManager: ObservableObject {
     /// Re-establish connection using stored parameters. Uses smart connect (LAN first if host known).
     /// Refreshes auth token before connecting. Safe to call when already connected (no-op).
     public func reconnectIfNeeded() async {
-        guard !isConnected else { return }
+        guard !isConnected && !isConnecting else { return }
 
         // Refresh token
         if let session = try? await supabase.auth.session {
             authToken = session.accessToken
         }
 
-        guard authToken != nil, let port else { return }
+        guard authToken != nil, port != nil else { return }
 
         // Mark as reconnecting so authSuccess fires onReconnected
         isReconnecting = true
         reconnectAttempts = 0
         errorMessage = nil
 
-        if let host {
+        if host != nil {
             performLANConnectWithRelayFallback()
         } else {
             performRelayConnect()
@@ -129,6 +145,8 @@ public class ConnectionManager: ObservableObject {
     public func disconnect() {
         reconnectTimer?.invalidate()
         reconnectTimer = nil
+        lanTimeoutTask?.cancel()
+        lanTimeoutTask = nil
         pingTimer?.invalidate()
         pingTimer = nil
         lastPingTime = nil
@@ -138,6 +156,7 @@ public class ConnectionManager: ObservableObject {
         relayTask?.cancel(with: .goingAway, reason: nil)
         relayTask = nil
         isConnected = false
+        isConnecting = false
         isReconnecting = false
         connectionMode = .disconnected
         e2e.reset()
@@ -234,8 +253,10 @@ public class ConnectionManager: ObservableObject {
         let plainConn = NWConnection(to: .url(url), using: plainParams)
 
         // Timeout: if neither connects in 3 seconds, try relay
-        let timeoutTask = Task { @MainActor in
+        lanTimeoutTask?.cancel()
+        lanTimeoutTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard !Task.isCancelled else { return }
             if !lanConnected && !self.isConnected {
                 tlsConn.cancel()
                 plainConn.cancel()
@@ -245,10 +266,11 @@ public class ConnectionManager: ObservableObject {
         }
 
         // Handler called when either connection reaches .ready
-        let onReady: @MainActor (NWConnection, NWConnection) -> Void = { [weak self] winner, loser in
+        let onReady: @MainActor (NWConnection, NWConnection, String) -> Void = { [weak self] winner, loser, label in
             guard !lanConnected else { return } // Only first wins
             lanConnected = true
-            timeoutTask.cancel()
+            self?.lanTimeoutTask?.cancel()
+            self?.lanTimeoutTask = nil
             loser.cancel()
             // If relay already connected while we were waiting, tear it down
             if self?.relayTask != nil {
@@ -260,6 +282,7 @@ public class ConnectionManager: ObservableObject {
             }
             self?.connection = winner
             self?.isConnected = true
+            self?.isConnecting = false
             self?.reconnectAttempts = 0
             self?.errorMessage = nil
             self?.connectionMode = .lan
@@ -277,14 +300,17 @@ public class ConnectionManager: ObservableObject {
             Task { @MainActor in
                 switch state {
                 case .ready:
-                    onReady(tlsConn, plainConn)
+                    onReady(tlsConn, plainConn, "TLS")
                 case .failed:
                     tlsFailed = true
                     if plainFailed && !lanConnected && self?.isConnected != true {
-                        timeoutTask.cancel()
+                        self?.lanTimeoutTask?.cancel()
+                        self?.lanTimeoutTask = nil
                         self?.connection = nil
                         self?.performRelayConnect()
                     }
+                case .waiting:
+                    break
                 default: break
                 }
             }
@@ -294,14 +320,17 @@ public class ConnectionManager: ObservableObject {
             Task { @MainActor in
                 switch state {
                 case .ready:
-                    onReady(plainConn, tlsConn)
+                    onReady(plainConn, tlsConn, "plain")
                 case .failed:
                     plainFailed = true
                     if tlsFailed && !lanConnected && self?.isConnected != true {
-                        timeoutTask.cancel()
+                        self?.lanTimeoutTask?.cancel()
+                        self?.lanTimeoutTask = nil
                         self?.connection = nil
                         self?.performRelayConnect()
                     }
+                case .waiting:
+                    break
                 default: break
                 }
             }
@@ -369,42 +398,60 @@ public class ConnectionManager: ObservableObject {
     }
 
     private func performRelayConnect() {
-        guard let token = authToken else { return }
-
-        let baseURL = TarsyConfig.relayURL
-
-        guard let url = URL(string: baseURL) else {
-            errorMessage = "Invalid relay URL"
-            return
+        // Cancel existing relay if any
+        if relayTask != nil {
+            relayTask?.cancel(with: .goingAway, reason: nil)
+            relayTask = nil
+            relaySession = nil
         }
 
-        relaySession = URLSession(configuration: .default)
-        let task = relaySession!.webSocketTask(with: url)
-        task.maximumMessageSize = 4 * 1024 * 1024 // 4MB
-        self.relayTask = task
-        task.resume()
+        Task { @MainActor in
+            // Refresh token to ensure it's valid before relay auth
+            if let session = try? await supabase.auth.session {
+                authToken = session.accessToken
+            }
 
-        // Send auth as first message (token not in URL for security)
-        let auth: [String: String] = ["action": "auth", "token": token, "role": "client"]
-        if let data = try? JSONSerialization.data(withJSONObject: auth),
-           let str = String(data: data, encoding: .utf8) {
-            task.send(.string(str)) { _ in }
-        }
+            guard let token = authToken else {
+                isConnecting = false
+                return
+            }
 
-        connectionMode = .relay
-        receiveRelayLoop()
+            let baseURL = TarsyConfig.relayURL
 
-        // Relay doesn't have an explicit "ready" — it's ready as soon as task resumes
-        // We consider ourselves connected when we get the first message or after a short delay
-        Task {
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            if !self.isConnected {
-                // Fallback: consider relay connected after 500ms if no authSuccess yet.
-                // Don't reset isReconnecting — let authSuccess handle it for onReconnected.
-                self.isConnected = true
-                self.reconnectAttempts = 0
-                self.errorMessage = nil
-                self.startPing()
+            guard let url = URL(string: baseURL) else {
+                errorMessage = "Invalid relay URL"
+                return
+            }
+
+            relaySession = URLSession(configuration: .default)
+            let task = relaySession!.webSocketTask(with: url)
+            task.maximumMessageSize = 4 * 1024 * 1024 // 4MB
+            self.relayTask = task
+            task.resume()
+
+            // Send auth as first message (token not in URL for security)
+            let auth: [String: String] = ["action": "auth", "token": token, "role": "client"]
+            if let data = try? JSONSerialization.data(withJSONObject: auth),
+               let str = String(data: data, encoding: .utf8) {
+                task.send(.string(str)) { _ in }
+            }
+
+            connectionMode = .relay
+            receiveRelayLoop()
+
+            // Relay doesn't have an explicit "ready" — it's ready as soon as task resumes
+            // We consider ourselves connected when we get the first message or after a short delay
+            Task {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                if !self.isConnected && self.relayTask != nil {
+                    // Fallback: consider relay connected after 500ms if no authSuccess yet.
+                    // Don't reset isReconnecting — let authSuccess handle it for onReconnected.
+                    self.isConnected = true
+                    self.isConnecting = false
+                    self.reconnectAttempts = 0
+                    self.errorMessage = nil
+                    self.startPing()
+                }
             }
         }
     }
@@ -464,6 +511,7 @@ public class ConnectionManager: ObservableObject {
         case .authSuccess:
             let wasReconnecting = isReconnecting
             isConnected = true
+            isConnecting = false
             isReconnecting = false
             reconnectAttempts = 0
             errorMessage = nil
@@ -569,8 +617,9 @@ public class ConnectionManager: ObservableObject {
     }
 
     private func handleDisconnect() {
-        guard isConnected || reconnectAttempts == 0 else { return }
+        guard isConnected || isConnecting || reconnectAttempts == 0 else { return }
         isConnected = false
+        isConnecting = false
         connection?.cancel()
         connection = nil
         relayTask?.cancel(with: .goingAway, reason: nil)
