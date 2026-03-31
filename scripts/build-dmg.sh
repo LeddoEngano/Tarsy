@@ -56,6 +56,20 @@ echo "==> Creating DMG..."
 # Remove existing DMG if present (create-dmg fails otherwise)
 rm -f "$DMG_PATH"
 
+# Stage DMG contents: app + Finder alias to Applications
+DMG_STAGE="$BUILD_DIR/dmg-stage"
+rm -rf "$DMG_STAGE"
+mkdir -p "$DMG_STAGE"
+cp -R "$APP_PATH" "$DMG_STAGE/"
+
+# Create a Finder alias (not a symlink) — Finder renders the proper icon
+osascript -e "
+    tell application \"Finder\"
+        make alias file to POSIX file \"/Applications\" at POSIX file \"$DMG_STAGE\"
+        set name of result to \"Applications\"
+    end tell
+"
+
 create-dmg \
     --volname "$APP_NAME" \
     --volicon "$ROOT_DIR/TarsymacOS/Sources/Assets.xcassets/AppIcon.appiconset/icon_512.png" \
@@ -64,11 +78,13 @@ create-dmg \
     --icon-size 128 \
     --text-size 14 \
     --icon "$APP_NAME.app" 150 200 \
-    --app-drop-link 450 200 \
+    --icon "Applications" 450 200 \
     --no-internet-enable \
     "$DMG_PATH" \
-    "$APP_PATH" \
+    "$DMG_STAGE" \
     || true  # create-dmg may exit non-zero even on success
+
+rm -rf "$DMG_STAGE"
 
 # Verify DMG was created
 if [ ! -f "$DMG_PATH" ]; then
