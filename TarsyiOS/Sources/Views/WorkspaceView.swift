@@ -40,6 +40,7 @@ struct WorkspaceView: View {
     @State private var tabs: [TerminalTab] = []
     @State private var messageText = ""
     @State private var isStreamActive = false
+    @State private var isBrowserActive = false
     @State private var isAgentThinking = false
     @State private var agentActivity: String? = nil // Current tool use activity
     @StateObject private var chatService = ChatService()
@@ -706,7 +707,7 @@ struct WorkspaceView: View {
             // Stream area — collapses when keyboard is up
             if keyboardHeight == 0 {
                 if workspace.stack == .web || workspace.stack == .fullstack {
-                    if viewMode == .browser {
+                    ZStack {
                         WebBrowserView(
                             workspace: workspace,
                             onScreenshot: { image in
@@ -728,16 +729,23 @@ struct WorkspaceView: View {
                             onMultiQuestionSubmit: { submitMultiQuestionAnswers($0) },
                             onVoiceMessage: { persistVoiceMessage($0) },
                             isFullscreen: $isFullscreenBrowser,
-                            isActive: $isStreamActive
+                            isActive: $isBrowserActive
                         )
-                            .frame(maxWidth: .infinity)
-                            .frame(height: max(UIScreen.main.bounds.height, UIScreen.main.bounds.width) * 0.25)
-                            .clipped()
-                    } else {
+                        .opacity(viewMode == .browser ? 1 : 0)
+                        .allowsHitTesting(viewMode == .browser)
+
                         streamPlayerContent
+                            .opacity(viewMode == .stream ? 1 : 0)
+                            .allowsHitTesting(viewMode == .stream)
                     }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: max(UIScreen.main.bounds.height, UIScreen.main.bounds.width) * 0.25)
+                    .clipped()
                 } else {
                     streamPlayerContent
+                        .frame(maxWidth: .infinity)
+                        .frame(height: max(UIScreen.main.bounds.height, UIScreen.main.bounds.width) * 0.25)
+                        .clipped()
                 }
 
                 // Tabs bar
@@ -806,9 +814,6 @@ struct WorkspaceView: View {
             onVoiceMessage: { persistVoiceMessage($0) },
             isFullscreen: $isFullscreenStream
         )
-            .frame(maxWidth: .infinity)
-            .frame(height: max(UIScreen.main.bounds.height, UIScreen.main.bounds.width) * 0.25)
-            .clipped()
     }
 
     private var viewModeSwitch: some View {
@@ -826,6 +831,7 @@ struct WorkspaceView: View {
             }
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) { viewMode = .stream }
+                // Signal StreamPlayerView to auto-start if not already running
                 if !isStreamActive {
                     isStreamActive = true
                 }
@@ -1487,6 +1493,7 @@ struct WorkspaceView: View {
                         else if engineModel.contains("haiku") { windowSize = 200_000 }
                         else { windowSize = 200_000 }
                         contextPercent = Double(total) / Double(windowSize) * 100
+                        LiveActivityManager.shared.updateContext(workspaceId: workspace.id.uuidString, contextPercent: contextPercent, tabId: currentTab.id)
                     }
 
                 // Git pull result
@@ -1546,14 +1553,14 @@ struct WorkspaceView: View {
                 }
                 // Update Live Activity with current tool
                 if let tool = AgentToolType.parse(from: clean) {
-                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: currentTab.id)
+                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: currentTab.id, contextPercent: contextPercent)
                 }
             } else {
                 agentActivity = nil
                 chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
                 // Parse tool from raw output too
                 if let tool = AgentToolType.parse(from: output) {
-                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: currentTab.id)
+                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: currentTab.id, contextPercent: contextPercent)
                 }
             }
         }
@@ -1563,11 +1570,12 @@ struct WorkspaceView: View {
         isAgentThinking = false
         let sessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
         todoManager.markQuestion(sessionId: sessionId)
-        // Update Live Activity to waiting (scoped to tab)
-        LiveActivityManager.shared.updateStatus(workspaceId: workspace.id.uuidString, status: "waiting", tabId: currentTab.id)
+        // Update Live Activity to waiting (scoped to tab) with question text for the alert
+        var questionText: String?
         if let questionsJson = packet.payload?["questions"],
            let questionsData = questionsJson.data(using: .utf8),
            let questions = try? JSONDecoder().decode([InteractiveQuestion].self, from: questionsData) {
+            questionText = questions.first?.question
             if !questions.isEmpty {
                 withAnimation {
                     interactiveOptions = nil
@@ -1575,6 +1583,7 @@ struct WorkspaceView: View {
                 }
             }
         }
+        LiveActivityManager.shared.updateStatus(workspaceId: workspace.id.uuidString, status: "waiting", tabId: currentTab.id, message: questionText)
     }
 
     private var engineDisplayName: String {

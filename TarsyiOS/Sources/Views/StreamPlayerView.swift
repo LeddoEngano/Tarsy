@@ -238,6 +238,7 @@ struct StreamPlayerView: View {
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
             } else {
+                // Stream not started — show start button
                 VStack(spacing: 12) {
                     Image(systemName: "eye")
                         .font(.system(size: 40))
@@ -290,16 +291,27 @@ struct StreamPlayerView: View {
         .onAppear {
             checkDevServerStatus()
             if isWebMode { detectPorts() }
-            // Auto-start stream when view appears
+            // Reconnect stream if it was already active but lost connection
             if isActive && !viewModel.isConnected {
-                startStream()
+                startStreamWithAutoSetup()
             }
         }
         .onChange(of: isActive) { _, active in
-            // Auto-start stream when activated (e.g. switching to stream tab)
+            // Auto-start with full setup when activated (e.g. tab switch)
             if active && !viewModel.isConnected {
-                startStream()
+                startStreamWithAutoSetup()
             }
+        }
+        .onDisappear {
+            // Clean up when workspace is dismissed
+            connectionManager.onStreamFrameReceived = nil
+            connectionManager.removeListener("devserver")
+            connectionManager.removeListener("devserver-stop")
+            connectionManager.removeListener("devserver-stop-only")
+            connectionManager.removeListener("devserver-status")
+            connectionManager.removeListener("stream-ports-\(workspace.id)")
+            viewModel.disconnect()
+            isActive = false
         }
         .confirmationDialog("Select Port", isPresented: $showPortPicker, titleVisibility: .visible) {
             ForEach(detectedPorts) { port in

@@ -254,7 +254,14 @@ struct WebBrowserView: View {
 
                         floatingButton(icon: "chevron.left") { webViewRef.webView?.goBack() }
                         floatingButton(icon: "chevron.right") { webViewRef.webView?.goForward() }
-                        floatingButton(icon: "arrow.clockwise") { webViewRef.webView?.reload() }
+                        floatingButton(icon: "arrow.clockwise") {
+                            guard let webView = webViewRef.webView else { return }
+                            if webView.url != nil {
+                                webView.reloadFromOrigin()
+                            } else if let url = webViewURL {
+                                webView.load(URLRequest(url: url))
+                            }
+                        }
 
                         Spacer()
 
@@ -638,7 +645,12 @@ struct FullscreenWebBrowser: View {
                     HStack(spacing: 16) {
                         navButton(icon: "chevron.left") { fullscreenRef.webView?.goBack() }
                         navButton(icon: "chevron.right") { fullscreenRef.webView?.goForward() }
-                        navButton(icon: "arrow.clockwise") { fullscreenRef.webView?.reload() }
+                        navButton(icon: "arrow.clockwise") {
+                            guard let webView = fullscreenRef.webView else { return }
+                            if webView.url != nil {
+                                webView.reloadFromOrigin()
+                            }
+                        }
                         navButton(icon: "camera.viewfinder") {
                             guard let webView = fullscreenRef.webView else { return }
                             Haptics.light()
@@ -1022,6 +1034,10 @@ struct WebViewContainer: UIViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            Task { @MainActor in isLoading.wrappedValue = false }
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
             Task { @MainActor in isLoading.wrappedValue = false }
         }
 
