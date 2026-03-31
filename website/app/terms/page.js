@@ -44,8 +44,7 @@ export default function Terms() {
       <p>
         Tarsy is a remote desktop and AI coding agent platform for the Apple
         ecosystem. It enables you to stream your Mac screen, remotely control
-        your Mac, and run and interact with AI coding agents from your iPhone or
-        iPad. The Service includes:
+        your Mac, and run and interact with AI coding agents from your iPhone. The Service includes:
       </p>
       <ul>
         <li>

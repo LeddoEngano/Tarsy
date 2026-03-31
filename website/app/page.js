@@ -66,7 +66,7 @@ export default function Home() {
                     href="https://apps.apple.com/app/tarsy"
                     className="inline-block bg-amber text-surface text-sm font-semibold px-8 py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-amber/25 active:translate-y-0 active:scale-[0.98]"
                   >
-                    iPhone &amp; iPad
+                    iPhone
                   </a>
                   <a
                     href="/download/macos"
@@ -240,7 +240,7 @@ export default function Home() {
                 href="https://apps.apple.com/app/tarsy"
                 className="inline-block bg-amber text-surface text-sm font-semibold px-8 py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-amber/25 active:translate-y-0 active:scale-[0.98]"
               >
-                iPhone &amp; iPad
+                iPhone
               </a>
               <a
                 href="/download/macos"
