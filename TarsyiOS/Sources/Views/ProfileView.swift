@@ -392,6 +392,7 @@ struct ProfileView: View {
 
             VStack(spacing: 1) {
                 Button(action: {
+                    LiveActivityManager.shared.endAllActivities()
                     Task { await authManager.signOut() }
                 }) {
                     HStack(spacing: 12) {
@@ -602,6 +603,7 @@ struct ProfileView: View {
         Task {
             do {
                 try await profileService.deleteAccount()
+                LiveActivityManager.shared.endAllActivities()
                 await authManager.signOut()
             } catch {
 #if DEBUG
