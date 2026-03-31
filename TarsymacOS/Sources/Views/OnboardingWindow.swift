@@ -34,6 +34,13 @@ struct OnboardingWindow: View {
         case ready
     }
 
+    enum PermissionSubStep: Int, CaseIterable {
+        case screenRecording = 0
+        case accessibility = 1
+        case filesAndFolders = 2
+        case automation = 3
+    }
+
     var body: some View {
         ZStack {
             Theme.bg.ignoresSafeArea()
@@ -64,22 +71,19 @@ struct OnboardingWindow: View {
         .frame(width: 500, height: 580)
         .task {
             if authManager.isAuthenticated {
-                checkPermissions()
-                // Small delay to let permission checks complete
-                try? await Task.sleep(nanoseconds: 300_000_000)
-                step = allPermissionsGranted ? .ready : .permissions
+                step = .permissions
             }
         }
         .onChange(of: authManager.isAuthenticated) { _, isAuth in
             if isAuth {
-                checkPermissions()
-                Task {
-                    try? await Task.sleep(nanoseconds: 300_000_000)
-                    step = allPermissionsGranted ? .ready : .permissions
-                    await daemonManager.start()
-                }
+                step = .permissions
             } else {
                 step = .login
+            }
+        }
+        .onChange(of: step) { _, newStep in
+            if newStep == .ready {
+                Task { await daemonManager.start() }
             }
         }
     }
@@ -400,6 +404,7 @@ struct OnboardingWindow: View {
     @State private var hasFilesAccess = false
     @State private var hasAutomation = false
     @State private var isCheckingPermissions = false
+    @State private var permissionSubStep: PermissionSubStep = .screenRecording
 
     private var allPermissionsGranted: Bool {
         hasScreenRecording && hasAccessibility && hasFilesAccess && hasAutomation
@@ -409,51 +414,148 @@ struct OnboardingWindow: View {
         [hasScreenRecording, hasAccessibility, hasFilesAccess, hasAutomation].filter { $0 }.count
     }
 
+    private func permissionInfo(for subStep: PermissionSubStep) -> (icon: String, title: String, why: String, isGranted: Bool, settingsKey: String?) {
+        switch subStep {
+        case .screenRecording:
+            return ("rectangle.dashed.badge.record", "screen recording",
+                    "tarsy streams your mac screen to your iphone so you can see and control it remotely.",
+                    hasScreenRecording, "Privacy_ScreenCapture")
+        case .accessibility:
+            return ("hand.tap", "accessibility",
+                    "tarsy needs accessibility access to move windows, type, and handle remote input from your iphone.",
+                    hasAccessibility, "Privacy_Accessibility")
+        case .filesAndFolders:
+            return ("folder", "files and folders",
+                    "tarsy scans your project directories to list repos and provide file context to AI agents.",
+                    hasFilesAccess, "Privacy_FilesAndFolders")
+        case .automation:
+            return ("gearshape.2", "automation",
+                    "tarsy uses apple events to control browser tabs so it can manage dev server previews remotely.",
+                    hasAutomation, nil)
+        }
+    }
+
+    private func advanceToNextUngranted() {
+        for subStep in PermissionSubStep.allCases {
+            if !permissionInfo(for: subStep).isGranted {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    permissionSubStep = subStep
+                }
+                return
+            }
+        }
+        withAnimation(.easeInOut(duration: 0.2)) {
+            step = .ready
+        }
+    }
+
+    private func grantCurrentPermission() {
+        if permissionSubStep == .automation {
+            requestAutomationPermission()
+        } else if let key = permissionInfo(for: permissionSubStep).settingsKey {
+            openSettings(key)
+        }
+    }
+
     private var permissionsStep: some View {
-        VStack(spacing: 0) {
+        let info = permissionInfo(for: permissionSubStep)
+
+        return VStack(spacing: 0) {
             Spacer()
 
-            permissionsHeader
+            // Icon
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(info.isGranted ? Theme.moss.opacity(0.1) : Theme.amber.opacity(0.1))
+                    .frame(width: 64, height: 64)
+                Image(systemName: info.isGranted ? "checkmark" : info.icon)
+                    .font(.system(size: info.isGranted ? 22 : 26, weight: info.isGranted ? .bold : .regular))
+                    .foregroundColor(info.isGranted ? Theme.moss : Theme.amber)
+            }
+            .padding(.bottom, 16)
+
+            // Title
+            Text(info.title)
+                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .foregroundColor(Theme.textPrimary)
+                .padding(.bottom, 4)
+
+            // Step indicator
+            Text("step \(permissionSubStep.rawValue + 1) of 4")
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundColor(Theme.textMuted)
+                .padding(.bottom, 14)
+
+            // Why explanation
+            Text(info.why)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
+                .frame(maxWidth: 340)
                 .padding(.bottom, 20)
 
+            // Progress bar
             permissionsProgressBar
-                .padding(.horizontal, 40)
-                .padding(.bottom, 16)
+                .padding(.horizontal, 60)
+                .padding(.bottom, 24)
 
-            permissionsRows
-                .padding(.horizontal, 40)
-
-            permissionsActions
-                .padding(.top, 20)
-
-            if !allPermissionsGranted {
-                Text("grant permissions above, then click refresh")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Theme.textMuted)
-                    .padding(.top, 10)
+            // Grant button or granted indicator
+            if info.isGranted {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 14))
+                    Text("granted")
+                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                }
+                .foregroundColor(Theme.moss)
+            } else {
+                Button(action: { grantCurrentPermission() }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "lock.open")
+                            .font(.system(size: 11))
+                        Text("grant permission")
+                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    }
+                    .foregroundColor(Theme.bg)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 11)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8).fill(Theme.amber)
+                    )
+                }
+                .buttonStyle(.plain)
+                .pointerOnHover()
             }
+
+            // Dot indicators
+            HStack(spacing: 8) {
+                ForEach(PermissionSubStep.allCases, id: \.self) { subStep in
+                    Circle()
+                        .fill(subStep == permissionSubStep ? Theme.amber :
+                              permissionInfo(for: subStep).isGranted ? Theme.moss : Theme.border)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .padding(.top, 16)
 
             Spacer()
         }
         .task {
-            checkPermissions()
-        }
-    }
+            // Initial check
+            await checkPermissionsAsync()
+            advanceToNextUngranted()
 
-    private var permissionsHeader: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "lock.shield")
-                .font(.system(size: 32))
-                .foregroundColor(Theme.amber)
-                .padding(.bottom, 4)
-
-            Text("permissions")
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
-                .foregroundColor(Theme.textPrimary)
-
-            Text("tarsy needs a few permissions to work")
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(Theme.textSecondary)
+            // Poll every 2s for permission changes
+            while !Task.isCancelled && !allPermissionsGranted {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await checkPermissionsAsync()
+                if allPermissionsGranted {
+                    withAnimation(.easeInOut(duration: 0.2)) { step = .ready }
+                } else {
+                    advanceToNextUngranted()
+                }
+            }
         }
     }
 
@@ -482,90 +584,6 @@ struct OnboardingWindow: View {
         }
     }
 
-    private var permissionsRows: some View {
-        VStack(spacing: 8) {
-            permissionRow(
-                icon: "rectangle.dashed.badge.record",
-                name: "screen recording",
-                description: "stream your screen to iPhone",
-                granted: hasScreenRecording,
-                settingsKey: "Privacy_ScreenCapture"
-            )
-
-            permissionRow(
-                icon: "hand.tap",
-                name: "accessibility",
-                description: "control windows and input remotely",
-                granted: hasAccessibility,
-                settingsKey: "Privacy_Accessibility"
-            )
-
-            permissionRow(
-                icon: "folder",
-                name: "files and folders",
-                description: "scan projects and read your repos",
-                granted: hasFilesAccess,
-                settingsKey: "Privacy_FilesAndFolders"
-            )
-
-            automationRow
-        }
-    }
-
-    private var automationRow: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(hasAutomation ? Theme.moss.opacity(0.12) : Theme.terracotta.opacity(0.1))
-                    .frame(width: 32, height: 32)
-
-                Image(systemName: hasAutomation ? "checkmark" : "gearshape.2")
-                    .font(.system(size: hasAutomation ? 12 : 13, weight: hasAutomation ? .bold : .regular))
-                    .foregroundColor(hasAutomation ? Theme.moss : Theme.terracotta)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("automation")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(Theme.textPrimary)
-                Text("control browser tabs via apple events")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Theme.textMuted)
-            }
-
-            Spacer()
-
-            if !hasAutomation {
-                Button(action: { requestAutomationPermission() }) {
-                    Text("grant")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(Theme.amber)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 5)
-                                .fill(Theme.amber.opacity(0.1))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .stroke(Theme.amber.opacity(0.3), lineWidth: 1)
-                                )
-                        )
-                }
-                .buttonStyle(.plain)
-                .pointerOnHover()
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Theme.bgCard)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(hasAutomation ? Theme.moss.opacity(0.2) : Theme.border, lineWidth: 1)
-                )
-        )
-    }
-
     private func requestAutomationPermission() {
         NSApp.activate(ignoringOtherApps: true)
 
@@ -587,137 +605,26 @@ struct OnboardingWindow: View {
     }
 
     private func checkAutomationPermission() -> Bool {
-        // Check if we already have automation permission (without prompting)
         let target = NSAppleEventDescriptor(bundleIdentifier: "com.apple.systemevents")
         guard let aeDesc = target.aeDesc else { return false }
         let status = AEDeterminePermissionToAutomateTarget(aeDesc, typeWildCard, typeWildCard, false)
         return status == noErr
     }
 
-    private var permissionsActions: some View {
-        HStack(spacing: 10) {
-            Button(action: { checkPermissions() }) {
-                HStack(spacing: 6) {
-                    if isCheckingPermissions {
-                        ProgressView()
-                            .scaleEffect(0.4)
-                            .frame(width: 12, height: 12)
-                    } else {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11))
-                    }
-                    Text("refresh")
-                        .font(.system(size: 12, design: .monospaced))
-                }
-                .foregroundColor(Theme.textSecondary)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Theme.bgCard)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Theme.border, lineWidth: 1)
-                        )
-                )
-            }
-            .buttonStyle(.plain)
-            .pointerOnHover()
-
-            if allPermissionsGranted {
-                Button(action: {
-                    withAnimation(.easeInOut(duration: 0.2)) { step = .ready }
-                }) {
-                    HStack(spacing: 6) {
-                        Text("continue")
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
-                        Image(systemName: "arrow.right")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(Theme.bg)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 9)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8).fill(Theme.amber)
-                    )
-                }
-                .buttonStyle(.plain)
-                .pointerOnHover()
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func permissionRow(icon: String, name: String, description: String, granted: Bool, settingsKey: String) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(granted ? Theme.moss.opacity(0.12) : Theme.terracotta.opacity(0.1))
-                    .frame(width: 32, height: 32)
-
-                Image(systemName: granted ? "checkmark" : icon)
-                    .font(.system(size: granted ? 12 : 13, weight: granted ? .bold : .regular))
-                    .foregroundColor(granted ? Theme.moss : Theme.terracotta)
-            }
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(Theme.textPrimary)
-                Text(description)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Theme.textMuted)
-            }
-
-            Spacer()
-
-            if !granted {
-                Button(action: { openSettings(settingsKey) }) {
-                    Text("grant")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(Theme.amber)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 5)
-                                .fill(Theme.amber.opacity(0.1))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .stroke(Theme.amber.opacity(0.3), lineWidth: 1)
-                                )
-                        )
-                }
-                .buttonStyle(.plain)
-                .pointerOnHover()
-            }
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Theme.bgCard)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(granted ? Theme.moss.opacity(0.2) : Theme.border, lineWidth: 1)
-                )
-        )
-    }
-
-    private func checkPermissions() {
+    private func checkPermissionsAsync() async {
         isCheckingPermissions = true
 
-        Task {
-            do {
-                let _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                hasScreenRecording = true
-            } catch {
-                hasScreenRecording = false
-            }
-
-            hasAccessibility = AXIsProcessTrusted()
-            hasFilesAccess = preAccessDirectories()
-            hasAutomation = checkAutomationPermission()
-            isCheckingPermissions = false
+        do {
+            let _ = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            hasScreenRecording = true
+        } catch {
+            hasScreenRecording = false
         }
+
+        hasAccessibility = AXIsProcessTrusted()
+        hasFilesAccess = preAccessDirectories()
+        hasAutomation = checkAutomationPermission()
+        isCheckingPermissions = false
     }
 
     private func preAccessDirectories() -> Bool {
