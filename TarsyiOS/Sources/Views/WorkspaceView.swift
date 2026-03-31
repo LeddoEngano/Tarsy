@@ -70,7 +70,7 @@ struct WorkspaceView: View {
     @State private var keyboardAnimation: Animation = .easeInOut(duration: 0.25)
 
     private enum ViewMode: String {
-        case browser, stream
+        case stream, browser
     }
 
     // Per-tab state isolation
@@ -820,17 +820,6 @@ struct WorkspaceView: View {
 
     private var viewModeSwitch: some View {
         HStack(spacing: 0) {
-            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { viewMode = .browser } }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "iphone")
-                        .font(.system(size: 10))
-                    Text("browser")
-                        .font(.system(size: 11, design: .monospaced))
-                }
-                    .foregroundColor(viewMode == .browser ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-            }
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) { viewMode = .stream }
                 // Signal StreamPlayerView to auto-start if not already running
@@ -848,13 +837,24 @@ struct WorkspaceView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
             }
+            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { viewMode = .browser } }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "iphone")
+                        .font(.system(size: 10))
+                    Text("browser")
+                        .font(.system(size: 11, design: .monospaced))
+                }
+                    .foregroundColor(viewMode == .browser ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 5)
+            }
         }
         .background(
             GeometryReader { geo in
                 RoundedRectangle(cornerRadius: 12)
                     .fill(TarsyTheme.backgroundTertiary)
                     .frame(width: geo.size.width / 2, height: geo.size.height)
-                    .offset(x: viewMode == .browser ? 0 : geo.size.width / 2)
+                    .offset(x: viewMode == .stream ? 0 : geo.size.width / 2)
                     .animation(.easeInOut(duration: 0.2), value: viewMode)
             }
         )
@@ -1362,6 +1362,14 @@ struct WorkspaceView: View {
             .map { "[\($0.role)] \($0.content)" }
             .joined(separator: "\n")
         let message = "Continue the following session. Here's the recent context:\n\n\(contextSummary)"
+
+        // Start Live Activity for continued session
+        LiveActivityManager.shared.startActivity(
+            workspaceId: workspace.id.uuidString,
+            workspaceName: workspace.name,
+            engineType: engineType,
+            tabId: uniqueId
+        )
 
         connectionManager.send(WSPacket(
             action: .engineCreate,
