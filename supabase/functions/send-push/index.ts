@@ -10,13 +10,12 @@
 
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import * as jose from "https://deno.land/x/jose@v4.14.4/index.ts";
 
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-const APNS_KEY_ID = Deno.env.get("APNS_KEY_ID")!;
-const APNS_TEAM_ID = Deno.env.get("APNS_TEAM_ID")!;
-const APNS_PRIVATE_KEY_B64 = Deno.env.get("APNS_PRIVATE_KEY")!;
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const APNS_KEY_ID = Deno.env.get("APNS_KEY_ID") ?? "";
+const APNS_TEAM_ID = Deno.env.get("APNS_TEAM_ID") ?? "";
+const APNS_PRIVATE_KEY_B64 = Deno.env.get("APNS_PRIVATE_KEY") ?? "";
 const APNS_BUNDLE_ID = Deno.env.get("APNS_BUNDLE_ID") || "com.tarsy.ios";
 
 // Use sandbox for development, production for release
@@ -33,17 +32,56 @@ interface PushNotification {
   workspace_id?: string;
 }
 
+function pemToKeyData(input: string): Uint8Array {
+  // Decode base64-encoded PEM if needed
+  let pem = input.startsWith("-----") ? input : atob(input);
+  pem = pem.replace(/\\n/g, "\n");
+
+  // Strip PEM headers/footers and whitespace to get raw base64
+  const b64 = pem
+    .replace(/-----BEGIN [A-Z ]+-----/, "")
+    .replace(/-----END [A-Z ]+-----/, "")
+    .replace(/\s/g, "");
+
+  // Decode base64 to binary
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
+function base64url(data: Uint8Array | string): string {
+  const str = typeof data === "string"
+    ? btoa(data)
+    : btoa(String.fromCharCode(...data));
+  return str.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 async function generateAPNsToken(): Promise<string> {
-  const privateKeyPem = atob(APNS_PRIVATE_KEY_B64);
-  const privateKey = await jose.importPKCS8(privateKeyPem, "ES256");
+  const keyData = pemToKeyData(APNS_PRIVATE_KEY_B64);
 
-  const jwt = await new jose.SignJWT({})
-    .setProtectedHeader({ alg: "ES256", kid: APNS_KEY_ID })
-    .setIssuer(APNS_TEAM_ID)
-    .setIssuedAt()
-    .sign(privateKey);
+  const privateKey = await crypto.subtle.importKey(
+    "pkcs8",
+    keyData,
+    { name: "ECDSA", namedCurve: "P-256" },
+    false,
+    ["sign"]
+  );
 
-  return jwt;
+  const header = base64url(JSON.stringify({ alg: "ES256", kid: APNS_KEY_ID }));
+  const now = Math.floor(Date.now() / 1000);
+  const payload = base64url(JSON.stringify({ iss: APNS_TEAM_ID, iat: now }));
+  const signingInput = `${header}.${payload}`;
+
+  const signature = await crypto.subtle.sign(
+    { name: "ECDSA", hash: "SHA-256" },
+    privateKey,
+    new TextEncoder().encode(signingInput)
+  );
+
+  return `${signingInput}.${base64url(new Uint8Array(signature))}`;
 }
 
 async function sendAPNs(
@@ -92,14 +130,33 @@ async function sendAPNs(
 
 serve(async (req) => {
   try {
-    // Validate Authorization header (webhook calls use service role key)
+    // Validate Authorization header — accept only service_role JWTs.
+    // Supabase gateway already validates the JWT (verify_jwt: true),
+    // so we just need to confirm the caller has the service_role role.
     const authHeader = req.headers.get("Authorization");
     if (!authHeader?.startsWith("Bearer ")) {
       return new Response(JSON.stringify({ error: "Missing authorization" }), { status: 401 });
     }
-    const token = authHeader.replace("Bearer ", "");
-    if (token !== SUPABASE_SERVICE_ROLE_KEY) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
+    const jwt = authHeader.replace("Bearer ", "");
+    try {
+      const payload = JSON.parse(atob(jwt.split(".")[1]));
+      if (payload.role !== "service_role") {
+        return new Response(JSON.stringify({ error: "Forbidden: requires service_role" }), { status: 403 });
+      }
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid token" }), { status: 401 });
+    }
+
+    // Check required env vars before proceeding
+    const missingVars = [];
+    if (!APNS_KEY_ID) missingVars.push("APNS_KEY_ID");
+    if (!APNS_TEAM_ID) missingVars.push("APNS_TEAM_ID");
+    if (!APNS_PRIVATE_KEY_B64) missingVars.push("APNS_PRIVATE_KEY");
+    if (!SUPABASE_URL) missingVars.push("SUPABASE_URL");
+    if (!SUPABASE_SERVICE_ROLE_KEY) missingVars.push("SUPABASE_SERVICE_ROLE_KEY");
+    if (missingVars.length > 0) {
+      console.error(`Missing env vars: ${missingVars.join(", ")}`);
+      return new Response(JSON.stringify({ error: `Missing env vars: ${missingVars.join(", ")}` }), { status: 500 });
     }
 
     const { record } = await req.json() as { record: PushNotification };
@@ -127,6 +184,7 @@ serve(async (req) => {
     }
 
     // Generate APNs JWT
+    console.log(`APNS_PRIVATE_KEY starts with: "${APNS_PRIVATE_KEY_B64.substring(0, 20)}" len=${APNS_PRIVATE_KEY_B64.length}`);
     const apnsToken = await generateAPNsToken();
 
     // Send to all devices
@@ -153,7 +211,9 @@ serve(async (req) => {
       { status: 200 }
     );
   } catch (err) {
-    console.error("Edge function error:", err);
-    return new Response(JSON.stringify({ error: "Failed to send notification" }), { status: 500 });
+    const errorMsg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    const stack = err instanceof Error ? err.stack : "";
+    console.error("Edge function error:", errorMsg, stack);
+    return new Response(JSON.stringify({ error: errorMsg, stack: stack?.split("\n").slice(0, 3) }), { status: 500 });
   }
 });
