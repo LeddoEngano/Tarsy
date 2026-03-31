@@ -30,10 +30,10 @@ export default function Navbar() {
             Contact
           </Link>
           <Link
-            href="https://apps.apple.com/app/tarsy"
+            href="/download/macos"
             className="hidden sm:inline-block text-[11px] uppercase tracking-wider bg-amber text-surface font-semibold px-4 py-1.5 rounded-full no-underline transition-all duration-200 hover:opacity-100 hover:shadow-md hover:shadow-amber/20 active:scale-[0.97]"
           >
-            Get Tarsy
+            Download
           </Link>
         </div>
       </div>

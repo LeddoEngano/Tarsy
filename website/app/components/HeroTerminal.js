@@ -11,19 +11,19 @@ const sequences = [
     { text: "  Found issue in src/auth/session.ts:47", style: "text-taupe" },
     { text: "  Applying fix...", style: "text-taupe" },
     { text: "", style: "" },
-    { text: "  + Fixed null check in validateToken()", style: "text-moss" },
-    { text: "  + Added test coverage", style: "text-moss" },
-    { text: "  + All 128 tests passing", style: "text-moss" },
+    { text: "  + Fixed null check in validateToken()", style: "text-cream/70" },
+    { text: "  + Added test coverage", style: "text-cream/70" },
+    { text: "  + All 128 tests passing", style: "text-cream/70" },
   ],
   [
     { text: "$ tarsy connect --relay", style: "text-cream" },
     { text: "", style: "" },
     { text: "  Establishing secure tunnel...", style: "text-taupe" },
-    { text: "  E2E encryption active", style: "text-moss" },
+    { text: "  E2E encryption active", style: "text-cream/70" },
     { text: "  Streaming at 30fps / 6Mbps", style: "text-taupe" },
     { text: "", style: "" },
-    { text: "  + Connected to MacBook Pro", style: "text-moss" },
-    { text: "  + Ready for remote dev", style: "text-moss" },
+    { text: "  + Connected to MacBook Pro", style: "text-cream/70" },
+    { text: "  + Ready for remote dev", style: "text-cream/70" },
   ],
   [
     { text: '$ aider "add dark mode toggle"', style: "text-cream" },
@@ -32,9 +32,9 @@ const sequences = [
     { text: "  Editing src/components/Theme.tsx", style: "text-taupe" },
     { text: "  Editing src/styles/globals.css", style: "text-taupe" },
     { text: "", style: "" },
-    { text: "  + Theme provider implemented", style: "text-moss" },
-    { text: "  + CSS variables configured", style: "text-moss" },
-    { text: "  + 12 files updated", style: "text-moss" },
+    { text: "  + Theme provider implemented", style: "text-cream/70" },
+    { text: "  + CSS variables configured", style: "text-cream/70" },
+    { text: "  + 12 files updated", style: "text-cream/70" },
   ],
 ];
 
@@ -59,12 +59,12 @@ function HeroTerminal() {
 
   return (
     <div className="relative">
-      <div className="absolute -inset-6 bg-amber/[0.03] rounded-3xl blur-2xl" />
-      <div className="relative bg-surface-raised border border-surface-overlay/60 rounded-2xl overflow-hidden shadow-2xl shadow-amber/[0.04]">
+      <div className="absolute -inset-6 bg-amber/[0.02] rounded-3xl blur-2xl" />
+      <div className="relative bg-surface-raised border border-surface-overlay/60 rounded-2xl overflow-hidden shadow-2xl shadow-black/20">
         <div className="flex items-center gap-2 px-5 py-3.5 border-b border-surface-overlay/50">
-          <div className="w-2.5 h-2.5 rounded-full bg-terracotta/50" />
-          <div className="w-2.5 h-2.5 rounded-full bg-amber/50" />
-          <div className="w-2.5 h-2.5 rounded-full bg-moss/50" />
+          <div className="w-2.5 h-2.5 rounded-full bg-[#555]" />
+          <div className="w-2.5 h-2.5 rounded-full bg-[#777]" />
+          <div className="w-2.5 h-2.5 rounded-full bg-[#999]" />
           <span className="ml-3 text-[11px] text-taupe/40 select-none">
             ~/my-project
           </span>

@@ -34,7 +34,7 @@ export default function Home() {
     <>
       {/* Hero */}
       <section className="min-h-[100dvh] flex items-center pt-14 relative">
-        <div className="absolute top-0 inset-x-0 h-[500px] bg-amber/[0.03] blur-[100px] pointer-events-none" />
+        <div className="absolute top-0 inset-x-0 h-[500px] bg-amber/[0.02] blur-[100px] pointer-events-none" />
 
         <div className="relative max-w-6xl mx-auto px-6 w-full">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
@@ -62,12 +62,11 @@ export default function Home() {
               </ScrollReveal>
               <ScrollReveal delay={0.3}>
                 <div className="flex flex-wrap gap-3 mt-10">
-                  <a
-                    href="https://apps.apple.com/app/tarsy"
-                    className="inline-block bg-amber text-surface text-sm font-semibold px-8 py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-amber/25 active:translate-y-0 active:scale-[0.98]"
+                  <span
+                    className="inline-block bg-amber/10 text-taupe text-sm font-semibold px-8 py-3.5 rounded-xl cursor-not-allowed select-none border border-amber/10"
                   >
-                    iPhone
-                  </a>
+                    iPhone — Coming Soon
+                  </span>
                   <a
                     href="/download/macos"
                     className="inline-block border border-amber/30 text-amber text-sm font-semibold px-8 py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
@@ -119,7 +118,7 @@ export default function Home() {
             {steps.map((s, i) => (
               <ScrollReveal key={s.num} delay={i * 0.12}>
                 <div>
-                  <span className="font-display text-5xl font-bold text-amber/[0.12] leading-none select-none">
+                  <span className="font-display text-5xl font-bold text-amber/[0.08] leading-none select-none">
                     {s.num}
                   </span>
                   <h3 className="text-sm font-semibold text-cream mt-4">
@@ -176,17 +175,16 @@ export default function Home() {
                     </li>
                   ))}
                 </ul>
-                <a
-                  href="https://apps.apple.com/app/tarsy"
-                  className="block text-center bg-surface-overlay/50 text-cream text-sm font-semibold px-6 py-3 rounded-xl mt-8 no-underline transition-all duration-200 hover:opacity-100 hover:bg-surface-overlay active:scale-[0.98]"
+                <span
+                  className="block text-center bg-surface-overlay/50 text-taupe text-sm font-semibold px-6 py-3 rounded-xl mt-8 cursor-not-allowed select-none"
                 >
-                  Get Tarsy Pro
-                </a>
+                  Coming Soon
+                </span>
               </div>
             </ScrollReveal>
 
             <ScrollReveal delay={0.2} className="h-full">
-              <div className="relative bg-surface-raised border border-amber/30 rounded-2xl p-8 h-full flex flex-col text-left shadow-lg shadow-amber/[0.04]">
+              <div className="relative bg-surface-raised border border-amber/20 rounded-2xl p-8 h-full flex flex-col text-left shadow-lg shadow-amber/[0.02]">
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber text-surface text-[10px] font-bold uppercase tracking-wider px-3.5 py-1 rounded-full whitespace-nowrap">
                   Save 33%
                 </div>
@@ -213,12 +211,11 @@ export default function Home() {
                     </li>
                   ))}
                 </ul>
-                <a
-                  href="https://apps.apple.com/app/tarsy"
-                  className="block text-center bg-amber text-surface text-sm font-semibold px-6 py-3 rounded-xl mt-8 no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-amber/25 active:translate-y-0 active:scale-[0.98]"
+                <span
+                  className="block text-center bg-amber/10 text-taupe text-sm font-semibold px-6 py-3 rounded-xl mt-8 cursor-not-allowed select-none border border-amber/10"
                 >
-                  Get Tarsy Pro
-                </a>
+                  Coming Soon
+                </span>
               </div>
             </ScrollReveal>
           </div>
@@ -236,12 +233,11 @@ export default function Home() {
               Download Tarsy and start shipping code from your pocket today.
             </p>
             <div className="flex flex-wrap justify-center gap-3 mt-8">
-              <a
-                href="https://apps.apple.com/app/tarsy"
-                className="inline-block bg-amber text-surface text-sm font-semibold px-8 py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-amber/25 active:translate-y-0 active:scale-[0.98]"
+              <span
+                className="inline-block bg-amber/10 text-taupe text-sm font-semibold px-8 py-3.5 rounded-xl cursor-not-allowed select-none border border-amber/10"
               >
-                iPhone
-              </a>
+                iPhone — Coming Soon
+              </span>
               <a
                 href="/download/macos"
                 className="inline-block border border-amber/30 text-amber text-sm font-semibold px-8 py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"

@@ -21,6 +21,7 @@ export const metadata = {
     "Stream, control, and manage your Mac development workspace from your iPhone. Live screen streaming, AI coding agents, and remote access in your pocket.",
   icons: {
     icon: "/icon.png",
+    apple: "/icon.png",
   },
 };
 

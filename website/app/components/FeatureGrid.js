@@ -68,7 +68,7 @@ export default function FeatureGrid() {
               delay: i * 0.08,
               ease: [0.16, 1, 0.3, 1],
             }}
-            className={`${f.colSpan} group bg-surface-raised/80 border border-surface-overlay/40 rounded-2xl p-7 transition-all duration-300 hover:border-amber/20 hover:bg-surface-raised`}
+            className={`${f.colSpan} group bg-surface-raised/80 border border-surface-overlay/40 rounded-2xl p-7 transition-all duration-300 hover:border-amber/15 hover:bg-surface-raised`}
           >
             <Icon
               size={28}

@@ -7,7 +7,7 @@ function HeroDevices() {
   return (
     <div className="relative w-full max-w-[520px] ml-auto pl-12 pb-20">
       {/* Ambient glow */}
-      <div className="absolute -inset-6 bg-amber/[0.03] rounded-3xl blur-2xl" />
+      <div className="absolute -inset-6 bg-amber/[0.02] rounded-3xl blur-2xl" />
 
       {/* MacBook */}
       <motion.div
@@ -17,10 +17,10 @@ function HeroDevices() {
         transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
       >
         {/* Screen bezel */}
-        <div className="bg-[#2e2e2e] rounded-xl overflow-hidden border border-surface-overlay/60 shadow-2xl shadow-black/30">
+        <div className="bg-[#1a1a1a] rounded-xl overflow-hidden border border-surface-overlay/60 shadow-2xl shadow-black/30">
           {/* Camera dot */}
           <div className="flex justify-center py-1.5">
-            <div className="w-1.5 h-1.5 rounded-full bg-[#1a1a1a]/80" />
+            <div className="w-1.5 h-1.5 rounded-full bg-[#0a0a0a]/80" />
           </div>
           {/* Screen area */}
           <div className="mx-1.5 mb-1.5 rounded-lg overflow-hidden bg-surface aspect-[16/10] relative">
@@ -55,8 +55,8 @@ function HeroDevices() {
           </div>
         </div>
         {/* MacBook base */}
-        <div className="mx-auto w-[80%] h-2.5 bg-[#2e2e2e] rounded-b-lg border-x border-b border-surface-overlay/50" />
-        <div className="mx-auto w-[20%] h-1 bg-[#3a3a3a]/60 rounded-b-sm" />
+        <div className="mx-auto w-[80%] h-2.5 bg-[#1a1a1a] rounded-b-lg border-x border-b border-surface-overlay/50" />
+        <div className="mx-auto w-[20%] h-1 bg-[#222]/60 rounded-b-sm" />
         <p className="text-center mt-3 text-[10px] text-taupe/30 uppercase tracking-[0.15em] select-none">
           executes on your mac
         </p>
@@ -73,10 +73,10 @@ function HeroDevices() {
           ease: [0.16, 1, 0.3, 1],
         }}
       >
-        <div className="bg-[#1c1c1e] border border-surface-overlay/70 rounded-[1.4rem] p-[3px] shadow-2xl shadow-black/50">
+        <div className="bg-[#111] border border-surface-overlay/70 rounded-[1.4rem] p-[3px] shadow-2xl shadow-black/50">
           {/* Dynamic Island */}
           <div className="flex justify-center mt-1.5 mb-0.5">
-            <div className="w-12 h-3 bg-[#111] rounded-full" />
+            <div className="w-12 h-3 bg-[#000] rounded-full" />
           </div>
           {/* Screen area */}
           <div className="rounded-[1.1rem] overflow-hidden bg-surface aspect-[9/19] relative">
@@ -111,7 +111,7 @@ function HeroDevices() {
           </div>
           {/* Home indicator */}
           <div className="flex justify-center my-1">
-            <div className="w-7 h-[3px] bg-[#444] rounded-full" />
+            <div className="w-7 h-[3px] bg-[#333] rounded-full" />
           </div>
         </div>
         <p className="text-center mt-2 text-[10px] text-taupe/30 uppercase tracking-[0.15em] select-none">
@@ -138,7 +138,7 @@ function HeroDevices() {
             stroke="currentColor"
             strokeWidth="1"
             strokeDasharray="4 3"
-            opacity="0.35"
+            opacity="0.25"
           />
           <path
             d="M54 7 L60 12 L54 17"
@@ -146,7 +146,7 @@ function HeroDevices() {
             strokeWidth="1"
             strokeLinecap="round"
             strokeLinejoin="round"
-            opacity="0.35"
+            opacity="0.25"
           />
         </svg>
       </motion.div>
