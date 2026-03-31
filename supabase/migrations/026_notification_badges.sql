@@ -1,12 +1,13 @@
 -- Add read_at column for tracking which notifications have been seen
-ALTER TABLE push_notifications ADD COLUMN read_at timestamptz;
+ALTER TABLE push_notifications ADD COLUMN IF NOT EXISTS read_at timestamptz;
 
 -- Partial index for fast unread-per-workspace queries
-CREATE INDEX idx_push_notifications_unread_per_workspace
+CREATE INDEX IF NOT EXISTS idx_push_notifications_unread_per_workspace
   ON push_notifications (user_id, workspace_id)
   WHERE read_at IS NULL;
 
 -- Allow users to mark their own notifications as read
+DROP POLICY IF EXISTS "Users can update own notifications" ON push_notifications;
 CREATE POLICY "Users can update own notifications"
   ON push_notifications FOR UPDATE
   USING (auth.uid() = user_id)
