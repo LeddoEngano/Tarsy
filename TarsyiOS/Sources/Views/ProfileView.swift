@@ -30,7 +30,9 @@ struct ProfileView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         profileHeader
                         subscriptionSection
-                        agentPermissionsSection
+                        if !connectionManager.detectedAgents.isEmpty {
+                            agentPermissionsSection
+                        }
                         voiceInputSection
                         legalSection
                         aboutSection
