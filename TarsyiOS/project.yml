@@ -32,11 +32,6 @@ targets:
           - arm64
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
-        UISupportedInterfaceOrientations~ipad:
-          - UIInterfaceOrientationPortrait
-          - UIInterfaceOrientationPortraitUpsideDown
-          - UIInterfaceOrientationLandscapeLeft
-          - UIInterfaceOrientationLandscapeRight
         NSLocalNetworkUsageDescription: "Tarsy connects to your Mac on the local network to stream and send commands."
         NSPhotoLibraryUsageDescription: "Tarsy needs access to your photos to send images to the AI agent."
         NSPhotoLibraryAddUsageDescription: "Tarsy saves screenshots from the stream to your photo library."
@@ -58,6 +53,7 @@ targets:
         aps-environment: production
     settings:
       base:
+        TARGETED_DEVICE_FAMILY: "1"
         PRODUCT_BUNDLE_IDENTIFIER: com.tarsy.ios
         DEVELOPMENT_TEAM: "J2M334NJ3L"
         CODE_SIGN_IDENTITY: "Apple Development"
