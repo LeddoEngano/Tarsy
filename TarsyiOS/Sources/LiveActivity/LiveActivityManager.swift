@@ -8,8 +8,8 @@ class LiveActivityManager: ObservableObject {
 
     /// Active activities indexed by activityKey (workspaceId-tabId)
     private var activities: [String: Activity<TarsyActivityAttributes>] = [:]
-    /// Start times per activity
-    private var startDates: [String: Date] = [:]
+    /// Start times per activity (Unix timestamps)
+    private var startDates: [String: Double] = [:]
     /// Tracked context percent per activity
     private var contextPercents: [String: Double] = [:]
 
@@ -42,7 +42,7 @@ class LiveActivityManager: ObservableObject {
             Task { await zombie.end(nil, dismissalPolicy: .immediate) }
         }
 
-        let now = Date()
+        let now = Date().timeIntervalSince1970
         let attributes = TarsyActivityAttributes(
             workspaceId: workspaceId,
             workspaceName: workspaceName,
@@ -61,11 +61,19 @@ class LiveActivityManager: ObservableObject {
             let activity = try Activity.request(
                 attributes: attributes,
                 content: .init(state: state, staleDate: .now.addingTimeInterval(staleTTL)),
-                pushType: nil
+                pushType: .token
             )
             activities[activityKey] = activity
             startDates[activityKey] = now
             contextPercents[activityKey] = 0
+
+            // Observe push token updates and store in Supabase for APNs Live Activity pushes
+            Task {
+                for await tokenData in activity.pushTokenUpdates {
+                    let token = tokenData.map { String(format: "%02x", $0) }.joined()
+                    await self.storeLiveActivityToken(token, workspaceId: workspaceId)
+                }
+            }
         } catch {
 #if DEBUG
             print("[LiveActivity] Failed to start: \(error)")
@@ -131,7 +139,6 @@ class LiveActivityManager: ObservableObject {
         let content = ActivityContent(state: state, staleDate: .now.addingTimeInterval(staleTTL))
 
         Task {
-            // Send alert when agent needs user input so the user notices
             if status == "waiting" {
                 await activity.update(content, alertConfiguration: .init(
                     title: LocalizedStringResource(stringLiteral: "Tarsy"),
@@ -147,7 +154,6 @@ class LiveActivityManager: ObservableObject {
     func endActivity(workspaceId: String, status: String = "completed", tabId: String? = nil) {
         let activityKey = key(workspaceId: workspaceId, tabId: tabId)
 
-        // Try tracked dict first
         if let activity = activities[activityKey] {
             let startDate = startDates[activityKey] ?? activity.content.state.startedAt
             let cp = contextPercents[activityKey] ?? 0
@@ -159,7 +165,6 @@ class LiveActivityManager: ObservableObject {
                 contextPercent: cp
             )
             Task {
-                // Send completion/error alert so user is notified even when away
                 let alertBody = status == "error" ? "Agent encountered an error" : "Agent task completed"
                 await activity.update(
                     .init(state: finalState, staleDate: nil),
@@ -174,12 +179,13 @@ class LiveActivityManager: ObservableObject {
             activities.removeValue(forKey: activityKey)
             startDates.removeValue(forKey: activityKey)
             contextPercents.removeValue(forKey: activityKey)
+
+            // Clean up push token from Supabase
+            Task { await removeLiveActivityToken(workspaceId: workspaceId) }
             return
         }
 
-        // Fallback: find matching activity directly from the system.
-        // This handles the case where the app was suspended and lost in-memory references
-        // but the Live Activity is still visible on the Lock Screen / Dynamic Island.
+        // Fallback: find matching activity directly from the system
         for activity in Activity<TarsyActivityAttributes>.activities {
             if activity.attributes.workspaceId == workspaceId,
                activity.activityState == .active || activity.activityState == .stale {
@@ -191,14 +197,11 @@ class LiveActivityManager: ObservableObject {
                     contextPercent: activity.content.state.contextPercent
                 )
                 Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 60)) }
-#if DEBUG
-                print("[LiveActivity] Ended orphaned system activity for workspace \(workspaceId)")
-#endif
             }
         }
+        Task { await removeLiveActivityToken(workspaceId: workspaceId) }
     }
 
-    /// End all activities for a workspace (e.g., when user leaves the workspace view)
     func endActivitiesForWorkspace(_ workspaceId: String) {
         let keysToEnd = activities.keys.filter { $0.hasPrefix(workspaceId) }
         for k in keysToEnd {
@@ -217,7 +220,6 @@ class LiveActivityManager: ObservableObject {
             contextPercents.removeValue(forKey: k)
         }
 
-        // Also end any system activities for this workspace not in our dict
         for activity in Activity<TarsyActivityAttributes>.activities {
             if activity.attributes.workspaceId == workspaceId,
                activity.activityState == .active || activity.activityState == .stale {
@@ -231,11 +233,12 @@ class LiveActivityManager: ObservableObject {
                 Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .default) }
             }
         }
+        Task { await removeLiveActivityToken(workspaceId: workspaceId) }
     }
 
     func endAllActivities() {
         for (key, activity) in activities {
-            let startDate = startDates[key] ?? Date()
+            let startDate = startDates[key] ?? Date().timeIntervalSince1970
             let state = TarsyActivityAttributes.ContentState(
                 status: "completed", currentTool: "Done", currentToolIcon: "checkmark.circle",
                 startedAt: startDate, contextPercent: contextPercents[key] ?? 0
@@ -246,16 +249,76 @@ class LiveActivityManager: ObservableObject {
         startDates.removeAll()
         contextPercents.removeAll()
 
-        // Also end any system activities not in our dict
         for activity in Activity<TarsyActivityAttributes>.activities {
             guard activity.activityState == .active || activity.activityState == .stale else { continue }
             Task { await activity.end(nil, dismissalPolicy: .immediate) }
         }
+
+        // Clean up all tokens
+        Task { await removeAllLiveActivityTokens() }
     }
 
     var hasActiveActivities: Bool {
         !activities.isEmpty || !Activity<TarsyActivityAttributes>.activities.filter({
             $0.activityState == .active || $0.activityState == .stale
         }).isEmpty
+    }
+
+    // MARK: - Push Token Management
+
+    private func storeLiveActivityToken(_ token: String, workspaceId: String) async {
+        do {
+            let userId = try await supabase.auth.session.user.id.uuidString
+            try await supabase
+                .from("live_activity_tokens")
+                .upsert(
+                    [
+                        "user_id": userId,
+                        "workspace_id": workspaceId,
+                        "activity_token": token,
+                        "updated_at": ISO8601DateFormatter().string(from: Date())
+                    ],
+                    onConflict: "activity_token"
+                )
+                .execute()
+#if DEBUG
+            print("[LiveActivity] Stored push token \(token.prefix(8))... for workspace \(workspaceId.prefix(8))")
+#endif
+        } catch {
+#if DEBUG
+            print("[LiveActivity] Failed to store push token: \(error)")
+#endif
+        }
+    }
+
+    private func removeLiveActivityToken(workspaceId: String) async {
+        do {
+            let userId = try await supabase.auth.session.user.id.uuidString
+            try await supabase
+                .from("live_activity_tokens")
+                .delete()
+                .eq("user_id", value: userId)
+                .eq("workspace_id", value: workspaceId)
+                .execute()
+        } catch {
+#if DEBUG
+            print("[LiveActivity] Failed to remove push token: \(error)")
+#endif
+        }
+    }
+
+    private func removeAllLiveActivityTokens() async {
+        do {
+            let userId = try await supabase.auth.session.user.id.uuidString
+            try await supabase
+                .from("live_activity_tokens")
+                .delete()
+                .eq("user_id", value: userId)
+                .execute()
+        } catch {
+#if DEBUG
+            print("[LiveActivity] Failed to remove all push tokens: \(error)")
+#endif
+        }
     }
 }
