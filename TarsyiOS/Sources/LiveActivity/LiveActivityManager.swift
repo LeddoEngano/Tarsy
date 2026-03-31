@@ -10,6 +10,8 @@ class LiveActivityManager: ObservableObject {
     private var activities: [String: Activity<TarsyActivityAttributes>] = [:]
     /// Start times per activity
     private var startDates: [String: Date] = [:]
+    /// Tracked context percent per activity
+    private var contextPercents: [String: Double] = [:]
 
     private init() {}
 
@@ -48,7 +50,7 @@ class LiveActivityManager: ObservableObject {
         let state = TarsyActivityAttributes.ContentState(
             status: "running",
             currentTool: "Starting",
-            currentToolIcon: "play.circle",
+            currentToolIcon: "arrow.triangle.2.circlepath",
             startedAt: now
         )
 
@@ -60,6 +62,7 @@ class LiveActivityManager: ObservableObject {
             )
             activities[activityKey] = activity
             startDates[activityKey] = now
+            contextPercents[activityKey] = 0
         } catch {
 #if DEBUG
             print("[LiveActivity] Failed to start: \(error)")
@@ -67,35 +70,75 @@ class LiveActivityManager: ObservableObject {
         }
     }
 
-    func updateTool(workspaceId: String, tool: AgentToolType, tabId: String? = nil) {
+    func updateTool(workspaceId: String, tool: AgentToolType, tabId: String? = nil, contextPercent: Double? = nil) {
         let activityKey = key(workspaceId: workspaceId, tabId: tabId)
         guard let activity = activities[activityKey],
               let startDate = startDates[activityKey] else { return }
+
+        if let cp = contextPercent { contextPercents[activityKey] = cp }
+        let cp = contextPercents[activityKey] ?? 0
 
         let state = TarsyActivityAttributes.ContentState(
             status: "running",
             currentTool: tool.displayName,
             currentToolIcon: tool.iconName,
-            startedAt: startDate
+            startedAt: startDate,
+            contextPercent: cp
         )
 
         Task { await activity.update(.init(state: state, staleDate: nil)) }
     }
 
-    func updateStatus(workspaceId: String, status: String, tabId: String? = nil) {
+    func updateContext(workspaceId: String, contextPercent: Double, tabId: String? = nil) {
         let activityKey = key(workspaceId: workspaceId, tabId: tabId)
+        contextPercents[activityKey] = contextPercent
+
         guard let activity = activities[activityKey],
               let startDate = startDates[activityKey] else { return }
 
         let currentState = activity.content.state
         let state = TarsyActivityAttributes.ContentState(
-            status: status,
-            currentTool: status == "waiting" ? "Needs input" : currentState.currentTool,
-            currentToolIcon: status == "waiting" ? "questionmark.circle" : currentState.currentToolIcon,
-            startedAt: startDate
+            status: currentState.status,
+            currentTool: currentState.currentTool,
+            currentToolIcon: currentState.currentToolIcon,
+            startedAt: startDate,
+            contextPercent: contextPercent,
+            message: currentState.message
         )
 
         Task { await activity.update(.init(state: state, staleDate: nil)) }
+    }
+
+    func updateStatus(workspaceId: String, status: String, tabId: String? = nil, message: String? = nil) {
+        let activityKey = key(workspaceId: workspaceId, tabId: tabId)
+        guard let activity = activities[activityKey],
+              let startDate = startDates[activityKey] else { return }
+
+        let cp = contextPercents[activityKey] ?? 0
+        let currentState = activity.content.state
+        let state = TarsyActivityAttributes.ContentState(
+            status: status,
+            currentTool: status == "waiting" ? "Needs input" : currentState.currentTool,
+            currentToolIcon: status == "waiting" ? "questionmark.circle" : currentState.currentToolIcon,
+            startedAt: startDate,
+            contextPercent: cp,
+            message: status == "waiting" ? message : nil
+        )
+
+        let content = ActivityContent(state: state, staleDate: nil)
+
+        Task {
+            // Send alert when agent needs user input so the user notices
+            if status == "waiting" {
+                await activity.update(content, alertConfiguration: .init(
+                    title: LocalizedStringResource(stringLiteral: "Tarsy"),
+                    body: LocalizedStringResource(stringLiteral: message ?? "Your agent needs input"),
+                    sound: .default
+                ))
+            } else {
+                await activity.update(content)
+            }
+        }
     }
 
     func endActivity(workspaceId: String, status: String = "completed", tabId: String? = nil) {
@@ -104,15 +147,18 @@ class LiveActivityManager: ObservableObject {
         // Try tracked dict first
         if let activity = activities[activityKey] {
             let startDate = startDates[activityKey] ?? activity.content.state.startedAt
+            let cp = contextPercents[activityKey] ?? 0
             let finalState = TarsyActivityAttributes.ContentState(
                 status: status,
                 currentTool: status == "error" ? "Failed" : "Done",
                 currentToolIcon: status == "error" ? "xmark.circle" : "checkmark.circle",
-                startedAt: startDate
+                startedAt: startDate,
+                contextPercent: cp
             )
             Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 60)) }
             activities.removeValue(forKey: activityKey)
             startDates.removeValue(forKey: activityKey)
+            contextPercents.removeValue(forKey: activityKey)
             return
         }
 
@@ -126,7 +172,8 @@ class LiveActivityManager: ObservableObject {
                     status: status,
                     currentTool: status == "error" ? "Failed" : "Done",
                     currentToolIcon: status == "error" ? "xmark.circle" : "checkmark.circle",
-                    startedAt: activity.content.state.startedAt
+                    startedAt: activity.content.state.startedAt,
+                    contextPercent: activity.content.state.contextPercent
                 )
                 Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .after(.now + 60)) }
 #if DEBUG
@@ -145,12 +192,14 @@ class LiveActivityManager: ObservableObject {
                     status: "completed",
                     currentTool: "Done",
                     currentToolIcon: "checkmark.circle",
-                    startedAt: startDate
+                    startedAt: startDate,
+                    contextPercent: contextPercents[k] ?? 0
                 )
                 Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .default) }
             }
             activities.removeValue(forKey: k)
             startDates.removeValue(forKey: k)
+            contextPercents.removeValue(forKey: k)
         }
 
         // Also end any system activities for this workspace not in our dict
@@ -161,7 +210,8 @@ class LiveActivityManager: ObservableObject {
                     status: "completed",
                     currentTool: "Done",
                     currentToolIcon: "checkmark.circle",
-                    startedAt: activity.content.state.startedAt
+                    startedAt: activity.content.state.startedAt,
+                    contextPercent: activity.content.state.contextPercent
                 )
                 Task { await activity.end(.init(state: finalState, staleDate: nil), dismissalPolicy: .default) }
             }
@@ -172,12 +222,14 @@ class LiveActivityManager: ObservableObject {
         for (key, activity) in activities {
             let startDate = startDates[key] ?? Date()
             let state = TarsyActivityAttributes.ContentState(
-                status: "completed", currentTool: "Done", currentToolIcon: "checkmark.circle", startedAt: startDate
+                status: "completed", currentTool: "Done", currentToolIcon: "checkmark.circle",
+                startedAt: startDate, contextPercent: contextPercents[key] ?? 0
             )
             Task { await activity.end(.init(state: state, staleDate: nil), dismissalPolicy: .default) }
         }
         activities.removeAll()
         startDates.removeAll()
+        contextPercents.removeAll()
 
         // Also end any system activities not in our dict
         for activity in Activity<TarsyActivityAttributes>.activities {
