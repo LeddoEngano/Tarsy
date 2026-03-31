@@ -35,6 +35,7 @@ struct WorkspaceView: View {
     @EnvironmentObject var machineService: MachineService
     @EnvironmentObject var workspaceService: WorkspaceService
     @EnvironmentObject var subscriptionManager: SubscriptionManager
+    @EnvironmentObject var badgeService: NotificationBadgeService
 
     @State private var selectedTabIndex = 0
     @State private var tabs: [TerminalTab] = []
@@ -256,6 +257,8 @@ struct WorkspaceView: View {
         .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .task {
+            await badgeService.clearBadge(for: workspace.id)
+
             // Initialize tabs
             if tabs.isEmpty {
                 // Show OpenClaw tab if installed (fixed tab, first position)

@@ -92,6 +92,7 @@ struct TarsyiOSApp: App {
     @StateObject private var subscriptionManager = SubscriptionManager.shared
     @StateObject private var profileService = ProfileService()
     @StateObject private var deepLinkRouter = DeepLinkRouter()
+    @StateObject private var badgeService = NotificationBadgeService()
 
     var body: some Scene {
         WindowGroup {
@@ -103,6 +104,7 @@ struct TarsyiOSApp: App {
                 .environmentObject(subscriptionManager)
                 .environmentObject(profileService)
                 .environmentObject(deepLinkRouter)
+                .environmentObject(badgeService)
                 .onAppear {
                     AppDelegate.deepLinkRouter = deepLinkRouter
                     subscriptionManager.profileService = profileService
@@ -123,9 +125,11 @@ struct TarsyiOSApp: App {
                     case .background:
                         connectionManager.disconnect()
                     case .active:
-                        if authManager.isAuthenticated && !connectionManager.isConnected {
-                            Task {
-                                await connectionManager.reconnectIfNeeded()
+                        badgeService.clearAppIconBadge()
+                        if authManager.isAuthenticated {
+                            Task { await badgeService.refreshCounts() }
+                            if !connectionManager.isConnected {
+                                Task { await connectionManager.reconnectIfNeeded() }
                             }
                         }
                     default:

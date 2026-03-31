@@ -9,6 +9,7 @@ struct DashboardView: View {
     @EnvironmentObject var subscriptionManager: SubscriptionManager
     @EnvironmentObject var profileService: ProfileService
     @EnvironmentObject var deepLinkRouter: DeepLinkRouter
+    @EnvironmentObject var badgeService: NotificationBadgeService
     @StateObject private var taskService = AgentTaskService()
     @State private var showNewWorkspace = false
     @State private var showProfile = false
@@ -188,6 +189,7 @@ struct DashboardView: View {
             await workspaceService.fetchWorkspaces()
             await taskService.loadActiveTasks()
             await taskService.cleanupOldTasks()
+            await badgeService.refreshCounts()
         }
         .onAppear {
             // Poll machine status with jitter (25-35s) to avoid thundering herd
@@ -510,7 +512,7 @@ struct DashboardView: View {
             LazyVStack(spacing: 12) {
                 ForEach(filteredWorkspaces) { workspace in
                     NavigationLink(destination: WorkspaceView(workspace: workspace)) {
-                        WorkspaceCard(workspace: workspace)
+                        WorkspaceCard(workspace: workspace, unreadCount: badgeService.unreadCounts[workspace.id] ?? 0)
                     }
                     .contextMenu {
                         NavigationLink(destination: AIContextEditorView(workspace: workspace).environmentObject(workspaceService)) {
@@ -533,12 +535,14 @@ struct DashboardView: View {
             await machineService.fetchMachine()
             await workspaceService.fetchWorkspaces()
             await taskService.loadActiveTasks()
+            await badgeService.refreshCounts()
         }
     }
 }
 
 struct WorkspaceCard: View {
     let workspace: Workspace
+    var unreadCount: Int = 0
 
     var body: some View {
         HStack(spacing: 16) {
@@ -585,6 +589,18 @@ struct WorkspaceCard: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(TarsyTheme.backgroundTertiary, lineWidth: 1)
         )
+        .overlay(alignment: .topTrailing) {
+            if unreadCount > 0 {
+                Text("\(unreadCount)")
+                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(TarsyTheme.accentTerracotta)
+                    .clipShape(Capsule())
+                    .offset(x: -8, y: 8)
+            }
+        }
     }
 }
 
