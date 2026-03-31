@@ -600,6 +600,7 @@ struct WorkspaceView: View {
                 activeSessionId: activeSessionIdBinding,
                 activeEngineType: currentTab.engineType ?? .claude,
                 onSessionCreated: handleSessionCreated,
+                activeTabId: currentTab.id,
                 todoManager: todoManager,
                 interactiveQuestions: $interactiveQuestions,
                 interactiveOptions: $interactiveOptions,
@@ -723,6 +724,7 @@ struct WorkspaceView: View {
                         activeSessionId: activeSessionIdBinding,
                         activeEngineType: currentTab.engineType ?? .claude,
                         onSessionCreated: handleSessionCreated,
+                        activeTabId: currentTab.id,
                         todoManager: todoManager,
                         interactiveQuestions: $interactiveQuestions,
                         interactiveOptions: $interactiveOptions,
@@ -808,6 +810,7 @@ struct WorkspaceView: View {
             activeSessionId: activeSessionIdBinding,
             activeEngineType: currentTab.engineType ?? .claude,
             onSessionCreated: handleSessionCreated,
+            activeTabId: currentTab.id,
             todoManager: todoManager,
             interactiveQuestions: $interactiveQuestions,
             interactiveOptions: $interactiveOptions,
@@ -1460,6 +1463,20 @@ struct WorkspaceView: View {
                     } else {
                         LiveActivityManager.shared.endActivity(workspaceId: workspace.id.uuidString, tabId: currentTab.id)
                     }
+                case .engineError:
+                    let errSid = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
+                    todoManager.markCompleted(sessionId: errSid)
+                    if isActiveTabSession(packet) {
+                        isAgentThinking = false
+                        agentActivity = nil
+                    } else {
+                        updateBackgroundTabState(sessionId: errSid) { $0.isThinking = false; $0.activity = nil }
+                    }
+                    if let tid = tabId(forSession: errSid) {
+                        LiveActivityManager.shared.endActivity(workspaceId: workspace.id.uuidString, status: "error", tabId: tid)
+                    } else {
+                        LiveActivityManager.shared.endActivity(workspaceId: workspace.id.uuidString, status: "error", tabId: currentTab.id)
+                    }
                 case .engineCreate:
                     if let sessionId = packet.payload?["sessionId"], !tabs.isEmpty {
                         tabs[safeTabIndex].sessionId = sessionId
@@ -1503,7 +1520,9 @@ struct WorkspaceView: View {
                         else if engineModel.contains("haiku") { windowSize = 200_000 }
                         else { windowSize = 200_000 }
                         contextPercent = Double(total) / Double(windowSize) * 100
-                        LiveActivityManager.shared.updateContext(workspaceId: workspace.id.uuidString, contextPercent: contextPercent, tabId: currentTab.id)
+                        let statusSessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
+                        let statusTabId = tabId(forSession: statusSessionId) ?? currentTab.id
+                        LiveActivityManager.shared.updateContext(workspaceId: workspace.id.uuidString, contextPercent: contextPercent, tabId: statusTabId)
                     }
 
                 // Git pull result
@@ -1561,16 +1580,18 @@ struct WorkspaceView: View {
                 if !toolName.isEmpty {
                     todoManager.updateTool(sessionId: sessionId, tool: toolName)
                 }
-                // Update Live Activity with current tool
+                // Update Live Activity with current tool (resolve correct tab for background tabs)
+                let activityTabId = resolvedTabId ?? currentTab.id
                 if let tool = AgentToolType.parse(from: clean) {
-                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: currentTab.id, contextPercent: contextPercent)
+                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: activityTabId, contextPercent: contextPercent)
                 }
             } else {
                 agentActivity = nil
                 chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
                 // Parse tool from raw output too
+                let activityTabId = resolvedTabId ?? currentTab.id
                 if let tool = AgentToolType.parse(from: output) {
-                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: currentTab.id, contextPercent: contextPercent)
+                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: activityTabId, contextPercent: contextPercent)
                 }
             }
         }
@@ -1593,7 +1614,8 @@ struct WorkspaceView: View {
                 }
             }
         }
-        LiveActivityManager.shared.updateStatus(workspaceId: workspace.id.uuidString, status: "waiting", tabId: currentTab.id, message: questionText)
+        let askTabId = tabId(forSession: sessionId) ?? currentTab.id
+        LiveActivityManager.shared.updateStatus(workspaceId: workspace.id.uuidString, status: "waiting", tabId: askTabId, message: questionText)
     }
 
     private var engineDisplayName: String {
