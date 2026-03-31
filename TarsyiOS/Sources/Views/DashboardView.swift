@@ -13,9 +13,10 @@ struct DashboardView: View {
     @State private var showNewWorkspace = false
     @State private var showProfile = false
     @State private var showPaywall = false
-    @State private var showQuickDispatch = false
     @State private var showActiveSessions = false
-    @State private var showAIWizard = false
+    // MARK: - Hidden for App Store review (re-enable after approval)
+//    @State private var showQuickDispatch = false
+//    @State private var showAIWizard = false
     @State private var deepLinkWorkspace: Workspace?
     @State private var isDeepLinkActive = false
     @State private var hasFetchedMachines = false
@@ -58,24 +59,25 @@ struct DashboardView: View {
 
                     HStack(spacing: 16) {
                         if !machineService.machines.isEmpty {
-                            if !workspaceService.workspaces.isEmpty {
-                                Button(action: { showQuickDispatch = true }) {
-                                    Image(systemName: "bolt.fill")
-                                        .foregroundColor(TarsyTheme.accentAmber)
-                                }
-                                .accessibilityLabel("Quick dispatch")
-                            }
-                            Button(action: {
-                                if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
-                                    showAIWizard = true
-                                } else {
-                                    showPaywall = true
-                                }
-                            }) {
-                                Image(systemName: "wand.and.stars")
-                                    .foregroundColor(TarsyTheme.accentAmber)
-                            }
-                            .accessibilityLabel("AI project wizard")
+                            // MARK: - Hidden for App Store review (re-enable after approval)
+//                            if !workspaceService.workspaces.isEmpty {
+//                                Button(action: { showQuickDispatch = true }) {
+//                                    Image(systemName: "bolt.fill")
+//                                        .foregroundColor(TarsyTheme.accentAmber)
+//                                }
+//                                .accessibilityLabel("Quick dispatch")
+//                            }
+//                            Button(action: {
+//                                if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
+//                                    showAIWizard = true
+//                                } else {
+//                                    showPaywall = true
+//                                }
+//                            }) {
+//                                Image(systemName: "wand.and.stars")
+//                                    .foregroundColor(TarsyTheme.accentAmber)
+//                            }
+//                            .accessibilityLabel("AI project wizard")
                             Button(action: {
                                 if subscriptionManager.canCreateWorkspace(currentCount: workspaceService.workspaces.count) {
                                     showNewWorkspace = true
@@ -164,15 +166,17 @@ struct DashboardView: View {
         .fullScreenCover(isPresented: $showPaywall) {
             PaywallView()
         }
-        .sheet(isPresented: $showQuickDispatch) {
-            QuickDispatchView(workspaces: workspaceService.workspaces)
-        }
+        // MARK: - Hidden for App Store review (re-enable after approval)
+//        .sheet(isPresented: $showQuickDispatch) {
+//            QuickDispatchView(workspaces: workspaceService.workspaces)
+//        }
         .sheet(isPresented: $showActiveSessions) {
             ActiveSessionsView()
         }
-        .sheet(isPresented: $showAIWizard) {
-            AIProjectWizardView()
-        }
+        // MARK: - Hidden for App Store review (re-enable after approval)
+//        .sheet(isPresented: $showAIWizard) {
+//            AIProjectWizardView()
+//        }
         .task {
             await machineService.fetchMachine()
             hasFetchedMachines = true
