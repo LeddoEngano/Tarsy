@@ -1442,11 +1442,16 @@ struct WorkspaceView: View {
                     if isActiveTabSession(packet) {
                         isAgentThinking = false
                         agentActivity = nil
-
                     } else {
                         updateBackgroundTabState(sessionId: sid) { $0.isThinking = false; $0.activity = nil }
                     }
                     todoManager.markCompleted(sessionId: sid)
+                    // End Live Activity
+                    if let tid = tabId(forSession: sid) {
+                        LiveActivityManager.shared.endActivity(workspaceId: workspace.id.uuidString, tabId: tid)
+                    } else {
+                        LiveActivityManager.shared.endActivity(workspaceId: workspace.id.uuidString, tabId: currentTab.id)
+                    }
                 case .claudeCreate:
                     if let sessionId = packet.payload?["sessionId"], !tabs.isEmpty {
                         tabs[safeTabIndex].sessionId = sessionId
