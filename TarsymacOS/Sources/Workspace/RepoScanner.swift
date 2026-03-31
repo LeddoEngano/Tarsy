@@ -41,7 +41,7 @@ class RepoScanner {
                 guard fm.fileExists(atPath: gitPath) else { continue }
 
                 // Skip hidden dirs and common non-project dirs
-                if item.hasPrefix(".") || ["node_modules", "Library", ".Trash"].contains(item) {
+                if item.hasPrefix(".") || ["node_modules", "Library", ".Trash", "Applications", "Movies", "Music", "Pictures", "Public"].contains(item) {
                     continue
                 }
 
@@ -109,6 +109,7 @@ class RepoScanner {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = args
         process.currentDirectoryURL = URL(fileURLWithPath: path)
+        process.environment = ["GIT_TERMINAL_PROMPT": "0"] // Prevent git from hanging on credential prompts
 
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -116,6 +117,15 @@ class RepoScanner {
 
         do {
             try process.run()
+
+            // Timeout: kill git if it takes more than 5 seconds
+            let deadline = DispatchTime.now() + .seconds(5)
+            DispatchQueue.global().asyncAfter(deadline: deadline) {
+                if process.isRunning {
+                    process.terminate()
+                }
+            }
+
             process.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
             let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
