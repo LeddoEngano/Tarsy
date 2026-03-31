@@ -153,6 +153,18 @@ npm run dev:website  # Start website dev server
 
 Deployment targets: iOS 17.0, macOS 14.0. Swift 5.9.
 
+### Distribution (DMG)
+
+The macOS app is distributed as a signed and notarized DMG via direct download. To build:
+
+```
+./scripts/build-dmg.sh
+```
+
+This builds a Release archive, signs with Developer ID, creates a DMG (via `create-dmg`), notarizes with Apple, and staples the ticket. Output: `build/Tarsy.dmg`.
+
+**Requirements:** `create-dmg` (brew), Developer ID Application certificate, notarization credentials stored in Keychain as `tarsy-notarize` profile.
+
 ## Design System
 
 Tarsy uses a **warm, earthy, retro-70s aesthetic** — inspired by the Anthropic/Claude design language. Dark backgrounds with terracotta, amber, and moss green accents. All UI uses monospaced fonts.
