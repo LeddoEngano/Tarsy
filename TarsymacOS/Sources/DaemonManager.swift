@@ -402,7 +402,7 @@ class DaemonManager: ObservableObject {
         if event == "update", status != "waiting",
            let last = lastLAPushTime[sessionId],
            now.timeIntervalSince(last) < laPushThrottle {
-            return // Throttled
+            return
         }
         lastLAPushTime[sessionId] = now
 

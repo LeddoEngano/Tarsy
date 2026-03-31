@@ -1573,7 +1573,6 @@ struct WorkspaceView: View {
 
     private func handleEngineOutput(_ packet: WSPacket) {
         isAgentThinking = false
-        // If we get output, the agent is working again (no longer waiting for question)
         let sessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
         todoManager.markResumed(sessionId: sessionId)
         todoManager.confirmWorking(sessionId: sessionId)
