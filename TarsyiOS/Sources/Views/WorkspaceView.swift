@@ -426,8 +426,9 @@ struct WorkspaceView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
-                    if chatService.isLoading {
+                    if chatService.isLoading && chatService.messages.isEmpty {
                         ChatSkeletonView()
+                            .transition(.opacity)
                     }
 
                     ForEach(chatService.messages) { message in
