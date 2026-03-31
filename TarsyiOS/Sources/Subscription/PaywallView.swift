@@ -38,10 +38,11 @@ struct PaywallView: View {
 
                 // Icon
                 VStack(spacing: 6) {
-                    HStack(spacing: 4) {
-                        eyeIcon(size: 20)
-                        eyeIcon(size: 20)
-                    }
+                    Image("TarsyLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 64, height: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
                     Text("TARSY PRO")
                         .font(.system(size: 28, weight: .bold, design: .monospaced))
                         .foregroundColor(TarsyTheme.accentAmber)
@@ -207,23 +208,6 @@ struct PaywallView: View {
             Text(text)
                 .font(.system(size: 14, design: .monospaced))
                 .foregroundColor(TarsyTheme.textPrimary)
-        }
-    }
-
-    @ViewBuilder
-    private func eyeIcon(size: CGFloat) -> some View {
-        ZStack {
-            Circle()
-                .fill(TarsyTheme.accentAmber)
-                .frame(width: size, height: size)
-            Circle()
-                .fill(TarsyTheme.backgroundPrimary)
-                .frame(width: size * 0.45, height: size * 0.45)
-                .offset(x: size * 0.05, y: -size * 0.05)
-            Circle()
-                .fill(.white.opacity(0.5))
-                .frame(width: size * 0.15, height: size * 0.15)
-                .offset(x: size * 0.1, y: -size * 0.1)
         }
     }
 

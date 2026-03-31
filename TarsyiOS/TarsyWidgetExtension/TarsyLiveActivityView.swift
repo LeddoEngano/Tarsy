@@ -40,9 +40,11 @@ struct TarsyLiveActivityWidget: Widget {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(context.state.status == "running" ? warmBeige : statusColor(context.state.status))
             } compactTrailing: {
-                Circle()
-                    .fill(statusColor(context.state.status))
-                    .frame(width: 8, height: 8)
+                Image("TarsyLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 18, height: 18)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
             } minimal: {
                 Image(systemName: toolIcon(context.state))
                     .font(.system(size: 14, weight: .bold))

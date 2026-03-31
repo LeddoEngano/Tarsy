@@ -89,10 +89,13 @@ struct OnboardingWindow: View {
     private var header: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                HStack(spacing: 3) {
-                    eyeIcon(size: 12)
-                    eyeIcon(size: 12)
-                }
+                Image("TarsyLogo")
+                    .resizable()
+                    .interpolation(.high)
+                    .antialiased(true)
+                    .scaledToFit()
+                    .frame(width: 24, height: 24)
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
 
                 Text("tarsy")
                     .font(.system(size: 16, weight: .bold, design: .monospaced))
@@ -760,10 +763,13 @@ struct OnboardingWindow: View {
             Circle()
                 .fill(Theme.moss.opacity(0.15))
                 .frame(width: 56, height: 56)
-            HStack(spacing: 4) {
-                eyeIcon(size: 18)
-                eyeIcon(size: 18)
-            }
+            Image("TarsyLogo")
+                .resizable()
+                .interpolation(.high)
+                .antialiased(true)
+                .scaledToFit()
+                .frame(width: 40, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 9))
         }
     }
 
@@ -818,23 +824,6 @@ struct OnboardingWindow: View {
     }
 
     // MARK: - Components
-
-    @ViewBuilder
-    private func eyeIcon(size: CGFloat) -> some View {
-        ZStack {
-            Circle()
-                .fill(Theme.amber)
-                .frame(width: size, height: size)
-            Circle()
-                .fill(Theme.bg)
-                .frame(width: size * 0.45, height: size * 0.45)
-                .offset(x: size * 0.05, y: -size * 0.05)
-            Circle()
-                .fill(.white.opacity(0.5))
-                .frame(width: size * 0.15, height: size * 0.15)
-                .offset(x: size * 0.1, y: -size * 0.1)
-        }
-    }
 
     private func styledTextField(_ placeholder: String, text: Binding<String>) -> some View {
         HStack(spacing: 10) {

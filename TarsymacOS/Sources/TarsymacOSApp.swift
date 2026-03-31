@@ -48,9 +48,13 @@ struct TarsymacOSApp: App {
                     appDelegate.daemonManager = daemonManager
                 }
         } label: {
-            Image(systemName: updateChecker.shouldShowBanner
-                  ? "arrow.down.circle.fill"
-                  : daemonManager.isRunning ? "eye.circle.fill" : "eye.circle")
+            if updateChecker.shouldShowBanner {
+                Image(systemName: "arrow.down.circle.fill")
+            } else {
+                Image("MenuBarIcon")
+                    .renderingMode(.original)
+                    .opacity(daemonManager.isRunning ? 1.0 : 0.5)
+            }
         }
         .menuBarExtraStyle(.window)
 

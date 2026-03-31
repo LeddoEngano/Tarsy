@@ -11,27 +11,11 @@ struct SplashView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 20) {
-                // Eyes icon
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(TarsyTheme.accentAmber)
-                        .frame(width: 24, height: 24)
-                        .overlay(
-                            Circle()
-                                .fill(TarsyTheme.backgroundPrimary)
-                                .frame(width: 10, height: 10)
-                                .offset(x: 2, y: -2)
-                        )
-                    Circle()
-                        .fill(TarsyTheme.accentAmber)
-                        .frame(width: 24, height: 24)
-                        .overlay(
-                            Circle()
-                                .fill(TarsyTheme.backgroundPrimary)
-                                .frame(width: 10, height: 10)
-                                .offset(x: 2, y: -2)
-                        )
-                }
+                Image("TarsyLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 80, height: 80)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
 
                 Text("TARSY")
                     .font(.system(size: 48, weight: .bold, design: .monospaced))
