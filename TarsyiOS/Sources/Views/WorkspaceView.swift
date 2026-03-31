@@ -203,6 +203,7 @@ struct WorkspaceView: View {
             Text("Save a git checkpoint of the current state?")
         }
         .navigationBarTitleDisplayMode(.inline)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 8) {
@@ -667,7 +668,7 @@ struct WorkspaceView: View {
 
                     inputBar
                 }
-                .frame(height: UIScreen.main.bounds.height * 0.55)
+                .frame(height: max(UIScreen.main.bounds.height, UIScreen.main.bounds.width) * 0.4)
                 .background(TarsyTheme.backgroundPrimary.opacity(0.95))
                 .cornerRadius(20, corners: [.topLeft, .topRight])
                 .shadow(color: .black.opacity(0.4), radius: 16, y: -4)
@@ -730,7 +731,7 @@ struct WorkspaceView: View {
                             isActive: $isStreamActive
                         )
                             .frame(maxWidth: .infinity)
-                            .frame(height: UIScreen.main.bounds.height * 0.35)
+                            .frame(height: max(UIScreen.main.bounds.height, UIScreen.main.bounds.width) * 0.25)
                             .clipped()
                     } else {
                         streamPlayerContent
@@ -806,7 +807,7 @@ struct WorkspaceView: View {
             isFullscreen: $isFullscreenStream
         )
             .frame(maxWidth: .infinity)
-            .frame(height: UIScreen.main.bounds.height * 0.35)
+            .frame(height: max(UIScreen.main.bounds.height, UIScreen.main.bounds.width) * 0.25)
             .clipped()
     }
 
@@ -825,6 +826,9 @@ struct WorkspaceView: View {
             }
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.2)) { viewMode = .stream }
+                if !isStreamActive {
+                    isStreamActive = true
+                }
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "display")
@@ -1221,12 +1225,16 @@ struct WorkspaceView: View {
             if currentTab.type == .claude || currentTab.type == .engine {
                 let engineType = currentTab.engineType ?? .claude
                 if let sessionId = currentTab.sessionId {
+#if DEBUG
                     print("[Chat] Sending engineMessage to session \(sessionId)")
+#endif
                     var payload = ["sessionId": sessionId, "message": messageText, "engineType": engineType.rawValue]
                     if let images = imagesPayload { payload["images"] = images }
                     connectionManager.send(WSPacket(action: .engineMessage, payload: payload))
                 } else {
+#if DEBUG
                     print("[Chat] Sending engineCreate type=\(engineType.rawValue) path=\(workspace.localPath)")
+#endif
                     let permConfig = AgentPermissionConfig.load()
                     var payload = [
                         "path": workspace.localPath,
@@ -1264,11 +1272,15 @@ struct WorkspaceView: View {
         }
 
         guard connectionManager.isConnected else {
+#if DEBUG
             print("[Workspace] Could not connect to Mac after \(attempts) attempts")
+#endif
             return
         }
 
+#if DEBUG
         print("[Workspace] Connected! Auto-starting engine session for \(workspace.name)")
+#endif
 
         // Find the first engine tab without a session
         if let tabIndex = tabs.firstIndex(where: { ($0.type == .claude || $0.type == .engine) && $0.sessionId == nil }) {
@@ -1283,7 +1295,9 @@ struct WorkspaceView: View {
                     "workspaceId": workspace.id.uuidString
                 ]
             ))
+#if DEBUG
             print("[Workspace] Sent engineCreate type=\(engineType.rawValue) for path=\(workspace.localPath)")
+#endif
         }
     }
 

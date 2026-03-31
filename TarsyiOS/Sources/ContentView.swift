@@ -54,6 +54,7 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .onChange(of: machineService.isOnline) { _, isOnline in
             if !isOnline && connectionManager.isConnected {
                 connectionManager.disconnect()
@@ -150,7 +151,9 @@ struct ContentView: View {
         await machineService.fetchMachine()
 
         guard machineService.isOnline else {
+#if DEBUG
             print("[AutoConnect] Mac is offline, skipping connection")
+#endif
             return
         }
 
@@ -163,7 +166,9 @@ struct ContentView: View {
         do {
             let session = try await supabase.auth.session
             let lanHost = machineService.bestIP
+#if DEBUG
             print("[AutoConnect] LAN host: \(lanHost ?? "none")")
+#endif
 
             connectionManager.smartConnect(
                 lanHost: lanHost,
@@ -171,7 +176,9 @@ struct ContentView: View {
                 token: session.accessToken
             )
         } catch {
+#if DEBUG
             print("[AutoConnect] Failed: \(error)")
+#endif
         }
     }
 }

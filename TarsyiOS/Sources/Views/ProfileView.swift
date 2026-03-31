@@ -54,6 +54,7 @@ struct ProfileView: View {
             .toolbarBackground(.visible, for: .navigationBar)
         }
         .preferredColorScheme(.dark)
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .onAppear { loadKeys() }
         .sheet(item: $editingProvider) { provider in
             APIKeyEditorSheet(provider: provider, existingKey: getKeyForProvider(provider)) { newKey in
@@ -603,7 +604,9 @@ struct ProfileView: View {
                 try await profileService.deleteAccount()
                 await authManager.signOut()
             } catch {
+#if DEBUG
                 print("[ProfileView] Delete account error: \(error)")
+#endif
             }
             isDeleting = false
         }

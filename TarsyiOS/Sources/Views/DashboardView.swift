@@ -148,6 +148,7 @@ struct DashboardView: View {
                 }
             }
             .navigationBarHidden(true)
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .navigationDestination(isPresented: $isDeepLinkActive) {
                 if let ws = deepLinkWorkspace {
                     WorkspaceView(workspace: ws)
