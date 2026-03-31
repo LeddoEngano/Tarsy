@@ -36,7 +36,8 @@ xcodebuild \
 
 # ─── Export app from archive ─────────────────────────────────────────
 echo "==> Exporting app from archive..."
-cp -R "$BUILD_DIR/$APP_NAME.xcarchive/Products/Applications/$APP_NAME.app" "$APP_PATH"
+ARCHIVE_APP="$BUILD_DIR/$APP_NAME.xcarchive/Products/Applications/$SCHEME.app"
+cp -R "$ARCHIVE_APP" "$APP_PATH"
 
 # ─── Re-sign with Developer ID (deep) ───────────────────────────────
 echo "==> Signing with Developer ID..."
