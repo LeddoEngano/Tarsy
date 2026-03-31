@@ -38,26 +38,23 @@ public class NotificationBadgeService: ObservableObject {
 
     /// Mark all notifications for a workspace as read and update badge counts
     public func clearBadge(for workspaceId: UUID) async {
-        guard unreadCounts[workspaceId] != nil else { return }
-
-        // Remove from local state immediately
+        // Remove from local state immediately (if present)
         unreadCounts.removeValue(forKey: workspaceId)
 
         // Update app icon badge to remaining total
         let remaining = unreadCounts.values.reduce(0, +)
         updateAppIconBadge(remaining)
 
-        // Mark as read in the database
+        // Mark as read in the database regardless of local state
         do {
             try await supabase
                 .from("push_notifications")
-                .update(["read_at": ISO8601DateFormatter().string(from: Date())])
+                .update(["read_at": Date()])
                 .eq("workspace_id", value: workspaceId.uuidString)
                 .is("read_at", value: nil)
                 .execute()
         } catch {
             print("[NotificationBadgeService] Failed to clear badge: \(error)")
-            // Re-fetch to reconcile state
             await refreshCounts()
         }
     }

@@ -591,7 +591,7 @@ struct WorkspaceCard: View {
         )
         .overlay(alignment: .topTrailing) {
             if unreadCount > 0 {
-                Text("\(unreadCount)")
+                Text(unreadCount > 99 ? "99+" : "\(unreadCount)")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundColor(.white)
                     .padding(.horizontal, 6)
