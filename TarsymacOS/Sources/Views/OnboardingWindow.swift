@@ -402,11 +402,11 @@ struct OnboardingWindow: View {
     @State private var isCheckingPermissions = false
 
     private var allPermissionsGranted: Bool {
-        hasScreenRecording && hasAccessibility && hasFilesAccess
+        hasScreenRecording && hasAccessibility && hasFilesAccess && hasAutomation
     }
 
     private var grantedCount: Int {
-        [hasScreenRecording, hasAccessibility, hasFilesAccess].filter { $0 }.count
+        [hasScreenRecording, hasAccessibility, hasFilesAccess, hasAutomation].filter { $0 }.count
     }
 
     private var permissionsStep: some View {
@@ -460,7 +460,7 @@ struct OnboardingWindow: View {
     private var permissionsProgressBar: some View {
         VStack(spacing: 6) {
             HStack {
-                Text("\(grantedCount) of 3 granted")
+                Text("\(grantedCount) of 4 granted")
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundColor(allPermissionsGranted ? Theme.moss : Theme.textSecondary)
                 Spacer()
@@ -474,7 +474,7 @@ struct OnboardingWindow: View {
 
                     RoundedRectangle(cornerRadius: 2)
                         .fill(allPermissionsGranted ? Theme.moss : Theme.amber)
-                        .frame(width: geo.size.width * CGFloat(grantedCount) / 3.0, height: 3)
+                        .frame(width: geo.size.width * CGFloat(grantedCount) / 4.0, height: 3)
                         .animation(.easeInOut(duration: 0.3), value: grantedCount)
                 }
             }
@@ -507,7 +507,91 @@ struct OnboardingWindow: View {
                 granted: hasFilesAccess,
                 settingsKey: "Privacy_FilesAndFolders"
             )
+
+            automationRow
         }
+    }
+
+    private var automationRow: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(hasAutomation ? Theme.moss.opacity(0.12) : Theme.terracotta.opacity(0.1))
+                    .frame(width: 32, height: 32)
+
+                Image(systemName: hasAutomation ? "checkmark" : "gearshape.2")
+                    .font(.system(size: hasAutomation ? 12 : 13, weight: hasAutomation ? .bold : .regular))
+                    .foregroundColor(hasAutomation ? Theme.moss : Theme.terracotta)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("automation")
+                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .foregroundColor(Theme.textPrimary)
+                Text("control browser tabs via apple events")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(Theme.textMuted)
+            }
+
+            Spacer()
+
+            if !hasAutomation {
+                Button(action: { requestAutomationPermission() }) {
+                    Text("grant")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(Theme.amber)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Theme.amber.opacity(0.1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .stroke(Theme.amber.opacity(0.3), lineWidth: 1)
+                                )
+                        )
+                }
+                .buttonStyle(.plain)
+                .pointerOnHover()
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Theme.bgCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(hasAutomation ? Theme.moss.opacity(0.2) : Theme.border, lineWidth: 1)
+                )
+        )
+    }
+
+    private func requestAutomationPermission() {
+        NSApp.activate(ignoringOtherApps: true)
+
+        // Run a harmless AppleScript targeting System Events to trigger the macOS permission dialog
+        DispatchQueue.global(qos: .userInitiated).async {
+            var error: NSDictionary?
+            let script = NSAppleScript(source: """
+                tell application "System Events"
+                    return name of first process whose frontmost is true
+                end tell
+            """)
+            let result = script?.executeAndReturnError(&error)
+            let succeeded = result != nil && error == nil
+
+            DispatchQueue.main.async {
+                hasAutomation = succeeded
+            }
+        }
+    }
+
+    private func checkAutomationPermission() -> Bool {
+        // Check if we already have automation permission (without prompting)
+        let target = NSAppleEventDescriptor(bundleIdentifier: "com.apple.systemevents")
+        guard let aeDesc = target.aeDesc else { return false }
+        let status = AEDeterminePermissionToAutomateTarget(aeDesc, typeWildCard, typeWildCard, false)
+        return status == noErr
     }
 
     private var permissionsActions: some View {
@@ -631,6 +715,7 @@ struct OnboardingWindow: View {
 
             hasAccessibility = AXIsProcessTrusted()
             hasFilesAccess = preAccessDirectories()
+            hasAutomation = checkAutomationPermission()
             isCheckingPermissions = false
         }
     }
@@ -660,57 +745,6 @@ struct OnboardingWindow: View {
         }
 
         return accessCount >= 2
-    }
-
-    @State private var automationDenied = false
-    @State private var automationUserAttempts = 0
-
-    private func requestAutomationPermission() {
-        automationUserAttempts += 1
-        let attempt = automationUserAttempts
-
-        NSApp.activate(ignoringOtherApps: true)
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            let succeeded = checkAutomationWithAEAPI(askUser: true)
-
-            DispatchQueue.main.async {
-                hasAutomation = succeeded
-                if succeeded {
-                    automationDenied = false
-                } else if attempt >= 2 {
-                    automationDenied = true
-                    openSettings("Privacy_Automation")
-                }
-            }
-        }
-    }
-
-    private func checkAutomationWithAEAPI(askUser: Bool) -> Bool {
-        let targetDescriptor = NSAppleEventDescriptor(bundleIdentifier: "com.apple.finder")
-        guard let aeDesc = targetDescriptor.aeDesc else { return false }
-
-        let status = AEDeterminePermissionToAutomateTarget(
-            aeDesc,
-            typeWildCard,
-            typeWildCard,
-            askUser
-        )
-
-        switch status {
-        case noErr:
-            return true
-        default:
-            return false
-        }
-    }
-
-    private func checkAutomationPermission() async -> Bool {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: checkAutomationWithAEAPI(askUser: false))
-            }
-        }
     }
 
     private func openSettings(_ key: String) {
