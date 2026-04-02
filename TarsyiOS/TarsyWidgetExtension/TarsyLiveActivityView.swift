@@ -1,4 +1,5 @@
 import ActivityKit
+import AppIntents
 import SwiftUI
 import WidgetKit
 
@@ -11,9 +12,11 @@ struct TarsyLiveActivityWidget: Widget {
             DynamicIsland {
                 // MARK: - Expanded Dynamic Island
                 DynamicIslandExpandedRegion(.leading) {
-                    Image(systemName: context.attributes.engineIcon)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(warmBeige)
+                    TarsyEyesWidget(
+                        size: 24,
+                        pupilX: context.state.pupilX,
+                        pupilY: context.state.pupilY
+                    )
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text("\(Int(context.state.contextPercent))%")
@@ -48,11 +51,12 @@ struct TarsyLiveActivityWidget: Widget {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(context.state.status == "running" ? warmBeige : statusColor(context.state.status))
             } compactTrailing: {
-                Image("TarsyLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 18, height: 18)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                TarsyEyesWidget(
+                    size: 18,
+                    pupilX: context.state.pupilX,
+                    pupilY: context.state.pupilY
+                )
+                .frame(width: 18, height: 18)
             } minimal: {
                 Image(systemName: toolIcon(context.state))
                     .font(.system(size: 14, weight: .bold))
@@ -91,6 +95,11 @@ struct TarsyLiveActivityWidget: Widget {
                     .font(.system(size: 11, weight: .regular, design: .monospaced))
                     .foregroundColor(secondaryText)
                     .lineLimit(1)
+            }
+
+            // Permission action buttons (when waiting with options)
+            if context.state.status == "waiting" {
+                permissionButtons(context: context)
             }
 
             // Context usage bar
@@ -134,7 +143,7 @@ struct TarsyLiveActivityWidget: Widget {
             // Active state
             VStack(spacing: 8) {
                 HStack(spacing: 10) {
-                    // Status ring + engine icon
+                    // Status ring + animated Tarsy eyes
                     ZStack {
                         Circle()
                             .trim(from: 0, to: statusRingTrim(context.state.status))
@@ -145,9 +154,11 @@ struct TarsyLiveActivityWidget: Widget {
                             .frame(width: 32, height: 32)
                             .rotationEffect(.degrees(-90))
 
-                        Image(systemName: context.attributes.engineIcon)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.primary)
+                        TarsyEyesWidget(
+                            size: 22,
+                            pupilX: context.state.pupilX,
+                            pupilY: context.state.pupilY
+                        )
                     }
 
                     // Tool + workspace + engine
@@ -188,6 +199,11 @@ struct TarsyLiveActivityWidget: Widget {
                         .monospacedDigit()
                 }
 
+                // Permission action buttons (when waiting with options)
+                if context.state.status == "waiting" {
+                    permissionButtons(context: context)
+                }
+
                 // Context bar (only when we have data)
                 if context.state.contextPercent > 0 {
                     contextBar(percent: context.state.contextPercent)
@@ -197,6 +213,64 @@ struct TarsyLiveActivityWidget: Widget {
             .padding(.vertical, 12)
             .widgetURL(URL(string: "com.tarsy.ios://workspace/\(context.attributes.workspaceId)"))
         }
+    }
+
+    // MARK: - Permission Buttons
+
+    @ViewBuilder
+    private func permissionButtons(context: ActivityViewContext<TarsyActivityAttributes>) -> some View {
+        if let options = context.state.questionOptions,
+           let sessionId = context.state.sessionId,
+           !options.isEmpty {
+            HStack(spacing: 6) {
+                ForEach(Array(options.prefix(4).enumerated()), id: \.offset) { _, option in
+                    let formattedAnswer = formatAnswer(questionKey: context.state.questionKey, option: option)
+                    Button(intent: PermissionResponseIntent(
+                        sessionId: sessionId,
+                        engineType: context.state.engineTypeRaw ?? "claude",
+                        answer: formattedAnswer,
+                        workspaceId: context.attributes.workspaceId
+                    )) {
+                        Text(option)
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundColor(permissionButtonTextColor(option))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(permissionButtonColor(option))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func formatAnswer(questionKey: String?, option: String) -> String {
+        guard let key = questionKey, !key.isEmpty else { return option }
+        return "\(key): \(option)"
+    }
+
+    private func permissionButtonColor(_ option: String) -> Color {
+        let lower = option.lowercased()
+        if lower.contains("deny") || lower == "no" || lower == "n" || lower.contains("reject") || lower.contains("cancel") {
+            return terracottaColor.opacity(0.25)
+        }
+        if lower.contains("always") || lower.contains("all") || lower.contains("bypass") || lower.contains("trust") {
+            return mossColor.opacity(0.3)
+        }
+        // Default: allow / yes / positive
+        return amberColor.opacity(0.25)
+    }
+
+    private func permissionButtonTextColor(_ option: String) -> Color {
+        let lower = option.lowercased()
+        if lower.contains("deny") || lower == "no" || lower == "n" || lower.contains("reject") || lower.contains("cancel") {
+            return terracottaColor
+        }
+        if lower.contains("always") || lower.contains("all") || lower.contains("bypass") || lower.contains("trust") {
+            return mossColor
+        }
+        return amberColor
     }
 
     // MARK: - Context Bar
@@ -300,85 +374,85 @@ private let previewAttrs = TarsyActivityAttributes(
 #Preview("Compact — Editing", as: .dynamicIsland(.compact), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 127, contextPercent: 34)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 127, contextPercent: 34, pupilX: 0.3, pupilY: 0)
 }
 
 #Preview("Compact — Running", as: .dynamicIsland(.compact), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Running", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 200, contextPercent: 62)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Running", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 200, contextPercent: 62, pupilX: -0.2, pupilY: 0.15)
 }
 
 #Preview("Compact — Waiting", as: .dynamicIsland(.compact), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Approve changes?", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 45)
+    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Approve changes?", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 45, pupilX: 0, pupilY: 0)
 }
 
 #Preview("Compact — Error", as: .dynamicIsland(.compact), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Build failed", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 300)
+    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Build failed", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 300, pupilX: 0, pupilY: 0.25)
 }
 
 #Preview("Expanded — Running", as: .dynamicIsland(.expanded), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Writing tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 312, contextPercent: 45)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Writing tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 312, contextPercent: 45, pupilX: 0.15, pupilY: -0.2)
 }
 
 #Preview("Expanded — High Context", as: .dynamicIsland(.expanded), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 600, contextPercent: 87)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 600, contextPercent: 87, pupilX: -0.3, pupilY: 0)
 }
 
 #Preview("Expanded — Waiting", as: .dynamicIsland(.expanded), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 180, message: "Delete 3 files?")
+    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 180, contextPercent: 42, message: "Write to hello.txt?", sessionId: "session-1", engineTypeRaw: "claude", questionKey: "Write to hello.txt?", questionOptions: ["Yes", "No", "Always allow"])
 }
 
 #Preview("Expanded — Error", as: .dynamicIsland(.expanded), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Build failed", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 600)
+    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Build failed", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 600, pupilX: 0, pupilY: 0.2)
 }
 
 #Preview("Minimal — Running", as: .dynamicIsland(.minimal), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 90)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 90, pupilX: 0.2, pupilY: 0.15)
 }
 
 #Preview("Minimal — Waiting", as: .dynamicIsland(.minimal), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 45)
+    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 45, pupilX: 0, pupilY: 0)
 }
 
 #Preview("Lock Screen — Running", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing ContentView.swift", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 185, contextPercent: 42)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing ContentView.swift", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 185, contextPercent: 42, pupilX: 0.3, pupilY: 0)
 }
 
 #Preview("Lock Screen — High Context", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Running tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 500, contextPercent: 91)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Running tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 500, contextPercent: 91, pupilX: -0.15, pupilY: -0.2)
 }
 
-#Preview("Lock Screen — Waiting", as: .content, using: previewAttrs) {
+#Preview("Lock Screen — Waiting (Buttons)", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 92, message: "Delete 3 files?")
+    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 92, contextPercent: 31, message: "Write to hello.txt?", sessionId: "session-1", engineTypeRaw: "claude", questionKey: "Write to hello.txt?", questionOptions: ["Yes", "No", "Always allow"])
 }
 
 #Preview("Lock Screen — Error", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Connection lost", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 60)
+    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Connection lost", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 60, pupilX: 0, pupilY: 0.25)
 }
 
 #Preview("Lock Screen — Completed", as: .content, using: previewAttrs) {
