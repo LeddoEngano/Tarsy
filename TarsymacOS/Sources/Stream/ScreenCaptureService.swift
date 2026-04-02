@@ -3,6 +3,9 @@ import ScreenCaptureKit
 import CoreMedia
 import CoreImage
 import AppKit
+import os.log
+
+private let logger = Logger(subsystem: "com.tarsy.macos", category: "ScreenCapture")
 
 @MainActor
 class ScreenCaptureService: NSObject, ObservableObject {
@@ -13,7 +16,11 @@ class ScreenCaptureService: NSObject, ObservableObject {
     private var stream: SCStream?
     private var streamOutput: StreamOutput?
     private var cachedContent: SCShareableContent?
-    private var hasPermission = false
+    private(set) var hasPermission = false
+
+    /// Set to true after SCShareableContent fails with -3801 (TCC declined).
+    /// Prevents retrying in the same app session which would show repeated dialogs.
+    private(set) var permissionDeclined = false
 
     /// Direct pixel buffer callback for H.264 encoding
     var onPixelBuffer: ((CVPixelBuffer) -> Void)?
@@ -21,15 +28,44 @@ class ScreenCaptureService: NSObject, ObservableObject {
     /// Latest pixel buffer for screenshot capture (updated every frame)
     private(set) var lastPixelBuffer: CVPixelBuffer?
 
-    // Request permission once at startup without triggering a capture
+    // MARK: - Permission Check
+
+    /// Reliable screen recording permission check.
+    /// CGPreflightScreenCaptureAccess() directly queries the TCC database.
+    /// NOTE: CGWindowListCopyWindowInfo is NOT reliable on macOS 15+ — it returns
+    /// window names for system windows (Dock, menu bar) even WITHOUT permission.
+    static func isScreenRecordingGranted() -> Bool {
+        CGPreflightScreenCaptureAccess()
+    }
+
+    // MARK: - Permission Request
+
     func requestPermission() async {
+        // If already declined this session, don't retry — avoids dialog spam
+        guard !permissionDeclined else { return }
+
+        // Pre-check: if CGPreflight says no, don't call SCShareableContent
+        // (which would show a dialog the user can't interact with remotely)
+        guard CGPreflightScreenCaptureAccess() else {
+            logger.warning("Screen recording not authorized — user needs to enable in System Settings")
+            hasPermission = false
+            return
+        }
+
         do {
             cachedContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             hasPermission = true
+            permissionDeclined = false
             updateWindowList()
+            logger.info("Permission granted, \(self.availableWindows.count) windows available")
         } catch {
-            print("[ScreenCapture] Permission error: \(error)")
+            let nsError = error as NSError
+            logger.error("SCShareableContent failed (code \(nsError.code)): \(nsError.localizedDescription)")
             hasPermission = false
+            if nsError.code == -3801 {
+                permissionDeclined = true
+                logger.error("TCC declined — will not retry until app restarts")
+            }
         }
     }
 
@@ -43,7 +79,12 @@ class ScreenCaptureService: NSObject, ObservableObject {
             cachedContent = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
             updateWindowList()
         } catch {
-            print("[ScreenCapture] Failed to get windows: \(error)")
+            logger.error("Failed to refresh windows: \(error.localizedDescription)")
+            let nsError = error as NSError
+            if nsError.code == -3801 {
+                hasPermission = false
+                permissionDeclined = true
+            }
         }
     }
 
@@ -58,6 +99,8 @@ class ScreenCaptureService: NSObject, ObservableObject {
 
     func findWindow(forStack stack: String) async -> SCWindow? {
         await refreshWindows()
+
+        logger.debug("findWindow(forStack: \(stack)) — hasPermission: \(self.hasPermission), windows: \(self.availableWindows.count)")
 
         let targetApps: [String]
         switch stack {
@@ -75,12 +118,13 @@ class ScreenCaptureService: NSObject, ObservableObject {
             let appWindows = availableWindows.filter {
                 $0.owningApplication?.applicationName == appName
             }
-            // Pick the largest window — avoids grabbing small widget/preview windows
             if let window = appWindows.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) {
+                logger.info("Found window '\(window.title ?? "?")' from \(appName)")
                 return window
             }
         }
 
+        logger.warning("No matching window found for stack: \(stack)")
         return nil
     }
 
@@ -105,7 +149,6 @@ class ScreenCaptureService: NSObject, ObservableObject {
     }
 
     func startCapture(window: SCWindow, fps: Int = 10, scale: CGFloat = 0.5, cropTitleBar: Bool = false) async throws {
-        // If already capturing, just stop the old stream first without destroying everything
         if isCapturing {
             try? await stream?.stopCapture()
         }
@@ -113,7 +156,7 @@ class ScreenCaptureService: NSObject, ObservableObject {
         selectedWindow = window
         let filter = SCContentFilter(desktopIndependentWindow: window)
 
-        let titleBarHeight: CGFloat = cropTitleBar ? 52 : 0  // Title bar + toolbar in Simulator
+        let titleBarHeight: CGFloat = cropTitleBar ? 52 : 0
         let contentHeight = window.frame.height - titleBarHeight
 
         let config = SCStreamConfiguration()
@@ -123,7 +166,6 @@ class ScreenCaptureService: NSObject, ObservableObject {
         config.queueDepth = 3
         config.showsCursor = true
 
-        // Crop out title bar by setting sourceRect
         if cropTitleBar {
             config.sourceRect = CGRect(
                 x: 0,
@@ -133,7 +175,6 @@ class ScreenCaptureService: NSObject, ObservableObject {
             )
         }
 
-        // Reuse stream output if possible
         if streamOutput == nil {
             streamOutput = StreamOutput { [weak self] pixelBuffer in
                 self?.lastPixelBuffer = pixelBuffer
@@ -145,20 +186,17 @@ class ScreenCaptureService: NSObject, ObservableObject {
             self?.onPixelBuffer?(pixelBuffer)
         }
 
-        // Only create new SCStream if we don't have one
         stream = SCStream(filter: filter, configuration: config, delegate: nil)
         try stream?.addStreamOutput(streamOutput!, type: .screen, sampleHandlerQueue: .global(qos: .userInteractive))
         try await stream?.startCapture()
         isCapturing = true
     }
 
-    /// Capture the entire display (for OpenClaw full-screen mode)
     func startDisplayCapture(fps: Int = 20, scale: CGFloat = 0.75) async throws {
         if isCapturing {
             try? await stream?.stopCapture()
         }
 
-        // Refresh content if needed
         if cachedContent == nil {
             await refreshWindows()
         }
@@ -170,12 +208,9 @@ class ScreenCaptureService: NSObject, ObservableObject {
             throw NSError(domain: "ScreenCapture", code: 2, userInfo: [NSLocalizedDescriptionKey: "No display found"])
         }
 
-        let contentHeight = display.height
-        let contentWidth = display.width
-
         let config = SCStreamConfiguration()
-        config.width = Int(CGFloat(contentWidth) * scale)
-        config.height = Int(CGFloat(contentHeight) * scale)
+        config.width = Int(CGFloat(display.width) * scale)
+        config.height = Int(CGFloat(display.height) * scale)
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = 3
         config.showsCursor = true
@@ -199,7 +234,6 @@ class ScreenCaptureService: NSObject, ObservableObject {
         selectedWindow = nil
     }
 
-    /// Capture a JPEG screenshot from the current stream
     func captureScreenshot(quality: CGFloat = 0.7) -> Data? {
         guard let pixelBuffer = lastPixelBuffer else { return nil }
 
@@ -220,7 +254,8 @@ class ScreenCaptureService: NSObject, ObservableObject {
         if let stream {
             try? await stream.stopCapture()
         }
-        // Don't nil out stream/streamOutput — keep for reuse
+        stream = nil
+        streamOutput = nil
         isCapturing = false
         lastPixelBuffer = nil
         selectedWindow = nil
