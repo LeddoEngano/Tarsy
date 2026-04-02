@@ -13,6 +13,16 @@ struct PaywallView: View {
         case monthly, annual
     }
 
+    /// Formats the annual price divided by 12 using the product's locale
+    private var annualMonthlyEquivalent: String? {
+        guard let product = subscriptionManager.annualProduct else { return nil }
+        let monthly = product.price / 12
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.locale = product.priceFormatStyle.locale
+        return formatter.string(from: monthly as NSDecimalNumber)
+    }
+
     var body: some View {
         ZStack {
             TarsyTheme.backgroundPrimary.ignoresSafeArea()
@@ -34,37 +44,50 @@ struct PaywallView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
 
-                Spacer()
+                Spacer().frame(height: 24)
 
-                // Icon
-                VStack(spacing: 6) {
+                // Hero section
+                VStack(spacing: 10) {
                     Image("TarsyLogo")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 64, height: 64)
+                        .frame(width: 56, height: 56)
                         .clipShape(RoundedRectangle(cornerRadius: 14))
+
                     Text("TARSY PRO")
                         .font(.system(size: 28, weight: .bold, design: .monospaced))
                         .foregroundColor(TarsyTheme.accentAmber)
+
+                    Text("Unlock the full remote\ndevelopment experience")
+                        .font(.system(size: 14, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(4)
                 }
 
-                Spacer().frame(height: 32)
+                Spacer()
 
-                // Features list
-                VStack(alignment: .leading, spacing: 16) {
-                    featureRow(icon: "square.stack.3d.up", text: "Unlimited workspaces")
-                    featureRow(icon: "globe", text: "Remote access via relay")
-                    featureRow(icon: "brain.head.profile", text: "All AI engines")
-                    featureRow(icon: "arrow.triangle.branch", text: "Git checkpoints & rollback")
-                    featureRow(icon: "folder", text: "File explorer")
-                    featureRow(icon: "mic", text: "Voice to text")
+                // Features grid — 2 columns
+                VStack(spacing: 0) {
+                    featureGridRow(
+                        icon1: "square.stack.3d.up", text1: "Unlimited\nworkspaces",
+                        icon2: "globe", text2: "Remote access\nvia relay"
+                    )
+                    featureGridRow(
+                        icon1: "brain.head.profile", text1: "All AI\nengines",
+                        icon2: "arrow.triangle.branch", text2: "Git checkpoints\n& rollback"
+                    )
+                    featureGridRow(
+                        icon1: "folder", text1: "File\nexplorer",
+                        icon2: "mic", text2: "Voice\nto text"
+                    )
                 }
-                .padding(.horizontal, 32)
+                .padding(.horizontal, 24)
 
-                Spacer().frame(height: 32)
+                Spacer()
 
                 // Plan selector
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     planCard(
                         plan: .annual,
                         label: "Annual",
@@ -82,32 +105,23 @@ struct PaywallView: View {
                 }
                 .padding(.horizontal, 24)
 
-                // Effective monthly price for annual
-                if selectedPlan == .annual {
-                    Text("$9.99/month billed annually")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textSecondary)
-                        .padding(.top, 8)
-                } else {
-                    Text("cancel anytime")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textSecondary)
-                        .padding(.top, 8)
+                // Contextual subtitle under plans
+                Group {
+                    if selectedPlan == .annual, let equiv = annualMonthlyEquivalent {
+                        Text("\(equiv)/month billed annually")
+                    } else {
+                        Text("cancel anytime")
+                    }
                 }
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(TarsyTheme.textSecondary)
+                .padding(.top, 10)
 
-                // Auto-renewal disclosure
-                Text("Subscription automatically renews. Manage or cancel anytime in Settings > App Store.")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-                    .padding(.top, 12)
-
-                Spacer().frame(height: 16)
+                Spacer().frame(height: 20)
 
                 // Subscribe button
                 Button(action: { purchase() }) {
-                    HStack {
+                    HStack(spacing: 8) {
                         if isPurchasing {
                             ProgressView()
                                 .tint(TarsyTheme.backgroundPrimary)
@@ -125,25 +139,33 @@ struct PaywallView: View {
                 .disabled(isPurchasing || isRestoring)
                 .padding(.horizontal, 24)
 
-                // Restore
-                Button(action: { restore() }) {
-                    Text(isRestoring ? "Restoring..." : "Restore purchase")
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textSecondary)
-                }
-                .disabled(isPurchasing || isRestoring)
-                .padding(.top, 12)
+                Spacer().frame(height: 12)
 
-                Spacer().frame(height: 16)
+                // Auto-renewal + restore
+                Text("Subscription automatically renews. Manage or cancel anytime in Settings > App Store.")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
 
-                // Legal
-                HStack(spacing: 16) {
+                Spacer().frame(height: 12)
+
+                // Restore + Legal
+                HStack(spacing: 20) {
+                    Button(action: { restore() }) {
+                        Text(isRestoring ? "Restoring..." : "Restore")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
+                    }
+                    .disabled(isPurchasing || isRestoring)
+
                     Link("Terms", destination: URL(string: "https://www.tarsy.dev/terms")!)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
+
                     Link("Privacy", destination: URL(string: "https://www.tarsy.dev/privacy")!)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
                 }
                 .padding(.bottom, 20)
             }
@@ -160,20 +182,8 @@ struct PaywallView: View {
     private func planCard(plan: Plan, label: String, price: String, detail: String, badge: String?) -> some View {
         let isSelected = selectedPlan == plan
 
-        return Button(action: { withAnimation(.easeInOut(duration: 0.2)) { selectedPlan = plan } }) {
-            VStack(spacing: 6) {
-                if let badge {
-                    Text(badge)
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundColor(TarsyTheme.backgroundPrimary)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(TarsyTheme.accentAmber)
-                        .cornerRadius(4)
-                } else {
-                    Spacer().frame(height: 17)
-                }
-
+        return Button(action: { withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { selectedPlan = plan } }) {
+            VStack(spacing: 4) {
                 Text(label)
                     .font(.system(size: 13, weight: .medium, design: .monospaced))
                     .foregroundColor(isSelected ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
@@ -188,27 +198,50 @@ struct PaywallView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
+            .padding(.vertical, 16)
             .background(isSelected ? TarsyTheme.backgroundSecondary : Color.clear)
             .cornerRadius(12)
             .overlay(
                 RoundedRectangle(cornerRadius: 12)
                     .stroke(isSelected ? TarsyTheme.accentAmber : TarsyTheme.textSecondary.opacity(0.3), lineWidth: isSelected ? 2 : 1)
             )
+            .overlay(alignment: .topTrailing) {
+                if let badge {
+                    Text(badge)
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .foregroundColor(TarsyTheme.backgroundPrimary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(TarsyTheme.accentAmber)
+                        .cornerRadius(4)
+                        .offset(x: -8, y: -8)
+                }
+            }
+            .scaleEffect(isSelected ? 1.05 : 1.0)
         }
         .buttonStyle(.plain)
     }
 
-    private func featureRow(icon: String, text: String) -> some View {
-        HStack(spacing: 12) {
+    private func featureGridRow(icon1: String, text1: String, icon2: String, text2: String) -> some View {
+        HStack(spacing: 0) {
+            featureCell(icon: icon1, text: text1)
+            featureCell(icon: icon2, text: text2)
+        }
+    }
+
+    private func featureCell(icon: String, text: String) -> some View {
+        HStack(spacing: 10) {
             Image(systemName: icon)
                 .font(.system(size: 14))
                 .foregroundColor(TarsyTheme.accentAmber)
-                .frame(width: 24)
+                .frame(width: 20)
             Text(text)
-                .font(.system(size: 14, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .foregroundColor(TarsyTheme.textPrimary)
+                .lineSpacing(2)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 10)
     }
 
     private func purchase() {
