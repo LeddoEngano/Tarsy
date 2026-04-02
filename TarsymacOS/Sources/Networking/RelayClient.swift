@@ -6,26 +6,35 @@ actor RelayClient {
     private var session: URLSession?
     private var isConnected = false
     private var reconnectAttempts = 0
-    private let maxReconnectAttempts = 20
 
     private var onPacketReceived: (@Sendable (WSPacket) -> Void)?
     private var onBinaryReceived: (@Sendable (Data) -> Void)?
+    /// Callback: (isConnected, reconnectAttempt) — attempt is 0 when connected
+    private var onConnectionStateChanged: (@Sendable (Bool, Int) -> Void)?
 
     private var authToken: String?
     private var machineSecret: String?
     private var isReconnecting = false
+    private var pingTask: Task<Void, Never>?
+    private var isIntentionalDisconnect = false
+    private var reconnectGeneration = 0
 
     func setHandlers(
         onPacket: @escaping @Sendable (WSPacket) -> Void,
-        onBinary: @escaping @Sendable (Data) -> Void = { _ in }
+        onBinary: @escaping @Sendable (Data) -> Void = { _ in },
+        onConnectionStateChanged: @escaping @Sendable (Bool, Int) -> Void = { _, _ in }
     ) {
         self.onPacketReceived = onPacket
         self.onBinaryReceived = onBinary
+        self.onConnectionStateChanged = onConnectionStateChanged
     }
+
+    var connected: Bool { isConnected }
 
     func connect(token: String, machineSecret: String? = nil) async {
         self.authToken = token
         if let machineSecret { self.machineSecret = machineSecret }
+        isIntentionalDisconnect = false
         // Only reset reconnect attempts on explicit connect (not reconnect)
         if !isReconnecting {
             reconnectAttempts = 0
@@ -40,8 +49,10 @@ actor RelayClient {
 
         guard let url = URL(string: baseURL) else { return }
 
-        // Cancel any existing connection
+        // Cancel any existing connection and ping task
+        stopPing()
         webSocket?.cancel(with: .goingAway, reason: nil)
+        session?.invalidateAndCancel()
 
         let newSession = URLSession(configuration: .default)
         session = newSession
@@ -62,11 +73,22 @@ actor RelayClient {
     }
 
     func disconnect() {
+        isIntentionalDisconnect = true
+        stopPing()
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
+        let wasConnected = isConnected
         isConnected = false
         reconnectAttempts = 0
         isReconnecting = false
+        if wasConnected {
+            onConnectionStateChanged?(false, 0)
+        }
+    }
+
+    /// Update the auth token without reconnecting (used for periodic token refresh)
+    func updateToken(_ token: String) {
+        self.authToken = token
     }
 
     func send(packet: WSPacket) {
@@ -91,6 +113,43 @@ actor RelayClient {
         ws.send(message) { _ in completion() }
     }
 
+    // MARK: - Ping/Pong Keep-Alive
+
+    private func startPing() {
+        stopPing()
+        pingTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000) // 30 seconds
+                guard !Task.isCancelled else { break }
+                guard let self else { break }
+                await self.sendPing()
+            }
+        }
+    }
+
+    private func stopPing() {
+        pingTask?.cancel()
+        pingTask = nil
+    }
+
+    private func sendPing() {
+        guard let ws = webSocket else { return }
+        ws.sendPing { [weak self] error in
+            if error != nil {
+                // Connection is dead — trigger reconnection
+                Task { await self?.handleDeadConnection() }
+            }
+        }
+    }
+
+    private func handleDeadConnection() {
+        guard isConnected else { return } // Already handling reconnection
+        isConnected = false
+        stopPing()
+        onConnectionStateChanged?(false, reconnectAttempts)
+        scheduleReconnect()
+    }
+
     // MARK: - Receive Loop
 
     private func receiveLoop() {
@@ -107,6 +166,8 @@ actor RelayClient {
             if !isConnected {
                 isConnected = true
                 reconnectAttempts = 0
+                startPing()
+                onConnectionStateChanged?(true, 0)
             }
             switch message {
             case .string(let text):
@@ -121,22 +182,41 @@ actor RelayClient {
             }
             receiveLoop() // Continue listening
 
-        case .failure:
+        case .failure(let error):
+            #if DEBUG
+            print("[RelayClient] Receive failed: \(error.localizedDescription)")
+            #endif
+            let wasConnected = isConnected
             isConnected = false
-            scheduleReconnect()
+            stopPing()
+            if wasConnected {
+                onConnectionStateChanged?(false, reconnectAttempts)
+            }
+            if !isIntentionalDisconnect {
+                scheduleReconnect()
+            }
         }
     }
 
-    // MARK: - Reconnect
+    // MARK: - Reconnect (infinite with exponential backoff + jitter)
 
     private func scheduleReconnect() {
-        guard reconnectAttempts < maxReconnectAttempts else { return }
+        guard !isIntentionalDisconnect else { return }
 
         reconnectAttempts += 1
-        let delay = min(reconnectAttempts * 2, 30)
+        let gen = reconnectGeneration
+
+        // Exponential backoff: 2, 4, 8, 16, 32, 60, 60, 60...
+        // With jitter to avoid thundering herd
+        let baseDelay = min(pow(2.0, Double(reconnectAttempts)), 60.0)
+        let jitter = Double.random(in: 0...min(baseDelay * 0.3, 10.0))
+        let delay = baseDelay + jitter
 
         Task {
             try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000)
+
+            guard !isIntentionalDisconnect else { return }
+            guard reconnectGeneration == gen else { return } // Superseded by forceReconnect
 
             // Force token refresh before reconnecting
             do {
@@ -146,10 +226,41 @@ actor RelayClient {
                 self.isReconnecting = true
                 self.performConnect(token: token)
             } catch {
-                if reconnectAttempts < maxReconnectAttempts {
+                // Token refresh failed — retry with existing token if we have one
+                if let existingToken = self.authToken {
+                    self.isReconnecting = true
+                    self.performConnect(token: existingToken)
+                } else {
+                    // No token at all — keep trying
                     scheduleReconnect()
                 }
             }
+        }
+    }
+
+    /// Force an immediate reconnection (e.g., after wake from sleep or token refresh)
+    func forceReconnect() async {
+        guard !isIntentionalDisconnect else { return }
+        reconnectGeneration += 1 // Invalidate any pending scheduleReconnect
+        reconnectAttempts = 0
+        stopPing()
+        webSocket?.cancel(with: .goingAway, reason: nil)
+        webSocket = nil
+        isConnected = false
+        isReconnecting = false
+
+        // Get fresh token and reconnect
+        do {
+            let refreshed = try await supabase.auth.refreshSession()
+            let token = refreshed.accessToken
+            self.authToken = token
+            performConnect(token: token)
+        } catch {
+            if let token = authToken {
+                performConnect(token: token)
+                return
+            }
+            scheduleReconnect()
         }
     }
 }
