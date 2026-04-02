@@ -12,7 +12,7 @@
 }
 
 @utility font-display {
-  font-family: var(--font-inter, "Inter"), sans-serif;
+  font-family: var(--font-outfit, "Outfit"), sans-serif;
 }
 
 html {
@@ -20,7 +20,7 @@ html {
 }
 
 body {
-  font-family: var(--font-inter, "Inter"), sans-serif;
+  font-family: var(--font-jetbrains, "JetBrains Mono"), monospace;
   background-color: var(--color-surface);
   color: var(--color-cream);
   line-height: 1.6;

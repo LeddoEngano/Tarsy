@@ -5,7 +5,7 @@ export default function Navbar() {
     <nav className="fixed top-0 left-0 right-0 z-50 bg-surface/90 backdrop-blur-xl border-b border-surface-overlay/40">
       <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5 no-underline">
-          <img src="/icon.png" alt="Tarsy" className="w-7 h-7 rounded-lg" />
+          <img src="/eyes.png" alt="tarsy" className="w-7 h-7" />
           <span className="text-base font-bold text-amber tracking-[0.15em]">
             tarsy
           </span>
