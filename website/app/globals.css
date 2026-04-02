@@ -1,14 +1,14 @@
 @import "tailwindcss";
 
 @theme {
-  --color-surface: #141312;
-  --color-surface-raised: #1d1c1a;
-  --color-surface-overlay: #2c2a27;
-  --color-cream: #e5e3df;
-  --color-taupe: #7d7972;
-  --color-amber: #d4a84b;
-  --color-terracotta: #d47b6b;
-  --color-moss: #a3b08c;
+  --color-surface: #131316;
+  --color-surface-raised: #1c1c21;
+  --color-surface-overlay: #2a2a30;
+  --color-cream: #e4e4e7;
+  --color-taupe: #71717a;
+  --color-amber: #ffffff;
+  --color-terracotta: #e5716a;
+  --color-moss: #6bc77b;
 }
 
 @utility font-display {
@@ -41,12 +41,12 @@ body {
 
 /* Legacy CSS variables for pages still using CSS modules (contact, legal) */
 :root {
-  --bg-primary: #141312;
-  --bg-secondary: #1d1c1a;
-  --bg-tertiary: #2c2a27;
-  --text-primary: #e5e3df;
-  --text-secondary: #7d7972;
-  --accent-amber: #d4a84b;
-  --accent-terracotta: #d47b6b;
-  --accent-moss: #a3b08c;
+  --bg-primary: #131316;
+  --bg-secondary: #1c1c21;
+  --bg-tertiary: #2a2a30;
+  --text-primary: #e4e4e7;
+  --text-secondary: #71717a;
+  --accent-amber: #ffffff;
+  --accent-terracotta: #e5716a;
+  --accent-moss: #6bc77b;
 }

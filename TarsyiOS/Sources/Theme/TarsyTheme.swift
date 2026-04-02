@@ -2,25 +2,25 @@ import SwiftUI
 
 enum TarsyTheme {
     // Backgrounds
-    static let backgroundPrimary = Color(hex: "0a0a0a")
-    static let backgroundSecondary = Color(hex: "111111")
-    static let backgroundTertiary = Color(hex: "222222")
+    static let backgroundPrimary = Color(hex: "131316")
+    static let backgroundSecondary = Color(hex: "1c1c21")
+    static let backgroundTertiary = Color(hex: "2a2a30")
 
     // Text
-    static let textPrimary = Color(hex: "ededed")
-    static let textSecondary = Color(hex: "666666")
+    static let textPrimary = Color(hex: "e4e4e7")
+    static let textSecondary = Color(hex: "71717a")
     static let textAccent = Color(hex: "ffffff")
 
     // Accents
     static let accentAmber = Color(hex: "ffffff")
-    static let accentTerracotta = Color(hex: "888888")
-    static let accentMoss = Color(hex: "b0b0b0")
+    static let accentTerracotta = Color(hex: "e5716a")
+    static let accentMoss = Color(hex: "6bc77b")
 
     // Status
-    static let statusRunning = Color(hex: "b0b0b0")
-    static let statusStarting = Color(hex: "ffffff")
-    static let statusIdle = Color(hex: "555555")
-    static let statusError = Color(hex: "888888")
+    static let statusRunning = Color(hex: "6bc77b")
+    static let statusStarting = Color(hex: "e0a86a")
+    static let statusIdle = Color(hex: "52525b")
+    static let statusError = Color(hex: "e5716a")
 
     // Fonts
     static let monoFont = Font.system(.body, design: .monospaced)
