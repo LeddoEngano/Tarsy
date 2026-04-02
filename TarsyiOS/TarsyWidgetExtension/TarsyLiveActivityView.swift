@@ -250,26 +250,25 @@ struct TarsyLiveActivityWidget: Widget {
         return "\(key): \(option)"
     }
 
-    private func permissionButtonColor(_ option: String) -> Color {
+    private func isNegativeOption(_ option: String) -> Bool {
         let lower = option.lowercased()
-        if lower.contains("deny") || lower == "no" || lower == "n" || lower.contains("reject") || lower.contains("cancel") {
-            return terracottaColor.opacity(0.25)
-        }
-        if lower.contains("always") || lower.contains("all") || lower.contains("bypass") || lower.contains("trust") {
-            return mossColor.opacity(0.3)
-        }
-        // Default: allow / yes / positive
+        return lower.contains("deny") || lower == "no" || lower == "n" || lower.contains("reject") || lower.contains("cancel")
+    }
+
+    private func isBroadAllowOption(_ option: String) -> Bool {
+        let lower = option.lowercased()
+        return lower.contains("always") || lower.contains("allow all") || lower.contains("bypass") || lower.contains("trust")
+    }
+
+    private func permissionButtonColor(_ option: String) -> Color {
+        if isNegativeOption(option) { return terracottaColor.opacity(0.25) }
+        if isBroadAllowOption(option) { return mossColor.opacity(0.3) }
         return amberColor.opacity(0.25)
     }
 
     private func permissionButtonTextColor(_ option: String) -> Color {
-        let lower = option.lowercased()
-        if lower.contains("deny") || lower == "no" || lower == "n" || lower.contains("reject") || lower.contains("cancel") {
-            return terracottaColor
-        }
-        if lower.contains("always") || lower.contains("all") || lower.contains("bypass") || lower.contains("trust") {
-            return mossColor
-        }
+        if isNegativeOption(option) { return terracottaColor }
+        if isBroadAllowOption(option) { return mossColor }
         return amberColor
     }
 
