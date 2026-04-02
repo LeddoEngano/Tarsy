@@ -519,6 +519,23 @@ class DaemonManager: ObservableObject {
                         payload: payload,
                         id: packet.id
                     ))
+                    // Now that E2E is ready, send initial state that the iOS client needs.
+                    // These were sent on relay connect but got lost (no client yet / no E2E).
+                    let agents = detectedAgents
+                    if !agents.isEmpty {
+                        await sendToClientOrRelay(
+                            WSPacket(action: .agentsDetected, payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]),
+                            to: "relay"
+                        )
+                    }
+                    let openclawInstalled = await openClaw.isInstalled()
+                    await sendToClientOrRelay(
+                        WSPacket(action: .openclawStatus, payload: [
+                            "installed": openclawInstalled ? "true" : "false",
+                            "running": "false"
+                        ]),
+                        to: "relay"
+                    )
                 } else {
                     log("e2eKeyExchange: ECDH failed")
                 }
