@@ -421,6 +421,7 @@ struct WorkspaceView: View {
 
     @State private var interactiveOptions: [InteractiveOption]? = nil
     @State private var interactiveQuestions: [InteractiveQuestion]? = nil
+    @State private var pendingPermissionRequestId: String? = nil
 
     private var chatArea: some View {
         ScrollViewReader { proxy in
@@ -579,9 +580,19 @@ struct WorkspaceView: View {
             if let sessionId = currentTab.sessionId {
                 isAgentThinking = true
                 let engineType = currentTab.engineType?.rawValue ?? "claude"
+                var payload: [String: String] = [
+                    "sessionId": sessionId,
+                    "answer": answerText,
+                    "engineType": engineType
+                ]
+                // Include permission request ID if this was a permission prompt
+                if let permId = pendingPermissionRequestId {
+                    payload["permissionRequestId"] = permId
+                    pendingPermissionRequestId = nil
+                }
                 connectionManager.send(WSPacket(
                     action: .engineUserResponse,
-                    payload: ["sessionId": sessionId, "answer": answerText, "engineType": engineType]
+                    payload: payload
                 ))
             }
         }
@@ -1641,6 +1652,14 @@ struct WorkspaceView: View {
         isAgentThinking = false
         let sessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
         todoManager.markQuestion(sessionId: sessionId)
+
+        // Track permission request ID if this is a permission prompt
+        if packet.payload?["isPermission"] == "true" {
+            pendingPermissionRequestId = packet.payload?["permissionRequestId"]
+        } else {
+            pendingPermissionRequestId = nil
+        }
+
         // Update Live Activity to waiting (scoped to tab) with question text for the alert
         var questionText: String?
         var questionKey: String?
