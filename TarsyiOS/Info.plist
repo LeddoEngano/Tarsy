@@ -54,6 +54,11 @@
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
 	<true/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>InterVariable.ttf</string>
+		<string>InterVariable-Italic.ttf</string>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>

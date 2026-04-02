@@ -31,6 +31,7 @@ targets:
         LSApplicationCategoryType: "public.app-category.developer-tools"
         NSAppleEventsUsageDescription: "Tarsy needs to control your browser to manage tabs and navigate pages."
         ITSAppUsesNonExemptEncryption: false
+        ATSApplicationFontsPath: Fonts
         CFBundleURLTypes:
           - CFBundleURLSchemes:
               - com.tarsy.macos

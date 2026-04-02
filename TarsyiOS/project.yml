@@ -43,6 +43,9 @@ targets:
               - com.tarsy.ios
         NSSupportsLiveActivities: true
         NSSupportsLiveActivitiesFrequentUpdates: true
+        UIAppFonts:
+          - InterVariable.ttf
+          - InterVariable-Italic.ttf
         ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
@@ -75,6 +78,8 @@ targets:
           - Info.plist
       - path: Sources/LiveActivity/TarsyActivityAttributes.swift
         buildPhase: sources
+      - path: Sources/Fonts
+        buildPhase: resources
     entitlements:
       path: TarsyWidgetExtension/TarsyWidgetExtension.entitlements
       properties:
@@ -87,6 +92,9 @@ targets:
         CFBundleName: TarsyWidgets
         CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"
+        UIAppFonts:
+          - InterVariable.ttf
+          - InterVariable-Italic.ttf
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
