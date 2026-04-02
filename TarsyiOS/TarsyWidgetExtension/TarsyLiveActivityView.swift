@@ -12,11 +12,7 @@ struct TarsyLiveActivityWidget: Widget {
             DynamicIsland {
                 // MARK: - Expanded Dynamic Island
                 DynamicIslandExpandedRegion(.leading) {
-                    TarsyEyesWidget(
-                        size: 24,
-                        pupilX: context.state.pupilX,
-                        pupilY: context.state.pupilY
-                    )
+                    TarsyEyesWidget(size: 24)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text("\(Int(context.state.contextPercent))%")
@@ -51,12 +47,8 @@ struct TarsyLiveActivityWidget: Widget {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundColor(context.state.status == "running" ? warmBeige : statusColor(context.state.status))
             } compactTrailing: {
-                TarsyEyesWidget(
-                    size: 18,
-                    pupilX: context.state.pupilX,
-                    pupilY: context.state.pupilY
-                )
-                .frame(width: 18, height: 18)
+                TarsyEyesWidget(size: 18)
+                    .frame(width: 18, height: 18)
             } minimal: {
                 Image(systemName: toolIcon(context.state))
                     .font(.system(size: 14, weight: .bold))
@@ -154,11 +146,7 @@ struct TarsyLiveActivityWidget: Widget {
                             .frame(width: 32, height: 32)
                             .rotationEffect(.degrees(-90))
 
-                        TarsyEyesWidget(
-                            size: 22,
-                            pupilX: context.state.pupilX,
-                            pupilY: context.state.pupilY
-                        )
+                        TarsyEyesWidget(size: 22)
                     }
 
                     // Tool + workspace + engine
@@ -373,37 +361,37 @@ private let previewAttrs = TarsyActivityAttributes(
 #Preview("Compact — Editing", as: .dynamicIsland(.compact), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 127, contextPercent: 34, pupilX: 0.3, pupilY: 0)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 127, contextPercent: 34)
 }
 
 #Preview("Compact — Running", as: .dynamicIsland(.compact), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Running", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 200, contextPercent: 62, pupilX: -0.2, pupilY: 0.15)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Running", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 200, contextPercent: 62)
 }
 
 #Preview("Compact — Waiting", as: .dynamicIsland(.compact), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Approve changes?", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 45, pupilX: 0, pupilY: 0)
+    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Approve changes?", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 45)
 }
 
 #Preview("Compact — Error", as: .dynamicIsland(.compact), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Build failed", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 300, pupilX: 0, pupilY: 0.25)
+    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Build failed", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 300)
 }
 
 #Preview("Expanded — Running", as: .dynamicIsland(.expanded), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Writing tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 312, contextPercent: 45, pupilX: 0.15, pupilY: -0.2)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Writing tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 312, contextPercent: 45)
 }
 
 #Preview("Expanded — High Context", as: .dynamicIsland(.expanded), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 600, contextPercent: 87, pupilX: -0.3, pupilY: 0)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 600, contextPercent: 87)
 }
 
 #Preview("Expanded — Waiting", as: .dynamicIsland(.expanded), using: previewAttrs) {
@@ -415,31 +403,31 @@ private let previewAttrs = TarsyActivityAttributes(
 #Preview("Expanded — Error", as: .dynamicIsland(.expanded), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Build failed", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 600, pupilX: 0, pupilY: 0.2)
+    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Build failed", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 600)
 }
 
 #Preview("Minimal — Running", as: .dynamicIsland(.minimal), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 90, pupilX: 0.2, pupilY: 0.15)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 90)
 }
 
 #Preview("Minimal — Waiting", as: .dynamicIsland(.minimal), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 45, pupilX: 0, pupilY: 0)
+    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 45)
 }
 
 #Preview("Lock Screen — Running", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing ContentView.swift", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 185, contextPercent: 42, pupilX: 0.3, pupilY: 0)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing ContentView.swift", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 185, contextPercent: 42)
 }
 
 #Preview("Lock Screen — High Context", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Running tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 500, contextPercent: 91, pupilX: -0.15, pupilY: -0.2)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Running tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 500, contextPercent: 91)
 }
 
 #Preview("Lock Screen — Waiting (Buttons)", as: .content, using: previewAttrs) {
@@ -451,7 +439,7 @@ private let previewAttrs = TarsyActivityAttributes(
 #Preview("Lock Screen — Error", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Connection lost", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 60, pupilX: 0, pupilY: 0.25)
+    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Connection lost", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 60)
 }
 
 #Preview("Lock Screen — Completed", as: .content, using: previewAttrs) {

@@ -23,23 +23,19 @@ struct TarsyActivityAttributes: ActivityAttributes {
         let startedAt: Double        // Unix timestamp (timeIntervalSince1970) — Double for APNs JSON compatibility
         let contextPercent: Double   // 0–100, context window usage
         let message: String?         // Optional detail (e.g., waiting question text)
-        let pupilX: Double           // Pupil horizontal offset (-1…1), animated between updates
-        let pupilY: Double           // Pupil vertical offset (-1…1), animated between updates
         // Interactive permission response fields (populated when status == "waiting")
         let sessionId: String?       // Session to respond to
         let engineTypeRaw: String?   // Engine type raw value for response packet
         let questionKey: String?     // Question text (used as answer dict key)
         let questionOptions: [String]? // Available options for quick-action buttons
 
-        init(status: String, currentTool: String, currentToolIcon: String, startedAt: Double, contextPercent: Double = 0, message: String? = nil, pupilX: Double = 0, pupilY: Double = 0, sessionId: String? = nil, engineTypeRaw: String? = nil, questionKey: String? = nil, questionOptions: [String]? = nil) {
+        init(status: String, currentTool: String, currentToolIcon: String, startedAt: Double, contextPercent: Double = 0, message: String? = nil, sessionId: String? = nil, engineTypeRaw: String? = nil, questionKey: String? = nil, questionOptions: [String]? = nil) {
             self.status = status
             self.currentTool = currentTool
             self.currentToolIcon = currentToolIcon
             self.startedAt = startedAt
             self.contextPercent = contextPercent
             self.message = message
-            self.pupilX = pupilX
-            self.pupilY = pupilY
             self.sessionId = sessionId
             self.engineTypeRaw = engineTypeRaw
             self.questionKey = questionKey

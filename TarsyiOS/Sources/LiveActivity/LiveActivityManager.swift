@@ -16,18 +16,6 @@ class LiveActivityManager: ObservableObject {
     /// Activities go stale after this interval without updates, triggering the "Updating…" fallback UI
     private let staleTTL: TimeInterval = 120
 
-    /// Natural-looking pupil positions for the animated Tarsy eyes
-    private let pupilPositions: [(x: Double, y: Double)] = [
-        (0, 0),          // center
-        (0.3, 0),        // right
-        (-0.3, 0),       // left
-        (0, -0.25),      // up
-        (0.2, 0.15),     // down-right
-        (-0.2, 0.15),    // down-left
-        (0.15, -0.2),    // up-right
-        (-0.15, -0.2),   // up-left
-    ]
-
     private init() {}
 
     // MARK: - Keys
@@ -62,14 +50,11 @@ class LiveActivityManager: ObservableObject {
             engineIcon: engineType.iconName
         )
 
-        let pupil = randomPupil()
         let state = TarsyActivityAttributes.ContentState(
             status: "running",
             currentTool: "Starting",
             currentToolIcon: "arrow.triangle.2.circlepath",
-            startedAt: now,
-            pupilX: pupil.x,
-            pupilY: pupil.y
+            startedAt: now
         )
 
         do {
@@ -103,16 +88,13 @@ class LiveActivityManager: ObservableObject {
 
         if let cp = contextPercent { contextPercents[activityKey] = cp }
         let cp = contextPercents[activityKey] ?? 0
-        let pupil = randomPupil()
 
         let state = TarsyActivityAttributes.ContentState(
             status: "running",
             currentTool: tool.displayName,
             currentToolIcon: tool.iconName,
             startedAt: startDate,
-            contextPercent: cp,
-            pupilX: pupil.x,
-            pupilY: pupil.y
+            contextPercent: cp
         )
 
         Task { await activity.update(.init(state: state, staleDate: .now.addingTimeInterval(staleTTL))) }
@@ -126,16 +108,13 @@ class LiveActivityManager: ObservableObject {
               let startDate = startDates[activityKey] else { return }
 
         let currentState = activity.content.state
-        let pupil = randomPupil()
         let state = TarsyActivityAttributes.ContentState(
             status: currentState.status,
             currentTool: currentState.currentTool,
             currentToolIcon: currentState.currentToolIcon,
             startedAt: startDate,
             contextPercent: contextPercent,
-            message: currentState.message,
-            pupilX: pupil.x,
-            pupilY: pupil.y
+            message: currentState.message
         )
 
         Task { await activity.update(.init(state: state, staleDate: .now.addingTimeInterval(staleTTL))) }
@@ -148,7 +127,6 @@ class LiveActivityManager: ObservableObject {
 
         let cp = contextPercents[activityKey] ?? 0
         let currentState = activity.content.state
-        let pupil = randomPupil()
         let state = TarsyActivityAttributes.ContentState(
             status: status,
             currentTool: status == "waiting" ? "Needs input" : currentState.currentTool,
@@ -156,8 +134,6 @@ class LiveActivityManager: ObservableObject {
             startedAt: startDate,
             contextPercent: cp,
             message: status == "waiting" ? message : nil,
-            pupilX: pupil.x,
-            pupilY: pupil.y,
             sessionId: status == "waiting" ? sessionId : nil,
             engineTypeRaw: status == "waiting" ? engineType : nil,
             questionKey: status == "waiting" ? questionKey : nil,
@@ -282,11 +258,6 @@ class LiveActivityManager: ObservableObject {
         }
 
         Task { await removeAllLiveActivityTokens() }
-    }
-
-    /// Returns a random pupil position from the preset list
-    private func randomPupil() -> (x: Double, y: Double) {
-        pupilPositions.randomElement() ?? (0, 0)
     }
 
     var hasActiveActivities: Bool {
