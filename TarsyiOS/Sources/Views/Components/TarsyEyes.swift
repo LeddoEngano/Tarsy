@@ -24,13 +24,13 @@ struct TarsyEyes: View {
             HStack(spacing: size * 0.1) {
                 Circle()
                     .fill(.white)
-                    .frame(width: size * 0.30, height: size * 0.30)
+                    .frame(width: size * 0.36, height: size * 0.36)
                     .scaleEffect(x: leftEye.scaleX, y: leftEye.scaleY)
                     .offset(x: leftEye.offsetX, y: leftEye.offsetY)
 
                 Circle()
                     .fill(.white)
-                    .frame(width: size * 0.48, height: size * 0.48)
+                    .frame(width: size * 0.414, height: size * 0.414)
                     .scaleEffect(x: rightEye.scaleX, y: rightEye.scaleY)
                     .offset(x: rightEye.offsetX, y: rightEye.offsetY)
             }
@@ -40,11 +40,11 @@ struct TarsyEyes: View {
             if morphShape != .none {
                 HStack(spacing: size * 0.1) {
                     morphIcon
-                        .font(.system(size: size * 0.26))
+                        .font(.system(size: size * 0.30))
                         .foregroundStyle(.white)
 
                     morphIcon
-                        .font(.system(size: size * 0.42))
+                        .font(.system(size: size * 0.345))
                         .foregroundStyle(.white)
                 }
                 .opacity(morphOpacity)
@@ -71,7 +71,7 @@ struct TarsyEyes: View {
     // MARK: - Behavior Selection
 
     private enum Behavior {
-        case blink, doubleBlink
+        case blink, doubleBlink, winkLeft, winkRight
         case dartRight, dartLeft
         case lookUp, lookDown
         case wave
@@ -92,6 +92,8 @@ struct TarsyEyes: View {
         let table: [(Behavior, Int)] = [
             (.blink, 5),
             (.doubleBlink, 2),
+            (.winkLeft, 2),
+            (.winkRight, 2),
             (.dartRight, 3),
             (.dartLeft, 3),
             (.lookUp, 2),
@@ -123,6 +125,8 @@ struct TarsyEyes: View {
         switch behavior {
         case .blink:            await doBlink()
         case .doubleBlink:      await doDoubleBlink()
+        case .winkLeft:         await doWink(left: true)
+        case .winkRight:        await doWink(left: false)
         case .dartRight:        await doDart(direction: 1)
         case .dartLeft:         await doDart(direction: -1)
         case .lookUp:           await doLook(dy: -1)
@@ -161,6 +165,19 @@ struct TarsyEyes: View {
         await doBlink()
         try? await Task.sleep(for: .milliseconds(100))
         await doBlink()
+    }
+
+    // MARK: - Wink
+
+    private func doWink(left: Bool) async {
+        withAnimation(.easeIn(duration: 0.07)) {
+            if left { leftEye.scaleY = 0.08 } else { rightEye.scaleY = 0.08 }
+        }
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 250...500)))
+        withAnimation(.spring(duration: 0.14, bounce: 0.25)) {
+            if left { leftEye.scaleY = 1 } else { rightEye.scaleY = 1 }
+        }
+        try? await Task.sleep(for: .milliseconds(150))
     }
 
     // MARK: - Dart
