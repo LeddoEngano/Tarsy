@@ -109,6 +109,14 @@ struct TarsyiOSApp: App {
                     AppDelegate.deepLinkRouter = deepLinkRouter
                     subscriptionManager.profileService = profileService
                     subscriptionManager.start()
+                    // Wire Live Activity widget permission buttons → WebSocket
+                    LiveActivityManager.shared.onPermissionResponse = { [weak connectionManager] sessionId, answer, engineType, _ in
+                        connectionManager?.send(WSPacket(
+                            action: .engineUserResponse,
+                            payload: ["sessionId": sessionId, "answer": answer, "engineType": engineType]
+                        ))
+                    }
+                    LiveActivityManager.shared.startWidgetResponseObserver()
                 }
                 .onOpenURL { url in
                     guard url.scheme == "com.tarsy.ios" else { return }

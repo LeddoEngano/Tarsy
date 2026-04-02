@@ -472,6 +472,19 @@ struct WorkspaceView: View {
             .onChange(of: agentActivity) { _, _ in
                 scrollToBottom(proxy)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .widgetPermissionResponseProcessed)) { notification in
+                guard let wsId = notification.userInfo?["workspaceId"] as? String,
+                      wsId == workspace.id.uuidString else { return }
+                // Clear question UI — response was sent from Live Activity widget
+                withAnimation {
+                    interactiveQuestions = nil
+                    interactiveOptions = nil
+                }
+                isAgentThinking = true
+                if let sessionId = notification.userInfo?["sessionId"] as? String {
+                    todoManager.markResumed(sessionId: sessionId)
+                }
+            }
         }
     }
 
@@ -1630,10 +1643,17 @@ struct WorkspaceView: View {
         todoManager.markQuestion(sessionId: sessionId)
         // Update Live Activity to waiting (scoped to tab) with question text for the alert
         var questionText: String?
+        var questionKey: String?
+        var questionOptions: [String]?
         if let questionsJson = packet.payload?["questions"],
            let questionsData = questionsJson.data(using: .utf8),
            let questions = try? JSONDecoder().decode([InteractiveQuestion].self, from: questionsData) {
             questionText = questions.first?.question
+            // For Live Activity interactive buttons: only for single, simple questions (≤4 options, single-select)
+            if questions.count == 1 && !questions[0].multiSelect && questions[0].options.count <= 4 && !questions[0].options.isEmpty {
+                questionKey = questions[0].question
+                questionOptions = questions[0].options
+            }
             if !questions.isEmpty {
                 withAnimation {
                     interactiveOptions = nil
@@ -1642,7 +1662,17 @@ struct WorkspaceView: View {
             }
         }
         let askTabId = tabId(forSession: sessionId) ?? currentTab.id
-        LiveActivityManager.shared.updateStatus(workspaceId: workspace.id.uuidString, status: "waiting", tabId: askTabId, message: questionText)
+        let engineType = currentTab.engineType?.rawValue ?? "claude"
+        LiveActivityManager.shared.updateStatus(
+            workspaceId: workspace.id.uuidString,
+            status: "waiting",
+            tabId: askTabId,
+            message: questionText,
+            sessionId: sessionId,
+            engineType: engineType,
+            questionKey: questionKey,
+            questionOptions: questionOptions
+        )
     }
 
     private var engineDisplayName: String {
