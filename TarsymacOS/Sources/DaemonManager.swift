@@ -486,10 +486,19 @@ class DaemonManager: ObservableObject {
                 relayE2E.reset()
                 if relayE2E.completeKeyExchange(remotePublicKeyBase64: clientKey) {
                     log("e2eKeyExchange: relay E2E established")
+                    var payload: [String: String] = ["e2ePublicKey": relayE2E.publicKeyBase64]
+                    // Sign our E2E public key with the TLS private key (same as LAN path)
+                    if let keyData = relayE2E.publicKeyBase64.data(using: .utf8),
+                       let signature = TLSCertificateManager.shared.sign(keyData) {
+                        payload["e2eKeySignature"] = signature.base64EncodedString()
+                        if let certDER = TLSCertificateManager.shared.certificateDER() {
+                            payload["tlsCertificate"] = certDER.base64EncodedString()
+                        }
+                    }
                     // Send response directly (not via sendToClientOrRelay which would try to encrypt)
                     await relayClient.send(packet: WSPacket(
                         action: .e2eKeyExchangeResponse,
-                        payload: ["e2ePublicKey": relayE2E.publicKeyBase64],
+                        payload: payload,
                         id: packet.id
                     ))
                 } else {
@@ -948,6 +957,36 @@ class DaemonManager: ObservableObject {
 
             log("claudeCreate: session created, sending response")
 
+            // Set permission handler for safe mode (control_request → iOS approval)
+            await terminalManager.setClaudePermissionHandler(sessionId: sid) { [weak self] requestId, toolName, toolInput in
+                Task { @MainActor in
+                    guard let self else { return }
+                    let description = self.formatPermissionDescription(toolName, toolInput)
+                    let questionsPayload: [[String: Any]] = [[
+                        "question": description,
+                        "header": "Permission",
+                        "options": ["Allow", "Always Allow \(toolName)", "Deny"],
+                        "multiSelect": false
+                    ]]
+                    if let jsonData = try? JSONSerialization.data(withJSONObject: questionsPayload),
+                       let jsonStr = String(data: jsonData, encoding: .utf8) {
+                        let packet = WSPacket(action: .claudeAskUser, payload: [
+                            "sessionId": sid,
+                            "questions": jsonStr,
+                            "permissionRequestId": requestId,
+                            "isPermission": "true"
+                        ])
+                        self.sessionLastEvent[sid] = packet
+                        await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
+                        PushNotificationService.shared.notifyAgentQuestion(
+                            workspace: workspaceName,
+                            question: description,
+                            workspaceId: wsIdStr
+                        )
+                    }
+                }
+            }
+
             await sendToClientOrRelay(
                 WSPacket(action: .claudeCreate, payload: ["sessionId": sid], id: packet.id),
                 to: clientId
@@ -974,7 +1013,32 @@ class DaemonManager: ObservableObject {
               let answer = packet.payload?["answer"] else { return }
         log("claudeUserResponse: \(answer) for session \(sessionId)")
         sessionLastEvent.removeValue(forKey: sessionId)
-        await terminalManager.respondToClaudeQuestion(answer, sessionId: sessionId)
+
+        // Check if this is a permission response (has permissionRequestId)
+        if let requestId = packet.payload?["permissionRequestId"] {
+            let choice: String
+            if answer.contains("Deny") { choice = "Deny" }
+            else if answer.contains("Always") { choice = "Always" }
+            else { choice = "Allow" }
+            await terminalManager.respondToClaudePermission(requestId, answer: choice, sessionId: sessionId)
+        } else {
+            await terminalManager.respondToClaudeQuestion(answer, sessionId: sessionId)
+        }
+    }
+
+    private func formatPermissionDescription(_ toolName: String, _ input: [String: Any]) -> String {
+        var parts: [String] = ["🔧 \(toolName)"]
+        if let cmd = input["command"] as? String {
+            parts.append("\n\(cmd)")
+        } else if let path = input["file_path"] as? String {
+            parts.append("\n\(path)")
+        } else if let query = input["query"] as? String {
+            parts.append("\n\(query)")
+        }
+        if let reason = input["_decision_reason"] as? String, !reason.isEmpty {
+            parts.append("\n\(reason)")
+        }
+        return parts.joined()
     }
 
     private func handleClaudeMessage(clientId: String, packet: WSPacket) async {
@@ -2415,6 +2479,41 @@ class DaemonManager: ObservableObject {
                     }
                 }
 
+                // Set permission handler for safe mode (control_request → iOS approval)
+                await terminalManager.setClaudePermissionHandler(sessionId: sid) { [weak self] requestId, toolName, toolInput in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        let description = self.formatPermissionDescription(toolName, toolInput)
+                        let questionsPayload: [[String: Any]] = [[
+                            "question": description,
+                            "header": "Permission",
+                            "options": ["Allow", "Always Allow \(toolName)", "Deny"],
+                            "multiSelect": false
+                        ]]
+                        if let jsonData = try? JSONSerialization.data(withJSONObject: questionsPayload),
+                           let jsonStr = String(data: jsonData, encoding: .utf8) {
+                            let packet = WSPacket(action: .engineAskUser, payload: [
+                                "sessionId": sid,
+                                "questions": jsonStr,
+                                "engineType": "claude",
+                                "permissionRequestId": requestId,
+                                "isPermission": "true"
+                            ])
+                            self.sessionLastEvent[sid] = packet
+                            await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
+                            self.sendLAPush(sessionId: sid, status: "waiting", toolName: "Permission", toolIcon: "lock.shield", message: description, alert: ["title": "Tarsy", "body": "Agent needs permission"])
+                            PushNotificationService.shared.notifyAgentQuestion(
+                                workspace: workspaceName,
+                                question: description,
+                                workspaceId: wsIdStr
+                            )
+                            if let taskId = self.sessionTaskMap[sid] {
+                                await self.agentTaskService.updateStatus(taskId, status: .waiting)
+                            }
+                        }
+                    }
+                }
+
                 await sendToClientOrRelay(
                     WSPacket(action: .engineCreate, payload: ["sessionId": sid, "engineType": "claude"], id: packet.id),
                     to: clientId
@@ -2539,7 +2638,16 @@ class DaemonManager: ObservableObject {
         let engineType = packet.payload?["engineType"] ?? ""
 
         if engineType == "claude" {
-            await terminalManager.respondToClaudeQuestion(answer, sessionId: sessionId)
+            // Check if this is a permission response
+            if let requestId = packet.payload?["permissionRequestId"] {
+                let choice: String
+                if answer.contains("Deny") { choice = "Deny" }
+                else if answer.contains("Always") { choice = "Always" }
+                else { choice = "Allow" }
+                await terminalManager.respondToClaudePermission(requestId, answer: choice, sessionId: sessionId)
+            } else {
+                await terminalManager.respondToClaudeQuestion(answer, sessionId: sessionId)
+            }
         } else {
             await terminalManager.respondToEngineQuestion(answer, sessionId: sessionId)
         }
