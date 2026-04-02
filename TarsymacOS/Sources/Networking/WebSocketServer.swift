@@ -357,6 +357,7 @@ actor WebSocketServer {
             try process.run()
             process.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            try? pipe.fileHandleForReading.close()
             guard let output = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !output.isEmpty else { return }
             // Kill each PID found (except our own)
@@ -369,7 +370,7 @@ actor WebSocketServer {
             // Give it a moment to release the port
             Thread.sleep(forTimeInterval: 0.3)
         } catch {
-            // Silently ignore — lsof may not find anything
+            try? pipe.fileHandleForReading.close()
         }
     }
 }

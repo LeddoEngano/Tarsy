@@ -163,6 +163,13 @@ actor SudoPasswordManager {
 
         let password: String? = await withCheckedContinuation { continuation in
             pendingRequests[requestId] = continuation
+            // Timeout: resume with nil after 60s to prevent indefinite task suspension
+            Task {
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+                if let cont = pendingRequests.removeValue(forKey: requestId) {
+                    cont.resume(returning: nil)
+                }
+            }
         }
 
         guard let password, !password.isEmpty else { return nil }
