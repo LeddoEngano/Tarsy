@@ -43,7 +43,18 @@ rm -f "$APP_PATH/Contents/embedded.provisionprofile"
 
 # ─── Re-sign with Developer ID ──────────────────────────────────────
 echo "==> Signing with Developer ID..."
-ENTITLEMENTS="$ROOT_DIR/TarsymacOS/TarsymacOS.entitlements"
+
+# Extract expanded entitlements from the archived app and strip restricted
+# entitlements that require a provisioning profile (keychain-access-groups,
+# com.apple.application-identifier, com.apple.developer.team-identifier).
+# Developer ID apps can access their own keychain group without the explicit
+# entitlement — AMFI on macOS 26+ rejects restricted entitlements that lack
+# an authorizing provisioning profile.
+ENTITLEMENTS="$BUILD_DIR/entitlements-expanded.plist"
+codesign -d --entitlements - --xml "$ARCHIVE_APP" > "$ENTITLEMENTS"
+/usr/libexec/PlistBuddy -c "Delete :keychain-access-groups" "$ENTITLEMENTS" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Delete :com.apple.application-identifier" "$ENTITLEMENTS" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Delete :com.apple.developer.team-identifier" "$ENTITLEMENTS" 2>/dev/null || true
 
 # Sign the main executable (no --deep; there are no nested frameworks)
 codesign --force --options runtime \
