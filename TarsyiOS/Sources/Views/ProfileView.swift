@@ -309,35 +309,35 @@ struct ProfileView: View {
 
                         Spacer()
 
-                        Button {
-                            let current = permissionConfig.mode(for: engine)
-                            let newMode: AgentPermissionConfig.PermissionMode = current == .dangerous ? .safe : .dangerous
-                            permissionConfig.setMode(newMode, for: engine)
-                            permissionConfig.save()
-                            Task {
-                                let perms = [
-                                    "claude": permissionConfig.claude.rawValue,
-                                    "codex": permissionConfig.codex.rawValue,
-                                    "gemini": permissionConfig.gemini.rawValue,
-                                    "aider": permissionConfig.aider.rawValue
-                                ]
-                                await profileService.updateAgentPermissions(perms)
-                            }
-                        } label: {
-                            Text(permissionConfig.mode(for: engine) == .dangerous ? "auto" : "safe")
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                .foregroundColor(permissionConfig.mode(for: engine) == .dangerous ? TarsyTheme.accentTerracotta : TarsyTheme.accentMoss)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 4)
-                                .background(
-                                    (permissionConfig.mode(for: engine) == .dangerous ? TarsyTheme.accentTerracotta : TarsyTheme.accentMoss).opacity(0.15)
-                                )
-                                .cornerRadius(6)
-                        }
+                        Text(permissionConfig.mode(for: engine) == .dangerous ? "auto" : "safe")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(permissionConfig.mode(for: engine) == .dangerous ? TarsyTheme.accentTerracotta : TarsyTheme.accentMoss)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                (permissionConfig.mode(for: engine) == .dangerous ? TarsyTheme.accentTerracotta : TarsyTheme.accentMoss).opacity(0.15)
+                            )
+                            .cornerRadius(6)
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 10)
                     .background(TarsyTheme.backgroundSecondary)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        let current = permissionConfig.mode(for: engine)
+                        let newMode: AgentPermissionConfig.PermissionMode = current == .dangerous ? .safe : .dangerous
+                        permissionConfig.setMode(newMode, for: engine)
+                        permissionConfig.save()
+                        Task {
+                            let perms = [
+                                "claude": permissionConfig.claude.rawValue,
+                                "codex": permissionConfig.codex.rawValue,
+                                "gemini": permissionConfig.gemini.rawValue,
+                                "aider": permissionConfig.aider.rawValue
+                            ]
+                            await profileService.updateAgentPermissions(perms)
+                        }
+                    }
                 }
             }
             .cornerRadius(10)
