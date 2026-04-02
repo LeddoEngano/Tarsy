@@ -15,11 +15,13 @@ actor ClaudeCodeSession: AIEngine {
     private var onOutput: (@Sendable (String) -> Void)?
     private var onComplete: (@Sendable (String) -> Void)?
     private var onAskUser: (@Sendable (String, [String]) -> Void)?
-    private var onStatusUpdate: (@Sendable (String, Int, Int) -> Void)?
-    private var onSessionId: (@Sendable (String) -> Void)? // model, cumulativeInputTokens, cumulativeOutputTokens
+    private var onStatusUpdate: (@Sendable (String, Int, Int, Int) -> Void)?  // (model, input, output, contextWindow)
+    private var onSessionId: (@Sendable (String) -> Void)?
     private var pendingAskUser = false // Track if last turn ended with AskUserQuestion
-    private var cumulativeInputTokens: Int = 0
-    private var cumulativeOutputTokens: Int = 0
+    private var lastInputTokens: Int = 0  // Latest turn's total input (includes cache tokens)
+    private var lastOutputTokens: Int = 0  // Latest turn's output tokens
+    private var lastModel: String = ""  // Last known model name
+    private var lastContextWindow: Int = 0  // Context window from modelUsage
     private var lineBuffer: String = "" // Accumulates partial JSON lines between reads
 
     init(id: String, workspacePath: String, aiContext: String? = nil, permissionMode: AgentPermissionConfig.PermissionMode = .dangerous) {
@@ -41,7 +43,7 @@ actor ClaudeCodeSession: AIEngine {
         self.onAskUser = handler
     }
 
-    func setStatusHandler(_ handler: @escaping @Sendable (String, Int, Int) -> Void) {
+    func setStatusHandler(_ handler: @escaping @Sendable (String, Int, Int, Int) -> Void) {
         self.onStatusUpdate = handler
     }
 
@@ -234,14 +236,18 @@ actor ClaudeCodeSession: AIEngine {
         case "assistant":
             pendingAskUser = false // Reset at start of new turn
             if let message = json["message"] as? [String: Any] {
-                // Extract model info
+                // Extract model info and usage (including cache tokens)
                 if let model = message["model"] as? String {
+                    lastModel = model
                     let usage = message["usage"] as? [String: Any]
-                    let inputTokens = usage?["input_tokens"] as? Int ?? 0
+                    let inputTokens = (usage?["input_tokens"] as? Int ?? 0)
+                        + (usage?["cache_creation_input_tokens"] as? Int ?? 0)
+                        + (usage?["cache_read_input_tokens"] as? Int ?? 0)
                     let outputTokens = usage?["output_tokens"] as? Int ?? 0
-                    cumulativeInputTokens += inputTokens
-                    cumulativeOutputTokens += outputTokens
-                    onStatusUpdate?(model, cumulativeInputTokens, cumulativeOutputTokens)
+                    // Replace (not accumulate) — each turn's input already includes full conversation history
+                    lastInputTokens = inputTokens
+                    lastOutputTokens = outputTokens
+                    onStatusUpdate?(model, lastInputTokens, lastOutputTokens, lastContextWindow)
                 }
 
                 if let content = message["content"] as? [[String: Any]] {
@@ -261,16 +267,33 @@ actor ClaudeCodeSession: AIEngine {
             if let sid = json["session_id"] as? String {
                 sessionId = sid
             }
-            // Also check for usage in result events
-            if let usage = json["usage"] as? [String: Any] {
-                let model = json["model"] as? String ?? ""
-                let inputTokens = usage["input_tokens"] as? Int ?? 0
+            // Use modelUsage for most accurate token and context window data
+            if let modelUsage = json["modelUsage"] as? [String: Any],
+               let firstEntry = modelUsage.max(by: {
+                   (($0.value as? [String: Any])?["inputTokens"] as? Int ?? 0) <
+                   (($1.value as? [String: Any])?["inputTokens"] as? Int ?? 0)
+               }),
+               let data = firstEntry.value as? [String: Any] {
+                let inputTokens = (data["inputTokens"] as? Int ?? 0)
+                    + (data["cacheReadInputTokens"] as? Int ?? 0)
+                    + (data["cacheCreationInputTokens"] as? Int ?? 0)
+                let outputTokens = data["outputTokens"] as? Int ?? 0
+                lastInputTokens = inputTokens
+                lastOutputTokens = outputTokens
+                if let cw = data["contextWindow"] as? Int { lastContextWindow = cw }
+                // Extract clean model name from key (e.g., "claude-opus-4-6[1m]" → "claude-opus-4-6")
+                let cleanModel = firstEntry.key.replacingOccurrences(of: "\\[.*\\]", with: "", options: .regularExpression)
+                if !cleanModel.isEmpty { lastModel = cleanModel }
+                onStatusUpdate?(lastModel, lastInputTokens, lastOutputTokens, lastContextWindow)
+            } else if let usage = json["usage"] as? [String: Any] {
+                // Fallback to top-level usage
+                let inputTokens = (usage["input_tokens"] as? Int ?? 0)
+                    + (usage["cache_creation_input_tokens"] as? Int ?? 0)
+                    + (usage["cache_read_input_tokens"] as? Int ?? 0)
                 let outputTokens = usage["output_tokens"] as? Int ?? 0
-                cumulativeInputTokens += inputTokens
-                cumulativeOutputTokens += outputTokens
-                if !model.isEmpty {
-                    onStatusUpdate?(model, cumulativeInputTokens, cumulativeOutputTokens)
-                }
+                lastInputTokens = inputTokens
+                lastOutputTokens = outputTokens
+                onStatusUpdate?(lastModel, lastInputTokens, lastOutputTokens, lastContextWindow)
             }
             // Result means the agent finished processing this message
             // But NOT if the turn ended with AskUserQuestion (agent is waiting for user input)

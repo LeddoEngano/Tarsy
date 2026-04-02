@@ -52,10 +52,7 @@ actor TerminalSessionManager {
         claudeSessions[id] = session
 
         Task {
-            await session.setHandlers(onOutput: onOutput, onComplete: { [weak self] (msg: String) in
-                onComplete(msg)
-                Task { await self?.removeClaudeSession(id) }
-            })
+            await session.setHandlers(onOutput: onOutput, onComplete: onComplete)
             await session.setAskUserHandler(onAskUser)
             try await session.start()
         }
@@ -63,7 +60,7 @@ actor TerminalSessionManager {
         return id
     }
 
-    func setClaudeStatusHandler(sessionId: String, handler: @escaping @Sendable (String, Int, Int) -> Void) async {
+    func setClaudeStatusHandler(sessionId: String, handler: @escaping @Sendable (String, Int, Int, Int) -> Void) async {
         await claudeSessions[sessionId]?.setStatusHandler(handler)
     }
 
@@ -86,10 +83,6 @@ actor TerminalSessionManager {
 
     func listClaudeSessions() -> [String] {
         Array(claudeSessions.keys)
-    }
-
-    private func removeClaudeSession(_ id: String) {
-        claudeSessions.removeValue(forKey: id)
     }
 
     // MARK: - Generic Engine Sessions (Multi-Provider)
@@ -118,15 +111,7 @@ actor TerminalSessionManager {
 
         engineSessions[id] = engine
 
-        let isHeadless = engineType != .claude
-        await engine.setHandlers(onOutput: onOutput, onComplete: { [weak self] (msg: String) in
-            onComplete(msg)
-            // Only auto-remove for interactive sessions (Claude).
-            // Headless engines (Gemini etc.) stay alive for multiple messages.
-            if !isHeadless {
-                Task { await self?.removeEngineSession(id) }
-            }
-        })
+        await engine.setHandlers(onOutput: onOutput, onComplete: onComplete)
         await engine.setAskUserHandler(onAskUser)
         try await engine.start()
 
@@ -145,11 +130,6 @@ actor TerminalSessionManager {
         await engineSessions[sessionId]?.terminate()
         engineSessions.removeValue(forKey: sessionId)
         claudeSessions.removeValue(forKey: sessionId)
-    }
-
-    private func removeEngineSession(_ id: String) {
-        engineSessions.removeValue(forKey: id)
-        claudeSessions.removeValue(forKey: id)
     }
 
     // MARK: - All Sessions
