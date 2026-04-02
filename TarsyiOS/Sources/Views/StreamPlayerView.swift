@@ -58,6 +58,39 @@ class StreamViewModel: ObservableObject {
     }
 }
 
+// MARK: - Shimmer Skeleton
+
+private struct StreamShimmerView: View {
+    @State private var phase: CGFloat = -1
+
+    var body: some View {
+        GeometryReader { geo in
+            TarsyTheme.backgroundTertiary
+                .overlay(
+                    LinearGradient(
+                        colors: [
+                            .clear,
+                            Color.white.opacity(0.04),
+                            Color.white.opacity(0.08),
+                            Color.white.opacity(0.04),
+                            .clear
+                        ],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                    .frame(width: geo.size.width * 0.6)
+                    .offset(x: phase * (geo.size.width * 0.8))
+                )
+                .clipped()
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.4).repeatForever(autoreverses: false)) {
+                phase = 1
+            }
+        }
+    }
+}
+
 struct StreamPlayerView: View {
     @ObservedObject var viewModel: StreamViewModel
     @EnvironmentObject var machineService: MachineService
@@ -230,39 +263,22 @@ struct StreamPlayerView: View {
                         .padding(.bottom, 12)
                     }
                 }
-            } else if isActive && !viewModel.isConnected {
-                VStack(spacing: 12) {
-                    ProgressView()
-                        .tint(TarsyTheme.accentAmber)
+            } else {
+                // Shimmer skeleton while stream is loading
+                ZStack(alignment: .bottom) {
+                    StreamShimmerView()
+
                     Text(isStartingStream ? "starting..." : "connecting to stream...")
                         .font(TarsyTheme.monoFontSmall)
                         .foregroundColor(TarsyTheme.textSecondary)
-                }
-            } else {
-                // Stream not started — show start button
-                VStack(spacing: 12) {
-                    Image(systemName: "eye")
-                        .font(.system(size: 40))
-                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
-
-                    Text("stream offline")
-                        .font(TarsyTheme.monoFont)
-                        .foregroundColor(TarsyTheme.textSecondary)
-
-                    Button(action: { startStreamWithAutoSetup() }) {
-                        Text("start stream")
-                            .font(TarsyTheme.monoFontSmall)
-                            .foregroundColor(TarsyTheme.accentAmber)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(TarsyTheme.accentAmber, lineWidth: 1)
-                            )
-                    }
-                    .accessibilityLabel("Start stream")
+                        .padding(.bottom, 16)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .onAppear {
+                    if !isActive {
+                        startStreamWithAutoSetup()
+                    }
+                }
             }
         }
         .cornerRadius(12)
