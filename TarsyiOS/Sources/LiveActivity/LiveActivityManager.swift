@@ -404,12 +404,30 @@ class LiveActivityManager: ObservableObject {
               let engineType = response["engineType"],
               let workspaceId = response["workspaceId"] else { return }
 
+        // Deduplicate: skip if we already processed this exact response
+        let responseId = response["responseId"] ?? ""
+        if !responseId.isEmpty && responseId == lastProcessedResponseId { return }
+        lastProcessedResponseId = responseId
+
         // Clear the pending response immediately to prevent double-processing
         defaults.removeObject(forKey: pendingResponseKey)
         defaults.synchronize()
 
-        // Update Live Activity back to "running"
-        updateStatus(workspaceId: workspaceId, status: "running")
+        // Update Live Activity back to "running" — find by workspaceId prefix
+        // since we don't have the tabId in the widget response
+        for activityKey in activities.keys where activityKey.hasPrefix(workspaceId) {
+            guard let activity = activities[activityKey],
+                  let startDate = startDates[activityKey] else { continue }
+            let cp = contextPercents[activityKey] ?? 0
+            let state = TarsyActivityAttributes.ContentState(
+                status: "running",
+                currentTool: "Resuming",
+                currentToolIcon: "arrow.triangle.2.circlepath",
+                startedAt: startDate,
+                contextPercent: cp
+            )
+            Task { await activity.update(.init(state: state, staleDate: .now.addingTimeInterval(staleTTL))) }
+        }
 
         // Forward the response to the WebSocket connection
         onPermissionResponse?(sessionId, answer, engineType, workspaceId)
