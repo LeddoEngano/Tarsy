@@ -17,7 +17,7 @@ struct ThinkingIndicator: View {
             }
 
             Text("thinking...")
-                .font(.system(size: 12, design: .monospaced))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(TarsyTheme.textSecondary)
         }
         .padding(.horizontal, 12)
@@ -47,7 +47,7 @@ struct AgentActivityView: View {
                 .animation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true), value: pulse)
 
             Text(text)
-                .font(.system(size: 11, design: .monospaced))
+                .font(TarsyTheme.font(size: 11))
                 .foregroundColor(TarsyTheme.textSecondary)
                 .lineLimit(1)
                 .truncationMode(.middle)

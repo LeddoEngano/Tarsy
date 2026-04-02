@@ -23,10 +23,10 @@ struct FileExplorerView: View {
                 // Search bar
                 HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 14))
+                        .font(TarsyTheme.font(size: 14))
                         .foregroundColor(TarsyTheme.textSecondary)
                     TextField("", text: $searchText, prompt: Text("search files...").foregroundColor(TarsyTheme.textSecondary.opacity(0.5)))
-                        .font(.system(size: 14, design: .monospaced))
+                        .font(TarsyTheme.font(size: 14))
                         .foregroundColor(TarsyTheme.textPrimary)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
@@ -44,7 +44,7 @@ struct FileExplorerView: View {
                     VStack(spacing: 12) {
                         ProgressView().tint(TarsyTheme.accentAmber)
                         Text("scanning project...")
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(TarsyTheme.font(size: 12))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                     Spacer()
@@ -108,16 +108,16 @@ struct FileExplorerView: View {
         Button(action: { toggleDir(entry.path) }) {
             HStack(spacing: 6) {
                 Image(systemName: expandedDirs.contains(entry.path) ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9))
+                    .font(TarsyTheme.font(size: 9))
                     .foregroundColor(TarsyTheme.textSecondary)
                     .frame(width: 12)
 
                 Image(systemName: "folder.fill")
-                    .font(.system(size: 12))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(TarsyTheme.accentAmber)
 
                 Text(entry.name)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13))
                     .foregroundColor(TarsyTheme.textPrimary)
 
                 Spacer()
@@ -134,11 +134,11 @@ struct FileExplorerView: View {
                 Color.clear.frame(width: 12) // Align with folder chevron
 
                 Image(systemName: fileIcon(entry.ext))
-                    .font(.system(size: 12))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(fileIconColor(entry.ext))
 
                 Text(entry.name)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13))
                     .foregroundColor(TarsyTheme.textSecondary)
 
                 Spacer()
@@ -158,15 +158,15 @@ struct FileExplorerView: View {
                     Button(action: { requestFileRead(entry.path) }) {
                         HStack(spacing: 8) {
                             Image(systemName: fileIcon(entry.ext))
-                                .font(.system(size: 12))
+                                .font(TarsyTheme.font(size: 12))
                                 .foregroundColor(fileIconColor(entry.ext))
 
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(entry.name)
-                                    .font(.system(size: 13, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 13))
                                     .foregroundColor(TarsyTheme.textPrimary)
                                 Text(entry.path)
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 10))
                                     .foregroundColor(TarsyTheme.textSecondary)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
@@ -289,13 +289,13 @@ struct FilePreviewView: View {
                     ForEach(Array(file.content.components(separatedBy: "\n").enumerated()), id: \.offset) { idx, line in
                         HStack(spacing: 0) {
                             Text("\(idx + 1)")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TarsyTheme.font(size: 10))
                                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
                                 .frame(width: 36, alignment: .trailing)
                                 .padding(.trailing, 8)
 
                             Text(colorizedLine(line))
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(TarsyTheme.font(size: 12))
                                 .fixedSize(horizontal: true, vertical: false)
                         }
                         .padding(.horizontal, 4)

@@ -33,7 +33,7 @@ struct PaywallView: View {
                     Spacer()
                     Button(action: { dismiss() }) {
                         Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .medium))
+                            .font(TarsyTheme.font(size: 16, weight: .medium))
                             .foregroundColor(TarsyTheme.textSecondary)
                             .frame(width: 32, height: 32)
                             .background(TarsyTheme.backgroundSecondary)
@@ -51,11 +51,11 @@ struct PaywallView: View {
                     TarsyEyes(size: 56)
 
                     Text("TARSY PRO")
-                        .font(.system(size: 28, weight: .bold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 28, weight: .bold))
                         .foregroundColor(TarsyTheme.accentAmber)
 
                     Text("Unlock the full remote\ndevelopment experience")
-                        .font(.system(size: 14, design: .monospaced))
+                        .font(TarsyTheme.font(size: 14))
                         .foregroundColor(TarsyTheme.textSecondary)
                         .multilineTextAlignment(.center)
                         .lineSpacing(4)
@@ -109,7 +109,7 @@ struct PaywallView: View {
                         Text("cancel anytime")
                     }
                 }
-                .font(.system(size: 11, design: .monospaced))
+                .font(TarsyTheme.font(size: 11))
                 .foregroundColor(TarsyTheme.textSecondary)
                 .padding(.top, 10)
 
@@ -124,7 +124,7 @@ struct PaywallView: View {
                                 .scaleEffect(0.8)
                         }
                         Text(isPurchasing ? "Processing..." : "Subscribe")
-                            .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                            .font(TarsyTheme.font(size: 16, weight: .semibold))
                     }
                     .foregroundColor(TarsyTheme.backgroundPrimary)
                     .frame(maxWidth: .infinity)
@@ -139,7 +139,7 @@ struct PaywallView: View {
 
                 // Auto-renewal + restore
                 Text("Subscription automatically renews. Manage or cancel anytime in Settings > App Store.")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
@@ -150,17 +150,17 @@ struct PaywallView: View {
                 HStack(spacing: 20) {
                     Button(action: { restore() }) {
                         Text(isRestoring ? "Restoring..." : "Restore")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TarsyTheme.font(size: 11))
                             .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
                     }
                     .disabled(isPurchasing || isRestoring)
 
                     Link("Terms", destination: URL(string: "https://www.tarsy.dev/terms")!)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11))
                         .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
 
                     Link("Privacy", destination: URL(string: "https://www.tarsy.dev/privacy")!)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11))
                         .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
                 }
                 .padding(.bottom, 20)
@@ -181,15 +181,15 @@ struct PaywallView: View {
         return Button(action: { withAnimation(.spring(response: 0.35, dampingFraction: 0.7)) { selectedPlan = plan } }) {
             VStack(spacing: 4) {
                 Text(label)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13, weight: .medium))
                     .foregroundColor(isSelected ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
 
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
                     Text(price)
-                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 20, weight: .bold))
                         .foregroundColor(isSelected ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
                     Text(detail)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11))
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
             }
@@ -204,7 +204,7 @@ struct PaywallView: View {
             .overlay(alignment: .topTrailing) {
                 if let badge {
                     Text(badge)
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 8, weight: .bold))
                         .foregroundColor(TarsyTheme.backgroundPrimary)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
@@ -228,11 +228,11 @@ struct PaywallView: View {
     private func featureCell(icon: String, text: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 14))
+                .font(TarsyTheme.font(size: 14))
                 .foregroundColor(TarsyTheme.accentAmber)
                 .frame(width: 20)
             Text(text)
-                .font(.system(size: 12, design: .monospaced))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(TarsyTheme.textPrimary)
                 .lineSpacing(2)
         }

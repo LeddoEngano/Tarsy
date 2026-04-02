@@ -69,7 +69,7 @@ struct NewWorkspaceView: View {
             .safeAreaInset(edge: .top) {
                 HStack {
                     Text("new workspace")
-                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 20, weight: .bold))
                         .foregroundColor(TarsyTheme.accentAmber)
                     Spacer()
                     Button("cancel") { dismiss() }
@@ -168,12 +168,12 @@ struct NewWorkspaceView: View {
                 HStack(spacing: 8) {
                     if let branch = repo.currentBranch {
                         Label(branch, systemImage: "arrow.triangle.branch")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                     if let s = repo.stack {
                         Text(s)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10))
                             .foregroundColor(TarsyTheme.accentAmber)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
@@ -183,7 +183,7 @@ struct NewWorkspaceView: View {
                 }
 
                 Text(repo.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(TarsyTheme.font(size: 9))
                     .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
             }
 
@@ -253,7 +253,7 @@ struct NewWorkspaceView: View {
                     Button(action: { workspaceType = .standard }) {
                         HStack(spacing: 4) {
                             Image(systemName: "macwindow")
-                                .font(.system(size: 10))
+                                .font(TarsyTheme.font(size: 10))
                             Text("standard")
                                 .font(TarsyTheme.monoFontSmall)
                         }
@@ -272,12 +272,12 @@ struct NewWorkspaceView: View {
                     }) {
                         HStack(spacing: 4) {
                             Image(systemName: "display")
-                                .font(.system(size: 10))
+                                .font(TarsyTheme.font(size: 10))
                             Text("openclaw")
                                 .font(TarsyTheme.monoFontSmall)
                             if !subscriptionManager.isPro {
                                 Image(systemName: "lock.fill")
-                                    .font(.system(size: 8))
+                                    .font(TarsyTheme.font(size: 8))
                             }
                         }
                         .foregroundColor(workspaceType == .openClaw ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
@@ -290,7 +290,7 @@ struct NewWorkspaceView: View {
 
                 if workspaceType == .openClaw {
                     Text("streams the full desktop instead of a single window. designed for watching OpenClaw work.")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TarsyTheme.font(size: 10))
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
             }
@@ -302,20 +302,20 @@ struct NewWorkspaceView: View {
                         HStack(spacing: 4) {
                             ProgressView().controlSize(.mini).tint(TarsyTheme.accentAmber)
                             Text("analyzing repo...")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TarsyTheme.font(size: 10))
                                 .foregroundColor(TarsyTheme.textSecondary)
                         }
                     } else if !devServerCommand.isEmpty && (detectedLanguage != nil || detectedFramework != nil) {
                         HStack(spacing: 6) {
                             Image(systemName: "sparkles")
-                                .font(.system(size: 9))
+                                .font(TarsyTheme.font(size: 9))
                                 .foregroundColor(TarsyTheme.accentMoss)
                             Text("auto-detected")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TarsyTheme.font(size: 10))
                                 .foregroundColor(TarsyTheme.accentMoss)
                             if let lang = detectedLanguage {
                                 Text(lang)
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 10))
                                     .foregroundColor(TarsyTheme.accentAmber)
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 1)
@@ -324,7 +324,7 @@ struct NewWorkspaceView: View {
                             }
                             if let fw = detectedFramework {
                                 Text(fw)
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 10))
                                     .foregroundColor(TarsyTheme.accentAmber)
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 1)

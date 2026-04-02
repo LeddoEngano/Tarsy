@@ -16,7 +16,7 @@ struct TarsyLiveActivityWidget: Widget {
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     Text("\(Int(context.state.contextPercent))%")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(Self.tarsyFont(size: 12, weight: .medium))
                         .foregroundColor(contextBarColor(context.state.contextPercent))
                 }
                 DynamicIslandExpandedRegion(.center) {
@@ -24,13 +24,13 @@ struct TarsyLiveActivityWidget: Widget {
                         statusDot(context.state.status)
 
                         Text(context.attributes.engineType)
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .font(Self.tarsyFont(size: 13, weight: .semibold))
                             .foregroundColor(warmBeige)
 
                         Spacer()
 
                         Text(Date(timeIntervalSince1970: context.state.startedAt), style: .timer)
-                            .font(.system(size: 13, weight: .medium, design: .monospaced))
+                            .font(Self.tarsyFont(size: 13, weight: .medium))
                             .foregroundColor(amberColor)
                             .monospacedDigit()
                     }
@@ -44,14 +44,14 @@ struct TarsyLiveActivityWidget: Widget {
                 }
             } compactLeading: {
                 Image(systemName: toolIcon(context.state))
-                    .font(.system(size: 14, weight: .bold))
+                    .font(Self.tarsyFont(size: 14, weight: .bold))
                     .foregroundColor(context.state.status == "running" ? warmBeige : statusColor(context.state.status))
             } compactTrailing: {
                 TarsyEyesWidget(size: 18)
                     .frame(width: 18, height: 18)
             } minimal: {
                 Image(systemName: toolIcon(context.state))
-                    .font(.system(size: 14, weight: .bold))
+                    .font(Self.tarsyFont(size: 14, weight: .bold))
                     .foregroundColor(statusColor(context.state.status))
             }
         }
@@ -66,11 +66,11 @@ struct TarsyLiveActivityWidget: Widget {
                 // Tool pill
                 HStack(spacing: 5) {
                     Image(systemName: toolIcon(context.state))
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(Self.tarsyFont(size: 11, weight: .semibold))
                         .foregroundColor(context.state.status == "running" ? warmBeige : statusColor(context.state.status))
 
                     Text(context.state.message ?? context.state.currentTool)
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(Self.tarsyFont(size: 12, weight: .medium))
                         .foregroundColor(warmBeige)
                         .lineLimit(1)
                 }
@@ -84,7 +84,7 @@ struct TarsyLiveActivityWidget: Widget {
                 Spacer()
 
                 Text(context.attributes.workspaceName)
-                    .font(.system(size: 11, weight: .regular, design: .monospaced))
+                    .font(Self.tarsyFont(size: 11, weight: .regular))
                     .foregroundColor(secondaryText)
                     .lineLimit(1)
             }
@@ -111,21 +111,21 @@ struct TarsyLiveActivityWidget: Widget {
                         .stroke(Color.secondary.opacity(0.4), lineWidth: 2)
                         .frame(width: 32, height: 32)
                     Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(Self.tarsyFont(size: 13, weight: .semibold))
                         .foregroundColor(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Updating…")
-                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .font(Self.tarsyFont(size: 12, weight: .medium))
                         .foregroundColor(.secondary)
                     Text(context.attributes.workspaceName)
-                        .font(.system(size: 10, weight: .regular, design: .monospaced))
+                        .font(Self.tarsyFont(size: 10, weight: .regular))
                         .foregroundColor(.secondary.opacity(0.7))
                         .lineLimit(1)
                 }
                 Spacer()
                 Text(Date(timeIntervalSince1970: context.state.startedAt), style: .timer)
-                    .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                    .font(Self.tarsyFont(size: 15, weight: .semibold))
                     .foregroundColor(.secondary)
                     .monospacedDigit()
             }
@@ -153,18 +153,18 @@ struct TarsyLiveActivityWidget: Widget {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 5) {
                             Image(systemName: toolIcon(context.state))
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(Self.tarsyFont(size: 10, weight: .semibold))
                                 .foregroundColor(statusColor(context.state.status))
 
                             Text(context.state.message ?? context.state.currentTool)
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .font(Self.tarsyFont(size: 12, weight: .semibold))
                                 .foregroundColor(.primary)
                                 .lineLimit(1)
                         }
 
                         HStack(spacing: 4) {
                             Text(context.attributes.workspaceName)
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .font(Self.tarsyFont(size: 10, weight: .medium))
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
 
@@ -172,7 +172,7 @@ struct TarsyLiveActivityWidget: Widget {
                                 .foregroundColor(.secondary.opacity(0.5))
 
                             Text(context.attributes.engineType)
-                                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                .font(Self.tarsyFont(size: 10, weight: .medium))
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
                         }
@@ -182,7 +182,7 @@ struct TarsyLiveActivityWidget: Widget {
 
                     // Timer
                     Text(Date(timeIntervalSince1970: context.state.startedAt), style: .timer)
-                        .font(.system(size: 15, weight: .bold, design: .monospaced))
+                        .font(Self.tarsyFont(size: 15, weight: .bold))
                         .foregroundColor(.primary)
                         .monospacedDigit()
                 }
@@ -221,7 +221,7 @@ struct TarsyLiveActivityWidget: Widget {
                         permissionRequestId: context.state.permissionRequestId ?? ""
                     )) {
                         Text(option)
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .font(Self.tarsyFont(size: 12, weight: .semibold))
                             .foregroundColor(permissionButtonTextColor(option))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 8)
@@ -278,7 +278,7 @@ struct TarsyLiveActivityWidget: Widget {
             .frame(height: 4)
 
             Text("\(Int(percent))%")
-                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                .font(Self.tarsyFont(size: 9, weight: .medium))
                 .foregroundColor(contextBarColor(percent))
                 .frame(width: 28, alignment: .trailing)
         }
@@ -294,10 +294,10 @@ struct TarsyLiveActivityWidget: Widget {
     private var staleView: some View {
         HStack(spacing: 5) {
             Image(systemName: "arrow.triangle.2.circlepath")
-                .font(.system(size: 11, weight: .semibold))
+                .font(Self.tarsyFont(size: 11, weight: .semibold))
                 .foregroundColor(secondaryText)
             Text("Updating…")
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(Self.tarsyFont(size: 12, weight: .medium))
                 .foregroundColor(secondaryText)
         }
     }
@@ -327,6 +327,12 @@ struct TarsyLiveActivityWidget: Widget {
         case "error": return "xmark"
         default: return state.currentToolIcon
         }
+    }
+
+    // MARK: - TarsyTheme Fonts
+
+    private static func tarsyFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        Font.custom("Inter", size: size).weight(weight)
     }
 
     // MARK: - TarsyTheme Colors

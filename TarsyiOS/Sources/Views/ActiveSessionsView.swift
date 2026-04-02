@@ -154,7 +154,7 @@ struct ActiveSessionsView: View {
                 }
             } label: {
                 Text(selectedIds.count == visibleSessions.count ? "deselect all" : "select all")
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13, weight: .medium))
                     .foregroundColor(TarsyTheme.accentAmber)
             }
 
@@ -170,10 +170,10 @@ struct ActiveSessionsView: View {
                             .tint(.white)
                     } else {
                         Image(systemName: "trash")
-                            .font(.system(size: 13))
+                            .font(TarsyTheme.font(size: 13))
                     }
                     Text("delete (\(selectedIds.count))")
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .font(TarsyTheme.font(size: 13, weight: .medium))
                 }
                 .foregroundColor(.white)
                 .padding(.horizontal, 16)
@@ -193,7 +193,7 @@ struct ActiveSessionsView: View {
     private var emptyView: some View {
         VStack(spacing: 16) {
             Image(systemName: "bubble.left.and.bubble.right")
-                .font(.system(size: 48))
+                .font(TarsyTheme.font(size: 48))
                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
 
             Text("no sessions yet")
@@ -377,12 +377,12 @@ private struct SessionCard: View {
         HStack(spacing: 12) {
             if isEditing {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 20))
+                    .font(TarsyTheme.font(size: 20))
                     .foregroundColor(isSelected ? TarsyTheme.accentAmber : TarsyTheme.textSecondary.opacity(0.4))
             }
 
             Image(systemName: session.hasImage ? "photo" : "brain.head.profile")
-                .font(.system(size: 18))
+                .font(TarsyTheme.font(size: 18))
                 .foregroundColor(session.hasImage ? TarsyTheme.accentTerracotta : TarsyTheme.accentAmber)
                 .frame(width: 36, height: 36)
                 .background((session.hasImage ? TarsyTheme.accentTerracotta : TarsyTheme.accentAmber).opacity(0.15))
@@ -390,27 +390,27 @@ private struct SessionCard: View {
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(session.displayTitle)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13, weight: .medium))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .lineLimit(2)
 
                 HStack(spacing: 8) {
                     if workspaceName != nil || session.projectName != nil {
                         Text(workspaceName ?? session.projectName ?? "")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10))
                             .foregroundColor(TarsyTheme.accentMoss)
                             .lineLimit(1)
                     }
 
                     if let count = session.messageCount, count > 0 {
                         Text("\(count) msgs")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
 
                     if let created = session.createdAt {
                         Text(formatDate(created))
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                 }
@@ -425,7 +425,7 @@ private struct SessionCard: View {
                         .tint(TarsyTheme.accentAmber)
                 } else {
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 12))
+                        .font(TarsyTheme.font(size: 12))
                         .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
                 }
             }
@@ -469,7 +469,7 @@ private struct SessionDetailView: View {
                     if session.messages.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "doc.text")
-                                .font(.system(size: 36))
+                                .font(TarsyTheme.font(size: 36))
                                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
                             Text("no messages yet")
                                 .font(TarsyTheme.monoFontSmall)
@@ -482,13 +482,13 @@ private struct SessionDetailView: View {
                                 ForEach(Array(session.messages.enumerated()), id: \.offset) { _, message in
                                     HStack(alignment: .top, spacing: 8) {
                                         Image(systemName: message.role == "user" ? "person.fill" : "brain")
-                                            .font(.system(size: 10))
+                                            .font(TarsyTheme.font(size: 10))
                                             .foregroundColor(message.role == "user" ? TarsyTheme.accentAmber : TarsyTheme.accentMoss)
                                             .frame(width: 20)
                                             .padding(.top, 2)
 
                                         Text(message.content)
-                                            .font(.system(size: 12, design: .monospaced))
+                                            .font(TarsyTheme.font(size: 12))
                                             .foregroundColor(TarsyTheme.textPrimary)
                                             .frame(maxWidth: .infinity, alignment: .leading)
                                     }
@@ -510,7 +510,7 @@ private struct SessionDetailView: View {
                                 Image(systemName: "play.fill")
                                 Text("continue session")
                             }
-                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                            .font(TarsyTheme.font(size: 14, weight: .medium))
                             .foregroundColor(TarsyTheme.backgroundPrimary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 12)

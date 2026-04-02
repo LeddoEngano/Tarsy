@@ -95,14 +95,14 @@ struct ProfileView: View {
                         image.resizable().aspectRatio(contentMode: .fill)
                     } placeholder: {
                         Image(systemName: "person.circle.fill")
-                            .font(.system(size: 48))
+                            .font(TarsyTheme.font(size: 48))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                     .frame(width: 56, height: 56)
                     .clipShape(Circle())
                 } else {
                     Image(systemName: "person.circle.fill")
-                        .font(.system(size: 48))
+                        .font(TarsyTheme.font(size: 48))
                         .foregroundColor(TarsyTheme.textSecondary)
                         .frame(width: 56, height: 56)
                 }
@@ -110,7 +110,7 @@ struct ProfileView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     if isEditingName {
                         TextField("display name", text: $displayNameInput)
-                            .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                            .font(TarsyTheme.font(size: 15, weight: .semibold))
                             .foregroundColor(TarsyTheme.textPrimary)
                             .textFieldStyle(.plain)
                             .onSubmit {
@@ -122,18 +122,18 @@ struct ProfileView: View {
                     } else {
                         if let name = profileService.profile?.displayName, !name.isEmpty {
                             Text("hello, \(name)!")
-                                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                                .font(TarsyTheme.font(size: 15, weight: .semibold))
                                 .foregroundColor(TarsyTheme.textPrimary)
                         } else {
                             Text(profileService.profile?.email ?? "")
-                                .font(.system(size: 15, weight: .semibold, design: .monospaced))
+                                .font(TarsyTheme.font(size: 15, weight: .semibold))
                                 .foregroundColor(TarsyTheme.textPrimary)
                         }
                     }
 
                     if let email = profileService.profile?.email {
                         Text(email)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                 }
@@ -145,7 +145,7 @@ struct ProfileView: View {
                     isEditingName.toggle()
                 }) {
                     Text(isEditingName ? "done" : "edit")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TarsyTheme.font(size: 10))
                         .foregroundColor(TarsyTheme.accentAmber)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
@@ -174,7 +174,7 @@ struct ProfileView: View {
                 }) {
                     HStack(spacing: 12) {
                         Image(systemName: subscriptionManager.isPro ? "crown.fill" : "crown")
-                            .font(.system(size: 16))
+                            .font(TarsyTheme.font(size: 16))
                             .foregroundColor(subscriptionManager.isPro ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
                             .frame(width: 28)
 
@@ -185,11 +185,11 @@ struct ProfileView: View {
 
                             if subscriptionManager.isPro, let exp = subscriptionManager.expirationDate {
                                 Text("renews \(exp.formatted(.dateTime.month().day()))")
-                                    .font(.system(size: 9, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 9))
                                     .foregroundColor(TarsyTheme.textSecondary)
                             } else {
                                 Text("1 workspace limit")
-                                    .font(.system(size: 9, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 9))
                                     .foregroundColor(TarsyTheme.textSecondary)
                             }
                         }
@@ -198,7 +198,7 @@ struct ProfileView: View {
 
                         if subscriptionManager.isPro {
                             Text("active")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TarsyTheme.font(size: 10))
                                 .foregroundColor(TarsyTheme.accentMoss)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -206,7 +206,7 @@ struct ProfileView: View {
                                 .cornerRadius(4)
                         } else {
                             Text("upgrade")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TarsyTheme.font(size: 10))
                                 .foregroundColor(TarsyTheme.accentAmber)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -223,7 +223,7 @@ struct ProfileView: View {
                     Button(action: { openSubscriptionManagement() }) {
                         HStack(spacing: 12) {
                             Image(systemName: "gear")
-                                .font(.system(size: 14))
+                                .font(TarsyTheme.font(size: 14))
                                 .foregroundColor(TarsyTheme.textSecondary)
                                 .frame(width: 28)
 
@@ -234,7 +234,7 @@ struct ProfileView: View {
                             Spacer()
 
                             Image(systemName: "arrow.up.right")
-                                .font(.system(size: 10))
+                                .font(TarsyTheme.font(size: 10))
                                 .foregroundColor(TarsyTheme.textSecondary)
                         }
                         .padding(.horizontal, 16)
@@ -246,7 +246,7 @@ struct ProfileView: View {
                 Button(action: { Task { try? await AppStore.sync() } }) {
                     HStack(spacing: 12) {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14))
+                            .font(TarsyTheme.font(size: 14))
                             .foregroundColor(TarsyTheme.textSecondary)
                             .frame(width: 28)
 
@@ -280,7 +280,7 @@ struct ProfileView: View {
             .cornerRadius(10)
 
             Text("API keys are stored in the device Keychain.")
-                .font(.system(size: 11, design: .monospaced))
+                .font(TarsyTheme.font(size: 11))
                 .foregroundColor(TarsyTheme.textSecondary)
                 .padding(.horizontal, 4)
         }
@@ -303,14 +303,14 @@ struct ProfileView: View {
                                 .font(TarsyTheme.monoFontSmall)
                                 .foregroundColor(TarsyTheme.textPrimary)
                             Text(permissionConfig.mode(for: engine) == .dangerous ? "auto mode" : "safe mode")
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TarsyTheme.font(size: 9))
                                 .foregroundColor(TarsyTheme.textSecondary)
                         }
 
                         Spacer()
 
                         Text(permissionConfig.mode(for: engine) == .dangerous ? "auto" : "safe")
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10, weight: .medium))
                             .foregroundColor(permissionConfig.mode(for: engine) == .dangerous ? TarsyTheme.accentTerracotta : TarsyTheme.accentMoss)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -397,7 +397,7 @@ struct ProfileView: View {
                 }) {
                     HStack(spacing: 12) {
                         Image(systemName: "rectangle.portrait.and.arrow.right")
-                            .font(.system(size: 14))
+                            .font(TarsyTheme.font(size: 14))
                             .foregroundColor(TarsyTheme.textPrimary)
                             .frame(width: 28)
 
@@ -425,7 +425,7 @@ struct ProfileView: View {
             Button(action: { showDeleteConfirmation = true }) {
                 HStack(spacing: 12) {
                     Image(systemName: "trash")
-                        .font(.system(size: 14))
+                        .font(TarsyTheme.font(size: 14))
                         .foregroundColor(TarsyTheme.accentTerracotta)
                         .frame(width: 28)
 
@@ -434,7 +434,7 @@ struct ProfileView: View {
                             .font(TarsyTheme.monoFontSmall)
                             .foregroundColor(TarsyTheme.accentTerracotta)
                         Text("permanently remove all data")
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(TarsyTheme.font(size: 9))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
 
@@ -461,7 +461,7 @@ struct ProfileView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .font(TarsyTheme.font(size: 11, weight: .semibold))
             .foregroundColor(TarsyTheme.textSecondary)
             .padding(.leading, 4)
     }
@@ -478,7 +478,7 @@ struct ProfileView: View {
                         .foregroundColor(TarsyTheme.textPrimary)
 
                     Text(engine.envKeyName ?? "")
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(TarsyTheme.font(size: 9))
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
 
@@ -488,17 +488,17 @@ struct ProfileView: View {
                     HStack(spacing: 4) {
                         Circle().fill(TarsyTheme.accentMoss).frame(width: 6, height: 6)
                         Text("configured")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10))
                             .foregroundColor(TarsyTheme.accentMoss)
                     }
                 } else {
                     Text("not set")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TarsyTheme.font(size: 10))
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
             .padding(.horizontal, 16)
@@ -511,7 +511,7 @@ struct ProfileView: View {
         Link(destination: URL(string: url)!) {
             HStack(spacing: 12) {
                 Image(systemName: "doc.text")
-                    .font(.system(size: 14))
+                    .font(TarsyTheme.font(size: 14))
                     .foregroundColor(TarsyTheme.textSecondary)
                     .frame(width: 28)
 
@@ -522,7 +522,7 @@ struct ProfileView: View {
                 Spacer()
 
                 Image(systemName: "arrow.up.right")
-                    .font(.system(size: 10))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
             .padding(.horizontal, 16)
@@ -555,7 +555,7 @@ struct ProfileView: View {
         Button(action: { showVoiceLanguagePicker = true }) {
             HStack(spacing: 12) {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 16))
+                    .font(TarsyTheme.font(size: 16))
                     .foregroundColor(TarsyTheme.accentAmber)
                     .frame(width: 28)
 
@@ -566,11 +566,11 @@ struct ProfileView: View {
                 Spacer()
 
                 Text(currentVoiceLanguageName)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(TarsyTheme.textSecondary)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
             .padding(.horizontal, 16)

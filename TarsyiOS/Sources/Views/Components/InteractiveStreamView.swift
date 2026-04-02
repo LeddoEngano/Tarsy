@@ -206,11 +206,11 @@ struct InteractiveStreamView: View {
 
                             HStack(spacing: 8) {
                                 Text("\(viewModel.fps) fps")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 10))
                                     .foregroundColor(.white.opacity(0.5))
                                 Button(action: closeFullscreen) {
                                     Image(systemName: "arrow.down.right.and.arrow.up.left")
-                                        .font(.system(size: 18))
+                                        .font(TarsyTheme.font(size: 18))
                                         .foregroundColor(.white.opacity(0.6))
                                 }
                             }
@@ -224,11 +224,11 @@ struct InteractiveStreamView: View {
 
                             HStack(spacing: 8) {
                                 Text("\(viewModel.fps) fps")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 10))
                                     .foregroundColor(.white.opacity(0.5))
                                 Button(action: closeFullscreen) {
                                     Image(systemName: "arrow.down.right.and.arrow.up.left")
-                                        .font(.system(size: 18))
+                                        .font(TarsyTheme.font(size: 18))
                                         .foregroundColor(.white.opacity(0.6))
                                 }
                             }
@@ -242,7 +242,7 @@ struct InteractiveStreamView: View {
                         HStack {
                             Button { showUrlBar = true } label: {
                                 Image(systemName: "globe")
-                                    .font(.system(size: 16, weight: .medium))
+                                    .font(TarsyTheme.font(size: 16, weight: .medium))
                                     .foregroundColor(.white.opacity(0.8))
                                     .frame(width: 28, height: 28)
                             }
@@ -278,7 +278,7 @@ struct InteractiveStreamView: View {
                             Haptics.light()
                         } label: {
                             Image(systemName: isKeyboardActive ? "keyboard.fill" : "keyboard")
-                                .font(.system(size: 16))
+                                .font(TarsyTheme.font(size: 16))
                                 .foregroundColor(isKeyboardActive ? TarsyTheme.accentAmber : .white.opacity(0.7))
                                 .frame(width: 36, height: 28)
                                 .background(isKeyboardActive ? TarsyTheme.accentAmber.opacity(0.2) : .white.opacity(0.1))
@@ -340,7 +340,7 @@ struct InteractiveStreamView: View {
         .overlay(alignment: .top) {
             if showGalleryHint {
                 Text("Saved to your gallery!")
-                    .font(.system(size: 12, weight: .medium))
+                    .font(TarsyTheme.font(size: 12, weight: .medium))
                     .foregroundColor(.white)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
@@ -359,12 +359,12 @@ struct InteractiveStreamView: View {
                 VStack(spacing: 0) {
                     HStack {
                         Text("tabs")
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .font(TarsyTheme.font(size: 13, weight: .semibold))
                             .foregroundColor(.white)
                         Spacer()
                         Button { withAnimation { showTabMenu = false } } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 18))
+                                .font(TarsyTheme.font(size: 18))
                                 .foregroundColor(.white.opacity(0.5))
                         }
                     }
@@ -379,7 +379,7 @@ struct InteractiveStreamView: View {
                                         .tint(.white.opacity(0.5))
                                         .scaleEffect(0.8)
                                     Text("loading tabs...")
-                                        .font(.system(size: 11, design: .monospaced))
+                                        .font(TarsyTheme.font(size: 11))
                                         .foregroundColor(.white.opacity(0.4))
                                 }
                                 .padding(.vertical, 20)
@@ -397,11 +397,11 @@ struct InteractiveStreamView: View {
 
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(tab.title)
-                                            .font(.system(size: 12, design: .monospaced))
+                                            .font(TarsyTheme.font(size: 12))
                                             .foregroundColor(.white)
                                             .lineLimit(1)
                                         Text(tab.url)
-                                            .font(.system(size: 9, design: .monospaced))
+                                            .font(TarsyTheme.font(size: 9))
                                             .foregroundColor(.white.opacity(0.4))
                                             .lineLimit(1)
                                     }
@@ -412,7 +412,7 @@ struct InteractiveStreamView: View {
                                         closeTab(tab)
                                     } label: {
                                         Image(systemName: "xmark")
-                                            .font(.system(size: 10))
+                                            .font(TarsyTheme.font(size: 10))
                                             .foregroundColor(.white.opacity(0.4))
                                             .frame(width: 24, height: 24)
                                     }
@@ -619,7 +619,7 @@ struct InteractiveStreamView: View {
             ))
         } label: {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .font(TarsyTheme.font(size: 16))
                 .foregroundColor(.white.opacity(0.8))
                 .frame(width: 36, height: 36)
                 .background(.white.opacity(0.15))
@@ -637,11 +637,11 @@ struct InteractiveStreamView: View {
                 ZStack {
                     if screenshotSaved {
                         Image(systemName: "checkmark")
-                            .font(.system(size: 16, weight: .bold))
+                            .font(TarsyTheme.font(size: 16, weight: .bold))
                             .foregroundColor(.green)
                     } else {
                         Image(systemName: "camera.viewfinder")
-                            .font(.system(size: 16))
+                            .font(TarsyTheme.font(size: 16))
                             .foregroundColor(.white.opacity(0.8))
                     }
                 }
@@ -874,7 +874,7 @@ struct InteractiveStreamView: View {
             connectionManager.send(WSPacket(action: action))
         } label: {
             Image(systemName: icon)
-                .font(.system(size: 16, weight: .medium))
+                .font(TarsyTheme.font(size: 16, weight: .medium))
                 .foregroundColor(.white.opacity(0.8))
                 .frame(width: 28, height: 28)
         }
@@ -969,8 +969,8 @@ struct InteractiveStreamView: View {
     @ViewBuilder
     private func hintLabel(icon: String, text: String) -> some View {
         HStack(spacing: 4) {
-            Image(systemName: icon).font(.system(size: 10))
-            Text(text).font(.system(size: 10, design: .monospaced))
+            Image(systemName: icon).font(TarsyTheme.font(size: 10))
+            Text(text).font(TarsyTheme.font(size: 10))
         }
         .foregroundColor(.white.opacity(0.7))
     }
@@ -990,7 +990,7 @@ struct InteractiveStreamView: View {
             }
 
             Image(systemName: isVoiceRecording ? "mic.fill" : "mic")
-                .font(.system(size: 28, weight: .medium))
+                .font(TarsyTheme.font(size: 28, weight: .medium))
                 .foregroundColor(isVoiceRecording ? .white : .white.opacity(0.9))
                 .frame(width: 64, height: 64)
                 .background(

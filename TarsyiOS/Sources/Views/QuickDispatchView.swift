@@ -20,7 +20,7 @@ struct QuickDispatchView: View {
                     // Workspace selector
                     VStack(alignment: .leading, spacing: 8) {
                         Text("WORKSPACE")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10, weight: .semibold))
                             .foregroundColor(TarsyTheme.textSecondary)
 
                         ScrollView(.horizontal, showsIndicators: false) {
@@ -30,7 +30,7 @@ struct QuickDispatchView: View {
                                         selectedWorkspace = ws
                                     } label: {
                                         Text(ws.name)
-                                            .font(.system(size: 12, design: .monospaced))
+                                            .font(TarsyTheme.font(size: 12))
                                             .foregroundColor(selectedWorkspace?.id == ws.id ? TarsyTheme.backgroundPrimary : TarsyTheme.textPrimary)
                                             .padding(.horizontal, 12)
                                             .padding(.vertical, 8)
@@ -45,11 +45,11 @@ struct QuickDispatchView: View {
                     // Command input
                     VStack(alignment: .leading, spacing: 8) {
                         Text("COMMAND")
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10, weight: .semibold))
                             .foregroundColor(TarsyTheme.textSecondary)
 
                         TextEditor(text: $command)
-                            .font(.system(size: 14, design: .monospaced))
+                            .font(TarsyTheme.font(size: 14))
                             .foregroundColor(TarsyTheme.textPrimary)
                             .scrollContentBackground(.hidden)
                             .padding(12)
@@ -76,7 +76,7 @@ struct QuickDispatchView: View {
                                 Image(systemName: "bolt.fill")
                             }
                             Text(isSending ? "dispatching..." : "dispatch")
-                                .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                                .font(TarsyTheme.font(size: 14, weight: .semibold))
                         }
                         .foregroundColor(TarsyTheme.backgroundPrimary)
                         .frame(maxWidth: .infinity)
@@ -87,7 +87,7 @@ struct QuickDispatchView: View {
                     .disabled(!canSend)
 
                     Text("The agent will run in the background. You'll get a push notification when it needs input or finishes.")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11))
                         .foregroundColor(TarsyTheme.textSecondary)
                         .multilineTextAlignment(.center)
 

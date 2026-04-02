@@ -14,7 +14,7 @@ struct AgentIcon: View {
                 .frame(width: size, height: size)
         } else {
             Image(systemName: engineType.iconName)
-                .font(.system(size: size * 0.75))
+                .font(TarsyTheme.font(size: size * 0.75))
                 .frame(width: size, height: size)
         }
     }

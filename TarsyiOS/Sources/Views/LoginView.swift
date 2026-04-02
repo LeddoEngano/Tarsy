@@ -48,8 +48,8 @@ struct LoginView: View {
                 VStack(spacing: 12) {
                     TarsyEyes(size: 100)
 
-                    Text("TARSY")
-                        .font(.system(size: 56, weight: .bold, design: .monospaced))
+                    Text("tarsy")
+                        .font(TarsyTheme.font(size: 56, weight: .bold))
                         .foregroundColor(TarsyTheme.accentAmber)
 
                     Text("remote agent controller")
@@ -78,7 +78,7 @@ struct LoginView: View {
                     Button("Privacy Policy") { legalURL = .privacy }
                         .foregroundColor(TarsyTheme.accentAmber)
                 }
-                .font(.system(size: 10, design: .monospaced))
+                .font(TarsyTheme.font(size: 10))
                 .foregroundColor(TarsyTheme.textSecondary)
                 .padding(.bottom, 16)
             }
@@ -123,7 +123,7 @@ struct LoginView: View {
             HStack(spacing: 8) {
                 if isSystemImage {
                     Image(systemName: icon)
-                        .font(.system(size: 18, weight: .medium))
+                        .font(TarsyTheme.font(size: 18, weight: .medium))
                         .frame(width: 20, height: 20)
                 } else {
                     Image(icon)
@@ -132,7 +132,7 @@ struct LoginView: View {
                         .frame(width: 20, height: 20)
                 }
                 Text(label)
-                    .font(.system(size: 17, weight: .medium))
+                    .font(TarsyTheme.font(size: 17, weight: .medium))
             }
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
@@ -153,7 +153,7 @@ struct LoginView: View {
             // Email field
             HStack(spacing: 10) {
                 Image(systemName: "envelope")
-                    .font(.system(size: 14))
+                    .font(TarsyTheme.font(size: 14))
                     .foregroundColor(TarsyTheme.textSecondary)
                     .frame(width: 20)
                 TextField("", text: $email, prompt: Text("email").foregroundColor(TarsyTheme.textSecondary))
@@ -171,7 +171,7 @@ struct LoginView: View {
             // Password field
             HStack(spacing: 10) {
                 Image(systemName: "lock")
-                    .font(.system(size: 14))
+                    .font(TarsyTheme.font(size: 14))
                     .foregroundColor(TarsyTheme.textSecondary)
                     .frame(width: 20)
 
@@ -189,7 +189,7 @@ struct LoginView: View {
 
                 Button(action: { showPassword.toggle() }) {
                     Image(systemName: showPassword ? "eye.slash" : "eye")
-                        .font(.system(size: 14))
+                        .font(TarsyTheme.font(size: 14))
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
             }
@@ -201,7 +201,7 @@ struct LoginView: View {
             if isSignUp {
                 HStack(spacing: 10) {
                     Image(systemName: "lock")
-                        .font(.system(size: 14))
+                        .font(TarsyTheme.font(size: 14))
                         .foregroundColor(TarsyTheme.textSecondary)
                         .frame(width: 20)
                     SecureField("", text: $confirmPassword, prompt: Text("confirm password").foregroundColor(TarsyTheme.textSecondary))
@@ -216,7 +216,7 @@ struct LoginView: View {
                 if !confirmPassword.isEmpty && confirmPassword != password {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 12))
+                            .font(TarsyTheme.font(size: 12))
                         Text("passwords don't match")
                             .font(TarsyTheme.monoFontSmall)
                     }
@@ -228,7 +228,7 @@ struct LoginView: View {
             if let error = authManager.errorMessage {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 12))
+                        .font(TarsyTheme.font(size: 12))
                     Text(error)
                         .font(TarsyTheme.monoFontSmall)
                 }
@@ -277,7 +277,7 @@ struct LoginView: View {
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(TarsyTheme.font(size: 11, weight: .medium))
                     Text("back")
                         .font(TarsyTheme.monoFontSmall)
                 }

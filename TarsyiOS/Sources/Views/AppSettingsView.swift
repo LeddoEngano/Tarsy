@@ -35,7 +35,7 @@ struct AppSettingsView: View {
                             }) {
                                 HStack(spacing: 12) {
                                     Image(systemName: subscriptionManager.isPro ? "crown.fill" : "crown")
-                                        .font(.system(size: 16))
+                                        .font(TarsyTheme.font(size: 16))
                                         .foregroundColor(subscriptionManager.isPro ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
                                         .frame(width: 28)
 
@@ -46,11 +46,11 @@ struct AppSettingsView: View {
 
                                         if subscriptionManager.isPro, let exp = subscriptionManager.expirationDate {
                                             Text("renews \(exp.formatted(.dateTime.month().day()))")
-                                                .font(.system(size: 9, design: .monospaced))
+                                                .font(TarsyTheme.font(size: 9))
                                                 .foregroundColor(TarsyTheme.textSecondary)
                                         } else {
                                             Text("1 workspace limit")
-                                                .font(.system(size: 9, design: .monospaced))
+                                                .font(TarsyTheme.font(size: 9))
                                                 .foregroundColor(TarsyTheme.textSecondary)
                                         }
                                     }
@@ -59,7 +59,7 @@ struct AppSettingsView: View {
 
                                     if subscriptionManager.isPro {
                                         Text("active")
-                                            .font(.system(size: 10, design: .monospaced))
+                                            .font(TarsyTheme.font(size: 10))
                                             .foregroundColor(TarsyTheme.accentMoss)
                                             .padding(.horizontal, 6)
                                             .padding(.vertical, 2)
@@ -67,7 +67,7 @@ struct AppSettingsView: View {
                                             .cornerRadius(4)
                                     } else {
                                         Text("upgrade")
-                                            .font(.system(size: 10, design: .monospaced))
+                                            .font(TarsyTheme.font(size: 10))
                                             .foregroundColor(TarsyTheme.accentAmber)
                                             .padding(.horizontal, 6)
                                             .padding(.vertical, 2)
@@ -98,14 +98,14 @@ struct AppSettingsView: View {
                                     .clipShape(Circle())
                                 } else {
                                     Image(systemName: "person.circle.fill")
-                                        .font(.system(size: 28))
+                                        .font(TarsyTheme.font(size: 28))
                                         .foregroundColor(TarsyTheme.textSecondary)
                                         .frame(width: 32, height: 32)
                                 }
 
                                 if isEditingName {
                                     TextField("display name", text: $displayNameInput)
-                                        .font(.system(size: 13, design: .monospaced))
+                                        .font(TarsyTheme.font(size: 13))
                                         .foregroundColor(TarsyTheme.textPrimary)
                                         .textFieldStyle(.plain)
                                         .onSubmit {
@@ -117,12 +117,12 @@ struct AppSettingsView: View {
                                 } else {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(profileService.profile?.nameOrEmail ?? "")
-                                            .font(.system(size: 13, design: .monospaced))
+                                            .font(TarsyTheme.font(size: 13))
                                             .foregroundColor(TarsyTheme.textPrimary)
                                         if let email = profileService.profile?.email,
                                            profileService.profile?.displayName != nil {
                                             Text(email)
-                                                .font(.system(size: 10, design: .monospaced))
+                                                .font(TarsyTheme.font(size: 10))
                                                 .foregroundColor(TarsyTheme.textSecondary)
                                         }
                                     }
@@ -135,7 +135,7 @@ struct AppSettingsView: View {
                                     isEditingName.toggle()
                                 }) {
                                     Text(isEditingName ? "done" : "edit")
-                                        .font(.system(size: 10, design: .monospaced))
+                                        .font(TarsyTheme.font(size: 10))
                                         .foregroundColor(TarsyTheme.accentAmber)
                                 }
                             }
@@ -156,7 +156,7 @@ struct AppSettingsView: View {
                         .cornerRadius(10)
 
                         Text("Your API keys are stored securely in the device Keychain and sent to your Mac only when needed.")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TarsyTheme.font(size: 11))
                             .foregroundColor(TarsyTheme.textSecondary)
                             .padding(.horizontal, 4)
 
@@ -174,7 +174,7 @@ struct AppSettingsView: View {
                                             .font(TarsyTheme.monoFontSmall)
                                             .foregroundColor(TarsyTheme.textPrimary)
                                         Text(permissionConfig.mode(for: engine) == .dangerous ? "auto mode — runs without asking" : "safe mode — asks before actions")
-                                            .font(.system(size: 9, design: .monospaced))
+                                            .font(TarsyTheme.font(size: 9))
                                             .foregroundColor(TarsyTheme.textSecondary)
                                     }
 
@@ -196,7 +196,7 @@ struct AppSettingsView: View {
                                         }
                                     } label: {
                                         Text(permissionConfig.mode(for: engine) == .dangerous ? "auto" : "safe")
-                                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                            .font(TarsyTheme.font(size: 10, weight: .medium))
                                             .foregroundColor(permissionConfig.mode(for: engine) == .dangerous ? TarsyTheme.accentTerracotta : TarsyTheme.accentMoss)
                                             .padding(.horizontal, 8)
                                             .padding(.vertical, 4)
@@ -214,7 +214,7 @@ struct AppSettingsView: View {
                         .cornerRadius(10)
 
                         Text("Auto mode lets agents execute without permission prompts. Safe mode requires approval for each action.")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TarsyTheme.font(size: 11))
                             .foregroundColor(TarsyTheme.textSecondary)
                             .padding(.horizontal, 4)
 
@@ -273,7 +273,7 @@ struct AppSettingsView: View {
 
     private func sectionHeader(_ title: String) -> some View {
         Text(title.uppercased())
-            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            .font(TarsyTheme.font(size: 11, weight: .semibold))
             .foregroundColor(TarsyTheme.textSecondary)
             .padding(.leading, 4)
     }
@@ -290,7 +290,7 @@ struct AppSettingsView: View {
                         .foregroundColor(TarsyTheme.textPrimary)
 
                     Text(engine.envKeyName ?? "")
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(TarsyTheme.font(size: 9))
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
 
@@ -300,17 +300,17 @@ struct AppSettingsView: View {
                     HStack(spacing: 4) {
                         Circle().fill(TarsyTheme.accentMoss).frame(width: 6, height: 6)
                         Text("configured")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10))
                             .foregroundColor(TarsyTheme.accentMoss)
                     }
                 } else {
                     Text("not set")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TarsyTheme.font(size: 10))
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
             .padding(.horizontal, 16)
@@ -345,7 +345,7 @@ struct AppSettingsView: View {
         Button(action: { showVoiceLanguagePicker = true }) {
             HStack(spacing: 12) {
                 Image(systemName: "mic.fill")
-                    .font(.system(size: 16))
+                    .font(TarsyTheme.font(size: 16))
                     .foregroundColor(TarsyTheme.accentAmber)
                     .frame(width: 28)
 
@@ -356,11 +356,11 @@ struct AppSettingsView: View {
                 Spacer()
 
                 Text(currentVoiceLanguageName)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(TarsyTheme.textSecondary)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
             .padding(.horizontal, 16)
@@ -439,7 +439,7 @@ struct APIKeyEditorSheet: View {
                                 .font(TarsyTheme.monoFont)
                                 .foregroundColor(TarsyTheme.textPrimary)
                             Text(provider.envKeyName ?? "")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(TarsyTheme.font(size: 11))
                                 .foregroundColor(TarsyTheme.textSecondary)
                         }
                     }
@@ -448,11 +448,11 @@ struct APIKeyEditorSheet: View {
                     // Key input
                     VStack(alignment: .leading, spacing: 6) {
                         Text("API Key")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TarsyTheme.font(size: 11))
                             .foregroundColor(TarsyTheme.textSecondary)
 
                         TextField("sk-...", text: $keyText)
-                            .font(.system(size: 13, design: .monospaced))
+                            .font(TarsyTheme.font(size: 13))
                             .foregroundColor(TarsyTheme.textPrimary)
                             .padding(12)
                             .background(TarsyTheme.backgroundSecondary)
@@ -467,9 +467,9 @@ struct APIKeyEditorSheet: View {
                         Link(destination: url) {
                             HStack(spacing: 4) {
                                 Image(systemName: "arrow.up.right.square")
-                                    .font(.system(size: 11))
+                                    .font(TarsyTheme.font(size: 11))
                                 Text("Get your \(provider.displayName) API key")
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 11))
                             }
                             .foregroundColor(TarsyTheme.accentAmber)
                         }

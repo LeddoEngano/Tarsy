@@ -45,19 +45,19 @@ struct MCPStoreView: View {
                     VStack(spacing: 12) {
                         ProgressView().tint(TarsyTheme.accentAmber)
                         Text("detecting integrations...")
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(TarsyTheme.font(size: 12))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                 } else if mcps.isEmpty {
                     VStack(spacing: 12) {
                         Image(systemName: "puzzlepiece.extension")
-                            .font(.system(size: 40))
+                            .font(TarsyTheme.font(size: 40))
                             .foregroundColor(TarsyTheme.textSecondary)
                         Text("No MCPs configured")
                             .font(TarsyTheme.monoFont)
                             .foregroundColor(TarsyTheme.textSecondary)
                         Text("Add MCPs to your agent configs\nand they'll appear here automatically")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TarsyTheme.font(size: 11))
                             .foregroundColor(TarsyTheme.textSecondary.opacity(0.7))
                             .multilineTextAlignment(.center)
                     }
@@ -97,7 +97,7 @@ struct MCPStoreView: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button(action: { loadMCPs() }) {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 14))
+                            .font(TarsyTheme.font(size: 14))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                 }
@@ -117,13 +117,13 @@ struct MCPStoreView: View {
             HStack(spacing: 8) {
                 AgentIcon(engineType: engine, size: 18)
                 Text(engine.displayName)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13, weight: .semibold))
                     .foregroundColor(TarsyTheme.textPrimary)
 
                 Spacer()
 
                 Text("\(mcps.count) active")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
 
@@ -143,18 +143,18 @@ struct MCPStoreView: View {
                 .frame(width: 8, height: 8)
 
             Image(systemName: mcpIcon(mcp.name))
-                .font(.system(size: 15))
+                .font(TarsyTheme.font(size: 15))
                 .foregroundColor(TarsyTheme.accentAmber)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(mcpDisplayName(mcp.name))
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13))
                     .foregroundColor(TarsyTheme.textPrimary)
 
                 HStack(spacing: 6) {
                     Text(mcp.type)
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(TarsyTheme.font(size: 9))
                         .foregroundColor(TarsyTheme.textSecondary)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -163,7 +163,7 @@ struct MCPStoreView: View {
 
                     if mcp.scope == "project" {
                         Text("project")
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(TarsyTheme.font(size: 9))
                             .foregroundColor(TarsyTheme.accentAmber.opacity(0.8))
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -176,7 +176,7 @@ struct MCPStoreView: View {
             Spacer()
 
             Text(healthLabel(for: mcp.name))
-                .font(.system(size: 10, design: .monospaced))
+                .font(TarsyTheme.font(size: 10))
                 .foregroundColor(healthColor(for: mcp.name))
         }
         .padding(.horizontal, 16)
@@ -188,11 +188,11 @@ struct MCPStoreView: View {
         HStack(spacing: 8) {
             AgentIcon(engineType: engine, size: 16)
             Text(engine.displayName)
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                .font(TarsyTheme.font(size: 13, weight: .semibold))
                 .foregroundColor(TarsyTheme.textSecondary)
             Spacer()
             Text(label)
-                .font(.system(size: 10, design: .monospaced))
+                .font(TarsyTheme.font(size: 10))
                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
         }
         .padding(.horizontal, 16)

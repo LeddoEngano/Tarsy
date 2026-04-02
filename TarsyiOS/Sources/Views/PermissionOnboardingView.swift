@@ -17,15 +17,15 @@ struct PermissionOnboardingView: View {
                 // Header
                 VStack(spacing: 12) {
                     Image(systemName: "shield.checkered")
-                        .font(.system(size: 48))
+                        .font(TarsyTheme.font(size: 48))
                         .foregroundColor(TarsyTheme.accentAmber)
 
                     Text("agent permissions")
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 22, weight: .bold))
                         .foregroundColor(TarsyTheme.textPrimary)
 
                     Text("Choose how AI agents interact with your code.\nYou can change this anytime in settings.")
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(TarsyTheme.font(size: 13))
                         .foregroundColor(TarsyTheme.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
@@ -71,7 +71,7 @@ struct PermissionOnboardingView: View {
                     onComplete()
                 } label: {
                     Text("continue")
-                        .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 16, weight: .semibold))
                         .foregroundColor(TarsyTheme.backgroundPrimary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
@@ -98,17 +98,17 @@ struct PermissionOnboardingView: View {
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: icon)
-                    .font(.system(size: 22))
+                    .font(TarsyTheme.font(size: 22))
                     .foregroundColor(isSelected ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
                     .frame(width: 36)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(title)
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 14, weight: .semibold))
                         .foregroundColor(TarsyTheme.textPrimary)
 
                     Text(description)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11))
                         .foregroundColor(TarsyTheme.textSecondary)
                         .multilineTextAlignment(.leading)
                 }
@@ -116,7 +116,7 @@ struct PermissionOnboardingView: View {
                 Spacer()
 
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22))
+                    .font(TarsyTheme.font(size: 22))
                     .foregroundColor(isSelected ? TarsyTheme.accentAmber : TarsyTheme.textSecondary.opacity(0.4))
             }
             .padding(16)

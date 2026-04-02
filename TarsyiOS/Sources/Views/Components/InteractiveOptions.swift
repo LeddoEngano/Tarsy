@@ -71,7 +71,7 @@ struct PaginatedQuestionCard: View {
                     Spacer()
                     Button(action: onDismiss) {
                         Image(systemName: "xmark")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(TarsyTheme.font(size: 13, weight: .medium))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                 }
@@ -81,7 +81,7 @@ struct PaginatedQuestionCard: View {
 
             // Question text
             Text(question.question)
-                .font(.system(size: isCompact ? 13 : 15, weight: .semibold))
+                .font(TarsyTheme.font(size: isCompact ? 13 : 15, weight: .semibold))
                 .foregroundColor(TarsyTheme.textPrimary)
                 .lineLimit(2)
                 .padding(.horizontal, 16)
@@ -112,18 +112,18 @@ struct PaginatedQuestionCard: View {
         HStack {
             Button(action: goToPrevious) {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(TarsyTheme.font(size: 14, weight: .medium))
                     .foregroundColor(currentIndex > 0 ? TarsyTheme.textPrimary : TarsyTheme.textSecondary.opacity(0.4))
             }
             .disabled(currentIndex == 0)
 
             Text("\(currentIndex + 1) de \(totalQuestions)")
-                .font(.system(size: 13, weight: .medium))
+                .font(TarsyTheme.font(size: 13, weight: .medium))
                 .foregroundColor(TarsyTheme.textSecondary)
 
             Button(action: goToNext) {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(TarsyTheme.font(size: 14, weight: .medium))
                     .foregroundColor(currentIndex < totalQuestions - 1 ? TarsyTheme.textPrimary : TarsyTheme.textSecondary.opacity(0.4))
             }
             .disabled(currentIndex >= totalQuestions - 1)
@@ -132,7 +132,7 @@ struct PaginatedQuestionCard: View {
 
             Button(action: onDismiss) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(TarsyTheme.font(size: 13, weight: .medium))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
         }
@@ -179,12 +179,12 @@ struct PaginatedQuestionCard: View {
         }) {
             HStack(spacing: isCompact ? 8 : 12) {
                 Text("\(optIndex)")
-                    .font(.system(size: isCompact ? 12 : 14, weight: .medium))
+                    .font(TarsyTheme.font(size: isCompact ? 12 : 14, weight: .medium))
                     .foregroundColor(singleAnswers[idx] == option ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
                     .frame(width: isCompact ? 22 : 28)
 
                 Text(option)
-                    .font(.system(size: isCompact ? 13 : 15))
+                    .font(TarsyTheme.font(size: isCompact ? 13 : 15))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
@@ -225,13 +225,13 @@ struct PaginatedQuestionCard: View {
 
                     if selected {
                         Image(systemName: "checkmark")
-                            .font(.system(size: isCompact ? 10 : 13, weight: .bold))
+                            .font(TarsyTheme.font(size: isCompact ? 10 : 13, weight: .bold))
                             .foregroundColor(.white)
                     }
                 }
 
                 Text(option)
-                    .font(.system(size: isCompact ? 13 : 15))
+                    .font(TarsyTheme.font(size: isCompact ? 13 : 15))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
@@ -254,7 +254,7 @@ struct PaginatedQuestionCard: View {
 
         return HStack(spacing: 8) {
             Image(systemName: "paperclip")
-                .font(.system(size: isCompact ? 12 : 14))
+                .font(TarsyTheme.font(size: isCompact ? 12 : 14))
                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
 
             TextField("", text: Binding(
@@ -262,7 +262,7 @@ struct PaginatedQuestionCard: View {
                 set: { customInputs[idx] = $0 }
             ), prompt: Text("Digite sua resposta...")
                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.4)))
-                .font(.system(size: isCompact ? 12 : 14))
+                .font(TarsyTheme.font(size: isCompact ? 12 : 14))
                 .foregroundColor(TarsyTheme.textPrimary)
                 .autocorrectionDisabled()
                 .textInputAutocapitalization(.never)
@@ -285,7 +285,7 @@ struct PaginatedQuestionCard: View {
                         .frame(width: isCompact ? 26 : 32, height: isCompact ? 26 : 32)
                         .overlay(
                             Image(systemName: "arrow.up")
-                                .font(.system(size: isCompact ? 12 : 14, weight: .bold))
+                                .font(TarsyTheme.font(size: isCompact ? 12 : 14, weight: .bold))
                                 .foregroundColor(.white)
                         )
                 }
@@ -365,7 +365,7 @@ struct InteractiveOptionsView: View {
                     ForEach(options) { option in
                         Button(action: { onSelect(option) }) {
                             Text(option.label)
-                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                .font(TarsyTheme.font(size: 12, weight: .medium))
                                 .foregroundColor(option.style == .primary ? TarsyTheme.backgroundPrimary : TarsyTheme.textPrimary)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 8)
@@ -378,7 +378,7 @@ struct InteractiveOptionsView: View {
                 ForEach(options) { option in
                     Button(action: { onSelect(option) }) {
                         Text(option.label)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(TarsyTheme.font(size: 12))
                             .foregroundColor(TarsyTheme.textPrimary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 12)

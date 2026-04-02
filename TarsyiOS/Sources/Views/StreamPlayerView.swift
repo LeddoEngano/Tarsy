@@ -153,7 +153,7 @@ struct StreamPlayerView: View {
                         }
                         Spacer()
                         Text("\(viewModel.fps) fps")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10))
                             .foregroundColor(TarsyTheme.textSecondary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
@@ -208,7 +208,7 @@ struct StreamPlayerView: View {
                             if isWebMode && detectedPorts.count > 1 {
                                 Button(action: { showPortPicker = true }) {
                                     Text(":\(String(selectedPort ?? 0))")
-                                        .font(.system(size: 10, design: .monospaced))
+                                        .font(TarsyTheme.font(size: 10))
                                         .foregroundColor(.white.opacity(0.7))
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 6)
@@ -241,7 +241,7 @@ struct StreamPlayerView: View {
                         Spacer()
                         HStack(spacing: 8) {
                             TextField("", text: $miniUrlText, prompt: Text("enter url...").foregroundColor(.white.opacity(0.3)))
-                                .font(.system(size: 13, design: .monospaced))
+                                .font(TarsyTheme.font(size: 13))
                                 .foregroundColor(.white)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
@@ -251,7 +251,7 @@ struct StreamPlayerView: View {
 
                             Button(action: { navigateMiniUrl() }) {
                                 Image(systemName: "arrow.right.circle.fill")
-                                    .font(.system(size: 20))
+                                    .font(TarsyTheme.font(size: 20))
                                     .foregroundColor(TarsyTheme.accentAmber)
                             }
                         }
@@ -348,7 +348,7 @@ struct StreamPlayerView: View {
     private var devServerGear: some View {
         Button(action: { restartDevServer() }) {
             Image(systemName: "gearshape.fill")
-                .font(.system(size: 14))
+                .font(TarsyTheme.font(size: 14))
                 .foregroundColor(gearColor)
                 .rotationEffect(.degrees(gearRotation))
                 .frame(width: 30, height: 30)
@@ -640,7 +640,7 @@ struct StreamPlayerView: View {
     private func streamButton(_ icon: String, color: Color = .white, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(TarsyTheme.font(size: 11))
                 .foregroundColor(color.opacity(0.9))
                 .frame(width: 28, height: 28)
                 .background(.ultraThinMaterial)

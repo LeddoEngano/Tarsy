@@ -16,22 +16,22 @@ struct NameOnboardingView: View {
                 Spacer()
 
                 Image(systemName: "person.text.rectangle")
-                    .font(.system(size: 48))
+                    .font(TarsyTheme.font(size: 48))
                     .foregroundColor(TarsyTheme.accentAmber)
 
                 VStack(spacing: 8) {
                     Text("how should we call you?")
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 22, weight: .bold))
                         .foregroundColor(TarsyTheme.textPrimary)
 
                     Text("we'll use it to personalize your experience")
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(TarsyTheme.font(size: 12))
                         .foregroundColor(TarsyTheme.textSecondary)
                         .multilineTextAlignment(.center)
                 }
 
                 TextField("your name or nickname", text: $name)
-                    .font(.system(size: 16, design: .monospaced))
+                    .font(TarsyTheme.font(size: 16))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .padding(14)
                     .background(TarsyTheme.backgroundSecondary)
@@ -60,7 +60,7 @@ struct NameOnboardingView: View {
                                 .tint(TarsyTheme.backgroundPrimary)
                         }
                         Text("continue")
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            .font(TarsyTheme.font(size: 14, weight: .semibold))
                     }
                     .foregroundColor(TarsyTheme.backgroundPrimary)
                     .frame(maxWidth: .infinity)
@@ -95,7 +95,7 @@ struct LegalWebView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Done") { dismiss() }
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            .font(TarsyTheme.font(size: 14, weight: .semibold))
                             .foregroundColor(TarsyTheme.accentAmber)
                     }
                 }

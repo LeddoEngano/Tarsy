@@ -40,7 +40,7 @@ struct ConnectionIndicator: View {
 
             if connectionManager.isConnected {
                 Text("\(Int(connectionManager.latency * 1000))ms")
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(TarsyTheme.font(size: 9))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
         }

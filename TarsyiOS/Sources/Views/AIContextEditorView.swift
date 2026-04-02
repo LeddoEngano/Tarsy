@@ -35,7 +35,7 @@ struct AIContextEditorView: View {
 
                 // Editor
                 TextEditor(text: $context)
-                    .font(.system(size: 14, design: .monospaced))
+                    .font(TarsyTheme.font(size: 14))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .scrollContentBackground(.hidden)
                     .background(TarsyTheme.backgroundPrimary)

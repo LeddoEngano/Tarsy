@@ -40,11 +40,11 @@ struct TarsyEyes: View {
             if morphShape != .none {
                 HStack(spacing: size * 0.1) {
                     morphIcon
-                        .font(.system(size: size * 0.30))
+                        .font(TarsyTheme.font(size: size * 0.30))
                         .foregroundStyle(.white)
 
                     morphIcon
-                        .font(.system(size: size * 0.345))
+                        .font(TarsyTheme.font(size: size * 0.345))
                         .foregroundStyle(.white)
                 }
                 .opacity(morphOpacity)

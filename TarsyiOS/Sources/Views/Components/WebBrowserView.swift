@@ -92,7 +92,7 @@ struct WebBrowserView: View {
     private var idleView: some View {
         VStack(spacing: 16) {
             Image(systemName: "globe")
-                .font(.system(size: 36))
+                .font(TarsyTheme.font(size: 36))
                 .foregroundColor(TarsyTheme.textSecondary)
 
             Text("Dev server not running")
@@ -101,7 +101,7 @@ struct WebBrowserView: View {
 
             if let cmd = workspace.devServerCommand, !cmd.isEmpty {
                 Text(cmd)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TarsyTheme.font(size: 11))
                     .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
             }
 
@@ -109,9 +109,9 @@ struct WebBrowserView: View {
                 Button(action: { startDevServer() }) {
                     HStack(spacing: 6) {
                         Image(systemName: "play.fill")
-                            .font(.system(size: 12))
+                            .font(TarsyTheme.font(size: 12))
                         Text("Start Server")
-                            .font(.system(size: 13, design: .monospaced))
+                            .font(TarsyTheme.font(size: 13))
                     }
                     .foregroundColor(TarsyTheme.backgroundPrimary)
                     .padding(.horizontal, 20)
@@ -122,7 +122,7 @@ struct WebBrowserView: View {
 
                 Button(action: { forceScanPorts() }) {
                     Text("Refresh")
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(TarsyTheme.font(size: 13))
                         .foregroundColor(TarsyTheme.accentAmber)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
@@ -135,7 +135,7 @@ struct WebBrowserView: View {
                 if isDevServerRunning {
                     Button(action: { stopDevServer() }) {
                         Text("Stop Server")
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(TarsyTheme.font(size: 12))
                             .foregroundColor(TarsyTheme.accentTerracotta)
                     }
                     .padding(.top, 4)
@@ -152,7 +152,7 @@ struct WebBrowserView: View {
             VStack(spacing: 8) {
                 HStack {
                     Text(progressText)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11))
                         .foregroundColor(TarsyTheme.accentAmber)
                     Spacer()
                     ProgressView()
@@ -178,7 +178,7 @@ struct WebBrowserView: View {
             // Last output line
             if !devServerOutput.isEmpty {
                 Text(devServerOutput)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(TarsyTheme.textSecondary.opacity(0.7))
                     .lineLimit(2)
                     .frame(maxWidth: 280)
@@ -186,7 +186,7 @@ struct WebBrowserView: View {
 
             Button(action: { stopDevServer() }) {
                 Text("Cancel")
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
         }
@@ -198,7 +198,7 @@ struct WebBrowserView: View {
         VStack(spacing: 12) {
             ProgressView().tint(TarsyTheme.accentAmber)
             Text("detecting dev server...")
-                .font(.system(size: 12, design: .monospaced))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(TarsyTheme.textSecondary)
         }
     }
@@ -276,7 +276,7 @@ struct WebBrowserView: View {
                         if detectedPorts.count > 1 {
                             Button(action: { showPortPicker = true }) {
                                 Text(":\(String(selectedPort ?? 0))")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 10))
                                     .foregroundColor(.white.opacity(0.7))
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 6)
@@ -308,7 +308,7 @@ struct WebBrowserView: View {
                     Spacer()
                     HStack(spacing: 8) {
                         TextField("", text: $miniUrlText, prompt: Text("enter url...").foregroundColor(.white.opacity(0.3)))
-                            .font(.system(size: 13, design: .monospaced))
+                            .font(TarsyTheme.font(size: 13))
                             .foregroundColor(.white)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
@@ -318,7 +318,7 @@ struct WebBrowserView: View {
 
                         Button(action: { navigateMiniUrl() }) {
                             Image(systemName: "arrow.right.circle.fill")
-                                .font(.system(size: 20))
+                                .font(TarsyTheme.font(size: 20))
                                 .foregroundColor(TarsyTheme.accentAmber)
                         }
                     }
@@ -361,7 +361,7 @@ struct WebBrowserView: View {
     private func floatingButton(icon: String, color: Color = .white, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(TarsyTheme.font(size: 11))
                 .foregroundColor(color.opacity(0.9))
                 .frame(width: 28, height: 28)
                 .background(.ultraThinMaterial)
@@ -702,7 +702,7 @@ struct FullscreenWebBrowser: View {
 
                     Button(action: onClose) {
                         Image(systemName: "arrow.down.right.and.arrow.up.left")
-                            .font(.system(size: 16))
+                            .font(TarsyTheme.font(size: 16))
                             .foregroundColor(.white.opacity(0.8))
                             .frame(width: 32, height: 32)
                             .background(.ultraThinMaterial)
@@ -719,7 +719,7 @@ struct FullscreenWebBrowser: View {
                     if showUrlBar {
                         HStack(spacing: 8) {
                             TextField("", text: $urlText, prompt: Text("enter url...").foregroundColor(.white.opacity(0.3)))
-                                .font(.system(size: 13, design: .monospaced))
+                                .font(TarsyTheme.font(size: 13))
                                 .foregroundColor(.white)
                                 .autocorrectionDisabled()
                                 .textInputAutocapitalization(.never)
@@ -729,7 +729,7 @@ struct FullscreenWebBrowser: View {
 
                             Button(action: { navigateToUrl() }) {
                                 Image(systemName: "arrow.right.circle.fill")
-                                    .font(.system(size: 20))
+                                    .font(TarsyTheme.font(size: 20))
                                     .foregroundColor(TarsyTheme.accentAmber)
                             }
                         }
@@ -745,7 +745,7 @@ struct FullscreenWebBrowser: View {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isUrlFocused = true }
                         }) {
                             Image(systemName: "globe")
-                                .font(.system(size: 13))
+                                .font(TarsyTheme.font(size: 13))
                                 .foregroundColor(.white.opacity(0.9))
                                 .frame(width: 32, height: 32)
                                 .background(.ultraThinMaterial)
@@ -842,7 +842,7 @@ struct FullscreenWebBrowser: View {
             }
 
             Image(systemName: isVoiceRecording ? "mic.fill" : "mic")
-                .font(.system(size: 28, weight: .medium))
+                .font(TarsyTheme.font(size: 28, weight: .medium))
                 .foregroundColor(isVoiceRecording ? .white : .white.opacity(0.9))
                 .frame(width: 64, height: 64)
                 .background(
@@ -935,7 +935,7 @@ struct FullscreenWebBrowser: View {
     private func navButton(icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 13))
+                .font(TarsyTheme.font(size: 13))
                 .foregroundColor(.white.opacity(0.9))
                 .frame(width: 32, height: 32)
                 .background(.ultraThinMaterial)

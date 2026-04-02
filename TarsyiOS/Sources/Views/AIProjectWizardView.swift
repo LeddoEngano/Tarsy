@@ -106,7 +106,7 @@ struct AIProjectWizardView: View {
             Spacer()
 
             Text("create with ai")
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .font(TarsyTheme.font(size: 18, weight: .bold))
                 .foregroundColor(TarsyTheme.accentAmber)
 
             Spacer()
@@ -142,7 +142,7 @@ struct AIProjectWizardView: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("describe your project")
-                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 16, weight: .semibold))
                     .foregroundColor(TarsyTheme.textPrimary)
 
                 Text("tell the AI what you want to build. be as detailed as you'd like.")
@@ -151,7 +151,7 @@ struct AIProjectWizardView: View {
             }
 
             TextEditor(text: $projectIdea)
-                .font(.system(size: 14, design: .monospaced))
+                .font(TarsyTheme.font(size: 14))
                 .foregroundColor(TarsyTheme.textPrimary)
                 .scrollContentBackground(.hidden)
                 .padding(14)
@@ -165,7 +165,7 @@ struct AIProjectWizardView: View {
                 .overlay(alignment: .topLeading) {
                     if projectIdea.isEmpty {
                         Text("e.g. a Next.js dashboard that tracks crypto prices with real-time charts and alerts...")
-                            .font(.system(size: 14, design: .monospaced))
+                            .font(TarsyTheme.font(size: 14))
                             .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
                             .padding(18)
                             .allowsHitTesting(false)
@@ -175,7 +175,7 @@ struct AIProjectWizardView: View {
             // Agent selector
             VStack(alignment: .leading, spacing: 8) {
                 Text("agent")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 10, weight: .semibold))
                     .foregroundColor(TarsyTheme.textSecondary)
                     .textCase(.uppercase)
 
@@ -198,7 +198,7 @@ struct AIProjectWizardView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "sparkles")
                     Text("analyze with ai")
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 14, weight: .semibold))
                 }
                 .foregroundColor(TarsyTheme.backgroundPrimary)
                 .frame(maxWidth: .infinity)
@@ -228,7 +228,7 @@ struct AIProjectWizardView: View {
 
             VStack(spacing: 8) {
                 Text("\(selectedEngine.displayName) is analyzing...")
-                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 16, weight: .semibold))
                     .foregroundColor(TarsyTheme.textPrimary)
 
                 Text("figuring out the best stack and structure for your project")
@@ -240,12 +240,12 @@ struct AIProjectWizardView: View {
             if !aiRawResponse.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("ai output")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 10, weight: .semibold))
                         .foregroundColor(TarsyTheme.textSecondary)
 
                     ScrollView {
                         Text(aiRawResponse)
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TarsyTheme.font(size: 11))
                             .foregroundColor(TarsyTheme.textSecondary.opacity(0.7))
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -267,7 +267,7 @@ struct AIProjectWizardView: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("review & customize")
-                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 16, weight: .semibold))
                     .foregroundColor(TarsyTheme.textPrimary)
 
                 Text("the AI suggested this setup. adjust anything you'd like.")
@@ -316,7 +316,7 @@ struct AIProjectWizardView: View {
                                 }
                             } label: {
                                 Text(dep)
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 11))
                                     .foregroundColor(isSelected ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 6)
@@ -334,7 +334,7 @@ struct AIProjectWizardView: View {
 
             Button(action: { withAnimation { step = .summary } }) {
                 Text("review summary")
-                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 14, weight: .semibold))
                     .foregroundColor(TarsyTheme.backgroundPrimary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
@@ -350,7 +350,7 @@ struct AIProjectWizardView: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("ready to create")
-                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 16, weight: .semibold))
                     .foregroundColor(TarsyTheme.textPrimary)
 
                 Text("confirm everything looks good, then let the AI build it.")
@@ -370,10 +370,10 @@ struct AIProjectWizardView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("agent")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TarsyTheme.font(size: 10))
                         .foregroundColor(TarsyTheme.textSecondary)
                     Text(selectedEngine.displayName)
-                        .font(.system(size: 13, weight: .medium, design: .monospaced))
+                        .font(TarsyTheme.font(size: 13, weight: .medium))
                         .foregroundColor(TarsyTheme.textPrimary)
                         .lineLimit(2)
                 }
@@ -392,12 +392,12 @@ struct AIProjectWizardView: View {
             if ghAvailable {
                 HStack(spacing: 12) {
                     Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 14))
+                        .font(TarsyTheme.font(size: 14))
                         .foregroundColor(TarsyTheme.textSecondary)
                         .frame(width: 24)
 
                     Text("create GitHub repository")
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(TarsyTheme.font(size: 13))
                         .foregroundColor(TarsyTheme.textPrimary)
 
                     Spacer()
@@ -421,7 +421,7 @@ struct AIProjectWizardView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "wand.and.stars")
                     Text("create project & start agent")
-                        .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 14, weight: .semibold))
                 }
                 .foregroundColor(TarsyTheme.backgroundPrimary)
                 .frame(maxWidth: .infinity)
@@ -444,13 +444,13 @@ struct AIProjectWizardView: View {
                     .frame(width: 80, height: 80)
 
                 Image(systemName: "wand.and.stars")
-                    .font(.system(size: 32))
+                    .font(TarsyTheme.font(size: 32))
                     .foregroundColor(TarsyTheme.accentAmber)
             }
 
             VStack(spacing: 8) {
                 Text("creating your project...")
-                    .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 16, weight: .semibold))
                     .foregroundColor(TarsyTheme.textPrimary)
 
                 Text("setting up repo, workspace, and dispatching agent")
@@ -680,7 +680,7 @@ struct AIProjectWizardView: View {
             HStack(spacing: 6) {
                 AgentIcon(engineType: engine, size: 14)
                 Text(engine.displayName)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12))
             }
             .foregroundColor(selectedEngine == engine ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
             .padding(.horizontal, 12)
@@ -698,7 +698,7 @@ struct AIProjectWizardView: View {
                     selected.wrappedValue = option
                 } label: {
                     Text(option)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(TarsyTheme.font(size: 12))
                         .foregroundColor(selected.wrappedValue == option ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
@@ -726,16 +726,16 @@ struct AIProjectWizardView: View {
     private func summaryCard(icon: String, label: String, value: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 14))
+                .font(TarsyTheme.font(size: 14))
                 .foregroundColor(TarsyTheme.accentAmber)
                 .frame(width: 24)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(TarsyTheme.textSecondary)
                 Text(value)
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13, weight: .medium))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .lineLimit(2)
             }
@@ -751,7 +751,7 @@ struct AIProjectWizardView: View {
     private func fieldSection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .font(TarsyTheme.font(size: 10, weight: .semibold))
                 .foregroundColor(TarsyTheme.textSecondary)
                 .textCase(.uppercase)
             content()
@@ -762,7 +762,7 @@ struct AIProjectWizardView: View {
     private func tarsyTextField(_ placeholder: String, text: Binding<String>) -> some View {
         TextField("", text: text, prompt: Text(placeholder).foregroundColor(TarsyTheme.textSecondary.opacity(0.5)))
             .textFieldStyle(.plain)
-            .font(.system(size: 14, design: .monospaced))
+            .font(TarsyTheme.font(size: 14))
             .foregroundColor(TarsyTheme.textPrimary)
             .padding(14)
             .background(TarsyTheme.backgroundSecondary)

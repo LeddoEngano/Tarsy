@@ -17,8 +17,8 @@ struct SplashView: View {
                     .opacity(showEyes ? 1 : 0)
 
                 VStack(spacing: 8) {
-                    Text("TARSY")
-                        .font(.system(size: 48, weight: .bold, design: .monospaced))
+                    Text("tarsy")
+                        .font(TarsyTheme.font(size: 48, weight: .bold))
                         .foregroundColor(TarsyTheme.accentAmber)
 
                     Text("remote agent controller")

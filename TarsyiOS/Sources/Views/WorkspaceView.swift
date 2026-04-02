@@ -158,7 +158,7 @@ struct WorkspaceView: View {
                 VStack {
                     HStack(spacing: 8) {
                         Image(systemName: feedback.contains("Saving") ? "arrow.triangle.2.circlepath" : feedback.contains("Committed") ? "checkmark" : "xmark")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(TarsyTheme.font(size: 12, weight: .semibold))
                             .foregroundColor(feedback.contains("Failed") ? TarsyTheme.accentTerracotta : TarsyTheme.accentMoss)
                         Text(feedback)
                             .font(TarsyTheme.monoFontSmall)
@@ -223,7 +223,7 @@ struct WorkspaceView: View {
                                 .resizable()
                                 .frame(width: 22, height: 22)
                             Image(systemName: "plus")
-                                .font(.system(size: 8, weight: .bold))
+                                .font(TarsyTheme.font(size: 8, weight: .bold))
                                 .foregroundColor(Color(red: 0.133, green: 0.773, blue: 0.369))
                                 .offset(x: -10, y: -1)
                         }
@@ -392,7 +392,7 @@ struct WorkspaceView: View {
                                                 .frame(width: 20, height: 20)
                                         } else {
                                             Image(systemName: engine.iconName)
-                                                .font(.system(size: 14))
+                                                .font(TarsyTheme.font(size: 14))
                                         }
                                     }
                                 }
@@ -660,7 +660,7 @@ struct WorkspaceView: View {
                         } label: {
                             HStack(spacing: 6) {
                                 Image(systemName: "bubble.left.fill")
-                                    .font(.system(size: 14))
+                                    .font(TarsyTheme.font(size: 14))
                                 if isAgentThinking {
                                     ProgressView()
                                         .controlSize(.mini)
@@ -694,7 +694,7 @@ struct WorkspaceView: View {
                             withAnimation(.spring(response: 0.3)) { showOpenClawChat = false }
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 20))
+                                .font(TarsyTheme.font(size: 20))
                                 .foregroundColor(TarsyTheme.textSecondary)
                         }
                     }
@@ -870,9 +870,9 @@ struct WorkspaceView: View {
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "display")
-                        .font(.system(size: 10))
+                        .font(TarsyTheme.font(size: 10))
                     Text("stream")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11))
                 }
                     .foregroundColor(viewMode == .stream ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
                     .padding(.horizontal, 12)
@@ -881,9 +881,9 @@ struct WorkspaceView: View {
             Button(action: { withAnimation(.easeInOut(duration: 0.2)) { viewMode = .browser } }) {
                 HStack(spacing: 4) {
                     Image(systemName: "iphone")
-                        .font(.system(size: 10))
+                        .font(TarsyTheme.font(size: 10))
                     Text("browser")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11))
                 }
                     .foregroundColor(viewMode == .browser ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
                     .padding(.horizontal, 12)
@@ -911,18 +911,18 @@ struct WorkspaceView: View {
                 Button(action: { pullBranch() }) {
                     HStack(spacing: 3) {
                         Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 10))
+                            .font(TarsyTheme.font(size: 10))
                         Text(currentBranch.isEmpty ? workspace.currentBranch ?? "main" : currentBranch)
                             .lineLimit(1)
                         Image(systemName: "arrow.down")
-                            .font(.system(size: 8))
+                            .font(TarsyTheme.font(size: 8))
                     }
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TarsyTheme.font(size: 11))
                     .foregroundColor(TarsyTheme.textSecondary)
                 }
 
                 Text("  |  ")
-                    .font(.system(size: 11))
+                    .font(TarsyTheme.font(size: 11))
                     .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
 
                 // Engine + model
@@ -931,17 +931,17 @@ struct WorkspaceView: View {
                     Text(engineDisplayName)
                         .lineLimit(1)
                 }
-                .font(.system(size: 11, design: .monospaced))
+                .font(TarsyTheme.font(size: 11))
                 .foregroundColor(TarsyTheme.textSecondary)
 
                 if contextPercent > 0 {
                     Text("  |  ")
-                        .font(.system(size: 11))
+                        .font(TarsyTheme.font(size: 11))
                         .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
 
                     // Context %
                     Text("\(Int(contextPercent))% ctx")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11))
                         .foregroundColor(contextPercent > 80 ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
                 }
 
@@ -966,13 +966,13 @@ struct WorkspaceView: View {
                 ZStack(alignment: .topLeading) {
                     if messageText.isEmpty {
                         Text("send a command...")
-                            .font(.system(size: 16))
+                            .font(TarsyTheme.font(size: 16))
                             .foregroundColor(TarsyTheme.textSecondary.opacity(0.35))
                             .padding(.horizontal, 20)
                             .padding(.top, 22)
                     }
                     TextEditor(text: $messageText)
-                        .font(.system(size: 16))
+                        .font(TarsyTheme.font(size: 16))
                         .foregroundColor(TarsyTheme.textPrimary)
                         .scrollContentBackground(.hidden)
                         .frame(minHeight: 36, maxHeight: 200)
@@ -987,7 +987,7 @@ struct WorkspaceView: View {
                 HStack(spacing: 4) {
                     Button(action: { showAttachmentPicker.toggle() }) {
                         Image(systemName: "plus")
-                            .font(.system(size: 18, weight: .medium))
+                            .font(TarsyTheme.font(size: 18, weight: .medium))
                             .foregroundColor(TarsyTheme.textSecondary)
                             .frame(width: 36, height: 36)
                     }
@@ -1007,11 +1007,11 @@ struct WorkspaceView: View {
                             ZStack {
                                 if todoManager.hasQuestionItems {
                                     Image(systemName: "questionmark")
-                                        .font(.system(size: 14, weight: .bold))
+                                        .font(TarsyTheme.font(size: 14, weight: .bold))
                                         .foregroundColor(TarsyTheme.accentAmber)
                                 } else if let tool = todoManager.items.last(where: { $0.status == .working })?.currentTool {
                                     Image(systemName: VoiceTodoManager.iconForTool(tool))
-                                        .font(.system(size: 14))
+                                        .font(TarsyTheme.font(size: 14))
                                         .foregroundColor(TarsyTheme.accentAmber)
                                 } else {
                                     ProgressView()
@@ -1026,7 +1026,7 @@ struct WorkspaceView: View {
                                 Group {
                                     if todoManager.activeCount > 1 {
                                         Text("\(todoManager.activeCount)")
-                                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                            .font(TarsyTheme.font(size: 9, weight: .bold))
                                             .foregroundColor(.white)
                                             .frame(width: 16, height: 16)
                                             .background(TarsyTheme.accentAmber)
@@ -1047,12 +1047,12 @@ struct WorkspaceView: View {
                                 .frame(width: 5, height: 5)
                                 .opacity(recDotVisible ? 1 : 0.15)
                             Text(recordingTimerText)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TarsyTheme.font(size: 10))
                                 .foregroundColor(TarsyTheme.accentTerracotta)
                                 .monospacedDigit()
                         }
                         Image(systemName: isRecording ? "mic.fill" : "mic")
-                            .font(.system(size: 16))
+                            .font(TarsyTheme.font(size: 16))
                             .foregroundColor(isRecording ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
                             .frame(width: 36, height: 36)
                     }
@@ -1067,7 +1067,7 @@ struct WorkspaceView: View {
 
                     Button(action: { sendMessage() }) {
                         Image(systemName: "arrow.up")
-                            .font(.system(size: 14, weight: .bold))
+                            .font(TarsyTheme.font(size: 14, weight: .bold))
                             .foregroundColor(canSend ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary.opacity(0.5))
                             .frame(width: 32, height: 32)
                             .background(canSend ? TarsyTheme.accentAmber : TarsyTheme.backgroundSecondary)
@@ -1169,7 +1169,7 @@ struct WorkspaceView: View {
                     .clipped()
             } else {
                 Image(systemName: "doc.fill")
-                    .font(.system(size: 11))
+                    .font(TarsyTheme.font(size: 11))
                     .foregroundColor(TarsyTheme.accentAmber)
                     .frame(width: 24, height: 24)
                     .background(TarsyTheme.backgroundTertiary)
@@ -1177,7 +1177,7 @@ struct WorkspaceView: View {
             }
 
             Text(attachment.name)
-                .font(.system(size: 10, design: .monospaced))
+                .font(TarsyTheme.font(size: 10))
                 .foregroundColor(TarsyTheme.textPrimary)
                 .lineLimit(1)
 
@@ -1185,7 +1185,7 @@ struct WorkspaceView: View {
                 withAnimation { attachments.removeAll { $0.id == attachment.id } }
             }) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 11))
+                    .font(TarsyTheme.font(size: 11))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
         }
@@ -1837,7 +1837,7 @@ struct TabButton: View {
                     AgentIcon(engineType: .claude, size: 12)
                 case .openclaw:
                     Text("🦞")
-                        .font(.system(size: 10))
+                        .font(TarsyTheme.font(size: 10))
                 case .engine:
                     AgentIcon(engineType: tab.engineType ?? .custom, size: 12)
                 case .terminal:
@@ -1851,7 +1851,7 @@ struct TabButton: View {
                 if let onClose {
                     Button(action: onClose) {
                         Image(systemName: "xmark")
-                            .font(.system(size: 8))
+                            .font(TarsyTheme.font(size: 8))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                 }
@@ -1874,7 +1874,7 @@ struct MessageBubble: View {
 
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
                 Text(message.role == .user ? "you" : "agent")
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(TarsyTheme.font(size: 9))
                     .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
 
                 Text(message.content)

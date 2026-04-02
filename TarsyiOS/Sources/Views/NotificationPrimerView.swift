@@ -15,15 +15,15 @@ struct NotificationPrimerView: View {
                 // Header
                 VStack(spacing: 12) {
                     Image(systemName: "bell.badge")
-                        .font(.system(size: 48))
+                        .font(TarsyTheme.font(size: 48))
                         .foregroundColor(TarsyTheme.accentAmber)
 
                     Text("stay in the loop")
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 22, weight: .bold))
                         .foregroundColor(TarsyTheme.textPrimary)
 
                     Text("Get notified when your AI agent\nneeds input or finishes a task.")
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(TarsyTheme.font(size: 13))
                         .foregroundColor(TarsyTheme.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
@@ -62,7 +62,7 @@ struct NotificationPrimerView: View {
                         requestNotificationPermission()
                     } label: {
                         Text("enable notifications")
-                            .font(.system(size: 16, weight: .semibold, design: .monospaced))
+                            .font(TarsyTheme.font(size: 16, weight: .semibold))
                             .foregroundColor(TarsyTheme.backgroundPrimary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 14)
@@ -75,7 +75,7 @@ struct NotificationPrimerView: View {
                         onComplete()
                     } label: {
                         Text("maybe later")
-                            .font(.system(size: 13, design: .monospaced))
+                            .font(TarsyTheme.font(size: 13))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                 }
@@ -88,12 +88,12 @@ struct NotificationPrimerView: View {
     private func benefitRow(icon: String, text: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
-                .font(.system(size: 16))
+                .font(TarsyTheme.font(size: 16))
                 .foregroundColor(TarsyTheme.accentAmber)
                 .frame(width: 24)
 
             Text(text)
-                .font(.system(size: 13, design: .monospaced))
+                .font(TarsyTheme.font(size: 13))
                 .foregroundColor(TarsyTheme.textPrimary)
 
             Spacer()

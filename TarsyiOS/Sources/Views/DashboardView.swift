@@ -30,8 +30,8 @@ struct DashboardView: View {
                 HStack {
                     HStack(spacing: 8) {
                         TarsyEyes(size: 32, animated: false)
-                        Text("TARSY")
-                            .font(.system(size: 24, weight: .bold, design: .monospaced))
+                        Text("tarsy")
+                            .font(TarsyTheme.font(size: 24, weight: .bold))
                             .foregroundColor(TarsyTheme.accentAmber)
 
                         if machineService.machines.count > 1 {
@@ -42,7 +42,7 @@ struct DashboardView: View {
                                     .fill(machineService.isOnline ? TarsyTheme.statusRunning : TarsyTheme.statusError)
                                     .frame(width: 6, height: 6)
                                 Text(machineService.isOnline ? "mac online" : "mac offline")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 10))
                                     .foregroundColor(TarsyTheme.textSecondary)
                             }
                         } else if hasFetchedMachines {
@@ -51,7 +51,7 @@ struct DashboardView: View {
                                     .fill(TarsyTheme.statusIdle)
                                     .frame(width: 6, height: 6)
                                 Text("no mac connected")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 10))
                                     .foregroundColor(TarsyTheme.textSecondary)
                             }
                         }
@@ -103,14 +103,14 @@ struct DashboardView: View {
                                     image.resizable().aspectRatio(contentMode: .fill)
                                 } placeholder: {
                                     Image(systemName: "person.circle.fill")
-                                        .font(.system(size: 22))
+                                        .font(TarsyTheme.font(size: 22))
                                         .foregroundColor(TarsyTheme.textSecondary)
                                 }
                                 .frame(width: 26, height: 26)
                                 .clipShape(Circle())
                             } else {
                                 Image(systemName: "person.circle.fill")
-                                    .font(.system(size: 22))
+                                    .font(TarsyTheme.font(size: 22))
                                     .foregroundColor(TarsyTheme.textSecondary)
                             }
                         }
@@ -218,11 +218,11 @@ struct DashboardView: View {
                 // Header
                 VStack(spacing: 12) {
                     Image(systemName: "desktopcomputer")
-                        .font(.system(size: 48))
+                        .font(TarsyTheme.font(size: 48))
                         .foregroundColor(TarsyTheme.accentAmber)
 
                     Text("connect your mac")
-                        .font(.system(size: 20, weight: .bold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 20, weight: .bold))
                         .foregroundColor(TarsyTheme.textPrimary)
 
                     Text("tarsy needs a companion app running\non your mac to get started")
@@ -278,9 +278,9 @@ struct DashboardView: View {
                 Link(destination: URL(string: "https://tarsy.dev")!) {
                     HStack(spacing: 8) {
                         Image(systemName: "arrow.down.to.line")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(TarsyTheme.font(size: 14, weight: .semibold))
                         Text("download for mac")
-                            .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                            .font(TarsyTheme.font(size: 14, weight: .semibold))
                     }
                     .foregroundColor(TarsyTheme.backgroundPrimary)
                     .frame(maxWidth: .infinity)
@@ -298,9 +298,9 @@ struct DashboardView: View {
                 }) {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 11))
+                            .font(TarsyTheme.font(size: 11))
                         Text("already installed? tap to refresh")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TarsyTheme.font(size: 11))
                     }
                     .foregroundColor(TarsyTheme.textSecondary)
                 }
@@ -322,7 +322,7 @@ struct DashboardView: View {
                         .fill(TarsyTheme.accentAmber.opacity(0.15))
                         .frame(width: 32, height: 32)
                     Text(number)
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 13, weight: .bold))
                         .foregroundColor(TarsyTheme.accentAmber)
                 }
 
@@ -339,15 +339,15 @@ struct DashboardView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Image(systemName: icon)
-                        .font(.system(size: 12))
+                        .font(TarsyTheme.font(size: 12))
                         .foregroundColor(TarsyTheme.accentAmber)
                     Text(title)
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 13, weight: .semibold))
                         .foregroundColor(TarsyTheme.textPrimary)
                 }
 
                 Text(description)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TarsyTheme.font(size: 11))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
             .padding(.bottom, isLast ? 0 : 20)
@@ -361,7 +361,7 @@ struct DashboardView: View {
     private var emptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "eye")
-                .font(.system(size: 48))
+                .font(TarsyTheme.font(size: 48))
                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
 
             Text("no workspaces yet")
@@ -385,7 +385,7 @@ struct DashboardView: View {
     private var activeTasksSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("active tasks")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(TarsyTheme.font(size: 11, weight: .semibold))
                 .foregroundColor(TarsyTheme.textSecondary)
                 .textCase(.uppercase)
 
@@ -421,19 +421,19 @@ struct DashboardView: View {
                         .foregroundColor(TarsyTheme.accentTerracotta)
                 }
             }
-            .font(.system(size: 14))
+            .font(TarsyTheme.font(size: 14))
             .frame(width: 20, height: 20)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(task.description)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .lineLimit(2)
 
                 HStack(spacing: 6) {
                     if let engine = task.engineType {
                         Text(engine)
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(TarsyTheme.font(size: 9))
                             .foregroundColor(TarsyTheme.accentAmber)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 1)
@@ -441,7 +441,7 @@ struct DashboardView: View {
                             .cornerRadius(3)
                     }
                     Text(task.status.rawValue)
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(TarsyTheme.font(size: 9))
                         .foregroundColor(TarsyTheme.textSecondary)
                 }
             }
@@ -449,7 +449,7 @@ struct DashboardView: View {
             Spacer()
 
             Image(systemName: "chevron.right")
-                .font(.system(size: 10))
+                .font(TarsyTheme.font(size: 10))
                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
         }
         .padding(10)
@@ -487,17 +487,17 @@ struct DashboardView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: machineService.selectedMachine?.deviceIcon ?? "desktopcomputer")
-                    .font(.system(size: 12))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(TarsyTheme.accentAmber)
                 Circle()
                     .fill(machineService.isOnline ? TarsyTheme.statusRunning : TarsyTheme.statusError)
                     .frame(width: 6, height: 6)
                 Text(machineService.selectedMachine?.name ?? "select mac")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(TarsyTheme.textSecondary)
                     .lineLimit(1)
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8))
+                    .font(TarsyTheme.font(size: 8))
                     .foregroundColor(TarsyTheme.textSecondary)
             }
         }
@@ -588,7 +588,7 @@ struct WorkspaceCard: View {
         .overlay(alignment: .topTrailing) {
             if unreadCount > 0 {
                 Text(unreadCount > 99 ? "99+" : "\(unreadCount)")
-                    .font(.system(size: 11, weight: .bold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 11, weight: .bold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)

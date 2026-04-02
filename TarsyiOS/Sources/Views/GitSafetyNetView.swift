@@ -55,7 +55,7 @@ struct GitSafetyNetView: View {
                                 .resizable()
                                 .frame(width: 26, height: 26)
                             Image(systemName: "plus")
-                                .font(.system(size: 10, weight: .bold))
+                                .font(TarsyTheme.font(size: 10, weight: .bold))
                                 .foregroundColor(Color(red: 0.133, green: 0.773, blue: 0.369))
                                 .offset(x: -12, y: -1)
                         }
@@ -88,7 +88,7 @@ struct GitSafetyNetView: View {
             if changedFiles.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "checkmark.circle")
-                        .font(.system(size: 40))
+                        .font(TarsyTheme.font(size: 40))
                         .foregroundColor(TarsyTheme.accentMoss)
                     Text("No changes")
                         .font(TarsyTheme.monoFont)
@@ -101,7 +101,7 @@ struct GitSafetyNetView: View {
                         Button(action: { requestFileDiff(file.path) }) {
                             HStack(spacing: 8) {
                                 Text(file.status)
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 11))
                                     .foregroundColor(file.statusColor)
                                     .frame(width: 20)
 
@@ -114,7 +114,7 @@ struct GitSafetyNetView: View {
                                 Spacer()
 
                                 Image(systemName: "chevron.right")
-                                    .font(.system(size: 10))
+                                    .font(TarsyTheme.font(size: 10))
                                     .foregroundColor(TarsyTheme.textSecondary)
                             }
                             .padding(.horizontal, 16)
@@ -135,7 +135,7 @@ struct GitSafetyNetView: View {
             if commits.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "clock")
-                        .font(.system(size: 40))
+                        .font(TarsyTheme.font(size: 40))
                         .foregroundColor(TarsyTheme.textSecondary)
                     Text("No commits")
                         .font(TarsyTheme.monoFont)
@@ -152,19 +152,19 @@ struct GitSafetyNetView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
                                     Text(commit.shortHash)
-                                        .font(.system(size: 11, design: .monospaced))
+                                        .font(TarsyTheme.font(size: 11))
                                         .foregroundColor(TarsyTheme.accentAmber)
 
                                     if commit.message.contains("checkpoint:") {
                                         Image(systemName: "arrow.triangle.branch")
-                                            .font(.system(size: 10))
+                                            .font(TarsyTheme.font(size: 10))
                                             .foregroundColor(TarsyTheme.accentMoss)
                                     }
 
                                     Spacer()
 
                                     Text(commit.relativeDate)
-                                        .font(.system(size: 10, design: .monospaced))
+                                        .font(TarsyTheme.font(size: 10))
                                         .foregroundColor(TarsyTheme.textSecondary)
                                 }
 
@@ -193,7 +193,7 @@ struct GitSafetyNetView: View {
                     Button(action: { checkout(branch) }) {
                         HStack(spacing: 10) {
                             Image(systemName: branch == currentBranch ? "checkmark.circle.fill" : "circle")
-                                .font(.system(size: 14))
+                                .font(TarsyTheme.font(size: 14))
                                 .foregroundColor(branch == currentBranch ? TarsyTheme.accentMoss : TarsyTheme.textSecondary)
 
                             Text(branch)
@@ -204,7 +204,7 @@ struct GitSafetyNetView: View {
 
                             if branch == currentBranch {
                                 Text("current")
-                                    .font(.system(size: 9, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 9))
                                     .foregroundColor(TarsyTheme.accentMoss)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
@@ -334,13 +334,13 @@ struct FileDiffView: View {
                     ForEach(Array(parseHunks().enumerated()), id: \.offset) { _, line in
                         HStack(spacing: 0) {
                             Text(line.lineNum)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TarsyTheme.font(size: 10))
                                 .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
                                 .frame(width: 36, alignment: .trailing)
                                 .padding(.trailing, 6)
 
                             Text(line.content)
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(TarsyTheme.font(size: 12))
                                 .foregroundColor(line.textColor)
                                 .fixedSize(horizontal: true, vertical: false)
                         }

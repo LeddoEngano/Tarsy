@@ -49,7 +49,7 @@ struct WorkspaceSessionPicker: View {
                 } else if filteredSessions.isEmpty {
                     VStack(spacing: 16) {
                         Image(systemName: "clock.arrow.circlepath")
-                            .font(.system(size: 48))
+                            .font(TarsyTheme.font(size: 48))
                             .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
 
                         Text("no previous sessions")
@@ -131,7 +131,7 @@ struct WorkspaceSessionPicker: View {
     private func sessionRow(_ session: UltraContextSession) -> some View {
         HStack(spacing: 12) {
             Image(systemName: session.hasImage ? "photo" : "brain.head.profile")
-                .font(.system(size: 16))
+                .font(TarsyTheme.font(size: 16))
                 .foregroundColor(session.hasImage ? TarsyTheme.accentTerracotta : TarsyTheme.accentAmber)
                 .frame(width: 32, height: 32)
                 .background((session.hasImage ? TarsyTheme.accentTerracotta : TarsyTheme.accentAmber).opacity(0.15))
@@ -139,19 +139,19 @@ struct WorkspaceSessionPicker: View {
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(session.displayTitle)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12, weight: .medium))
                     .foregroundColor(TarsyTheme.textPrimary)
                     .lineLimit(2)
 
                 HStack(spacing: 6) {
                     if let count = session.messageCount, count > 0 {
                         Text("\(count) msgs")
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(TarsyTheme.font(size: 9))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                     if let created = session.createdAt {
                         Text(formatDate(created))
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(TarsyTheme.font(size: 9))
                             .foregroundColor(TarsyTheme.textSecondary)
                     }
                 }
@@ -165,7 +165,7 @@ struct WorkspaceSessionPicker: View {
                     .tint(TarsyTheme.accentAmber)
             } else {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(TarsyTheme.textSecondary.opacity(0.4))
             }
         }

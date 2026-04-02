@@ -26,7 +26,7 @@ struct VoiceTodoOverlay: View {
 
                 if todoManager.hasQuestionItems {
                     Image(systemName: "questionmark")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(TarsyTheme.font(size: 14, weight: .bold))
                         .foregroundColor(TarsyTheme.accentAmber)
                 } else if todoManager.hasWorkingItems, let tool = todoManager.items.last(where: { $0.status == .working })?.currentTool {
                     ShakingIcon(systemName: VoiceTodoManager.iconForTool(tool), size: 14, color: TarsyTheme.accentAmber)
@@ -36,7 +36,7 @@ struct VoiceTodoOverlay: View {
                         .tint(TarsyTheme.accentAmber)
                 } else {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 12, weight: .bold))
+                        .font(TarsyTheme.font(size: 12, weight: .bold))
                         .foregroundColor(TarsyTheme.accentMoss)
                 }
             }
@@ -44,7 +44,7 @@ struct VoiceTodoOverlay: View {
         .overlay(alignment: .topTrailing) {
             if todoManager.workingCount > 1 {
                 Text("\(todoManager.workingCount)")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 8, weight: .bold))
                     .foregroundColor(.white)
                     .frame(width: 14, height: 14)
                     .background(TarsyTheme.accentAmber)
@@ -62,12 +62,12 @@ struct VoiceTodoOverlay: View {
             // Header
             HStack {
                 Text("tasks")
-                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12, weight: .semibold))
                     .foregroundColor(.white)
                 Spacer()
                 Button { todoManager.minimize() } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 14))
+                        .font(TarsyTheme.font(size: 14))
                         .foregroundColor(.white.opacity(0.4))
                 }
             }
@@ -81,7 +81,7 @@ struct VoiceTodoOverlay: View {
                         HStack(spacing: 8) {
                             if item.status == .question {
                                 Image(systemName: "questionmark.circle.fill")
-                                    .font(.system(size: 14))
+                                    .font(TarsyTheme.font(size: 14))
                                     .foregroundColor(TarsyTheme.accentAmber)
                                     .frame(width: 16, height: 16)
                             } else if item.status == .working {
@@ -96,13 +96,13 @@ struct VoiceTodoOverlay: View {
                                 }
                             } else {
                                 Image(systemName: "checkmark.circle.fill")
-                                    .font(.system(size: 12))
+                                    .font(TarsyTheme.font(size: 12))
                                     .foregroundColor(TarsyTheme.accentMoss)
                                     .frame(width: 16, height: 16)
                             }
 
                             Text(item.text)
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(TarsyTheme.font(size: 11))
                                 .foregroundColor(.white.opacity(0.8))
                                 .lineLimit(4)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -137,7 +137,7 @@ private struct ShakingIcon: View {
 
     var body: some View {
         Image(systemName: systemName)
-            .font(.system(size: size))
+            .font(TarsyTheme.font(size: size))
             .foregroundColor(color)
             .offset(x: shaking ? -1.5 : 0)
             .animation(.linear(duration: 0.06).repeatCount(5, autoreverses: true), value: shaking)
