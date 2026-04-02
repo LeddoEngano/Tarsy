@@ -46,11 +46,7 @@ struct LoginView: View {
 
                 // Logo
                 VStack(spacing: 12) {
-                    Image("TarsyLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 100, height: 100)
-                        .clipShape(RoundedRectangle(cornerRadius: 22))
+                    TarsyEyes(size: 100)
 
                     Text("TARSY")
                         .font(.system(size: 56, weight: .bold, design: .monospaced))

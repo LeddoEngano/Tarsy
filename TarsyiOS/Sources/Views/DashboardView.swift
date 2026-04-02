@@ -29,11 +29,7 @@ struct DashboardView: View {
                 // Custom header
                 HStack {
                     HStack(spacing: 8) {
-                        Image("TarsyLogo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 32, height: 32)
-                            .clipShape(RoundedRectangle(cornerRadius: 7))
+                        TarsyEyes(size: 32, animated: false)
                         Text("TARSY")
                             .font(.system(size: 24, weight: .bold, design: .monospaced))
                             .foregroundColor(TarsyTheme.accentAmber)

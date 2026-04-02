@@ -11,11 +11,7 @@ struct SplashView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 20) {
-                Image("TarsyLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 80, height: 80)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                TarsyEyes(size: 80)
 
                 Text("TARSY")
                     .font(.system(size: 48, weight: .bold, design: .monospaced))

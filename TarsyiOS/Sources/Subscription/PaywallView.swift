@@ -48,11 +48,7 @@ struct PaywallView: View {
 
                 // Hero section
                 VStack(spacing: 10) {
-                    Image("TarsyLogo")
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 56, height: 56)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                    TarsyEyes(size: 56)
 
                     Text("TARSY PRO")
                         .font(.system(size: 28, weight: .bold, design: .monospaced))
