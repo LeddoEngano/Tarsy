@@ -6,7 +6,7 @@ export default function Footer() {
       <div className="max-w-6xl mx-auto px-6 py-10 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2.5">
           <span className="text-sm font-bold text-amber tracking-[0.15em]">
-            TARSY
+            tarsy
           </span>
           <span className="text-[10px] text-taupe/30">|</span>
           <span className="text-[10px] text-taupe/50">

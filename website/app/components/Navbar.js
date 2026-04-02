@@ -7,7 +7,7 @@ export default function Navbar() {
         <Link href="/" className="flex items-center gap-2.5 no-underline">
           <img src="/icon.png" alt="Tarsy" className="w-7 h-7 rounded-lg" />
           <span className="text-base font-bold text-amber tracking-[0.15em]">
-            TARSY
+            tarsy
           </span>
         </Link>
         <div className="flex items-center gap-6">
