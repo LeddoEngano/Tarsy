@@ -51,7 +51,7 @@ targets:
       properties:
         com.apple.developer.applesignin:
           - Default
-        aps-environment: production
+        aps-environment: development
         com.apple.security.application-groups:
           - group.com.tarsy.ios
     settings:

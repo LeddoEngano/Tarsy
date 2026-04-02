@@ -61,7 +61,7 @@ actor OpenClawService {
     func startGateway() async throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: findOpenClawCLI())
-        process.arguments = ["gateway", "start"]
+        process.arguments = ["gateway", "start", "--host", "127.0.0.1"]
         process.environment = ProcessInfo.processInfo.environment
 
         let pipe = Pipe()
