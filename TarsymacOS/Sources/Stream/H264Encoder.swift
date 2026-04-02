@@ -116,7 +116,9 @@ class H264Encoder {
         )
 
         guard status == noErr, let session else {
+            #if DEBUG
             print("[Encoder] Failed to create compression session: \(status)")
+            #endif
             return
         }
 

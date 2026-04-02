@@ -228,7 +228,9 @@ class RemoteInputService {
         case "screenshot":
             break
         default:
+            #if DEBUG
             print("[RemoteInput] Unknown button: \(button)")
+            #endif
         }
     }
 
@@ -247,10 +249,14 @@ class RemoteInputService {
                 if process.terminationStatus != 0 {
                     let errData = (process.standardError as? Pipe)?.fileHandleForReading.readDataToEndOfFile()
                     let errStr = errData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                    #if DEBUG
                     print("[RemoteInput] Rotate failed: \(errStr)")
+                    #endif
                 }
             } catch {
+                #if DEBUG
                 print("[RemoteInput] Rotate error: \(error)")
+                #endif
             }
         }
     }
@@ -453,10 +459,14 @@ class RemoteInputService {
                 if process.terminationStatus != 0 {
                     let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
                     let errStr = String(data: errData, encoding: .utf8) ?? ""
+                    #if DEBUG
                     print("[RemoteInput] idb FAIL (\(process.terminationStatus)): \(escaped) — \(errStr.prefix(300))")
+                    #endif
                 }
             } catch {
+                #if DEBUG
                 print("[RemoteInput] idb ERROR: \(error) — cmd: \(escaped)")
+                #endif
             }
         }
     }
@@ -503,7 +513,9 @@ class RemoteInputService {
                     }
                 }
             } catch {
+                #if DEBUG
                 print("[RemoteInput] Failed to detect simulator: \(error)")
+                #endif
             }
         }
     }

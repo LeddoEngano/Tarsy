@@ -192,11 +192,9 @@ class TerminalSession {
         // nvm: list all node version dirs and add their bin/
         let nvmDir = "\(home)/.nvm/versions/node"
         let nvmDirExists = FileManager.default.fileExists(atPath: nvmDir)
-        print("[TerminalSession] nvm dir \(nvmDir) exists: \(nvmDirExists)")
         if nvmDirExists {
             do {
                 let versions = try FileManager.default.contentsOfDirectory(atPath: nvmDir)
-                print("[TerminalSession] nvm versions found: \(versions)")
                 for version in versions {
                     let binPath = "\(nvmDir)/\(version)/bin"
                     if FileManager.default.fileExists(atPath: binPath) {
@@ -204,7 +202,9 @@ class TerminalSession {
                     }
                 }
             } catch {
+                #if DEBUG
                 print("[TerminalSession] ERROR listing nvm dir: \(error)")
+                #endif
             }
         }
 
@@ -232,8 +232,9 @@ class TerminalSession {
         let currentPath = env["PATH"] ?? "/usr/bin:/bin"
         let enrichedPath = (resolvedPaths + [currentPath]).joined(separator: ":")
         env["PATH"] = enrichedPath
+        #if DEBUG
         print("[TerminalSession] Enriched PATH additions: \(resolvedPaths)")
-        print("[TerminalSession] Full PATH: \(enrichedPath)")
+        #endif
         process.environment = env
 
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in

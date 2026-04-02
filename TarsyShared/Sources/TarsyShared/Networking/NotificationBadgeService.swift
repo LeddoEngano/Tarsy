@@ -32,7 +32,9 @@ public class NotificationBadgeService: ObservableObject {
             }
             unreadCounts = counts
         } catch {
+            #if DEBUG
             print("[NotificationBadgeService] Failed to fetch unread counts: \(error)")
+            #endif
         }
     }
 
@@ -54,7 +56,9 @@ public class NotificationBadgeService: ObservableObject {
                 .is("read_at", value: nil)
                 .execute()
         } catch {
+            #if DEBUG
             print("[NotificationBadgeService] Failed to clear badge: \(error)")
+            #endif
             await refreshCounts()
         }
     }

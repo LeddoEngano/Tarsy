@@ -144,7 +144,9 @@ class ScreenCaptureService: NSObject, ObservableObject {
         do {
             try await startCapture(window: window, fps: fps, scale: scale)
         } catch {
+            #if DEBUG
             print("[ScreenCapture] Error starting capture: \(error)")
+            #endif
         }
     }
 

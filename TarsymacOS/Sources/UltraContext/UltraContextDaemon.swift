@@ -23,7 +23,9 @@ actor UltraContextSync {
     private func post(_ payload: [String: String]) async throws -> Data {
         guard let url = URL(string: proxyURL) else { throw URLError(.badURL) }
         guard let token = await authToken() else { throw URLError(.userAuthenticationRequired) }
-        print("[UltraContext] POST \(proxyURL) action=\(payload["action"] ?? "?")")
+        #if DEBUG
+        print("[UltraContext] POST action=\(payload["action"] ?? "?")")
+        #endif
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -33,7 +35,9 @@ actor UltraContextSync {
         let (data, response) = try await URLSession.shared.data(for: req)
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
             let body = String(data: data, encoding: .utf8) ?? ""
+            #if DEBUG
             print("[UltraContext] HTTP \(http.statusCode): \(body)")
+            #endif
         }
         return data
     }
@@ -80,7 +84,9 @@ actor UltraContextSync {
             contextMap[sessionId] = ctxId
             return ctxId
         } catch {
+            #if DEBUG
             print("[UltraContext] Create context error: \(error)")
+            #endif
             return nil
         }
     }
@@ -90,7 +96,9 @@ actor UltraContextSync {
         do {
             try await appendMessage(contextId: ctxId, role: "user", content: String(content.prefix(8000)))
         } catch {
+            #if DEBUG
             print("[UltraContext] Append user message error: \(error)")
+            #endif
         }
     }
 
@@ -101,7 +109,9 @@ actor UltraContextSync {
         do {
             try await appendMessage(contextId: ctxId, role: "assistant", content: String(content.prefix(8000)))
         } catch {
+            #if DEBUG
             print("[UltraContext] Append output error: \(error)")
+            #endif
         }
     }
 
@@ -110,7 +120,9 @@ actor UltraContextSync {
         do {
             try await appendMessage(contextId: ctxId, role: "assistant", content: "[completed] \(String(summary.prefix(4000)))")
         } catch {
+            #if DEBUG
             print("[UltraContext] Complete error: \(error)")
+            #endif
         }
         contextMap.removeValue(forKey: sessionId)
     }

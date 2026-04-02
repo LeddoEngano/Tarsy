@@ -28,7 +28,9 @@ actor SessionFileWatcher {
     func start() {
         guard !isRunning else { return }
         isRunning = true
+        #if DEBUG
         print("[SessionWatcher] Watching \(claudeDir)")
+        #endif
 
         // Initial scan: just mark current file sizes, don't process existing content
         Task { await markExistingFiles() }
@@ -60,7 +62,9 @@ actor SessionFileWatcher {
                 watchedFiles[fullPath] = size
             }
         }
+        #if DEBUG
         print("[SessionWatcher] Marked \(watchedFiles.count) existing files, watching for new content")
+        #endif
     }
 
     // MARK: - Scan
@@ -195,7 +199,9 @@ actor SessionFileWatcher {
                 let ctxId = try await createContext(sessionId: sessionId, cwd: parsed.cwd)
                 sessionContextMap[sessionId] = ctxId
             } catch {
+                #if DEBUG
                 print("[SessionWatcher] Create context error: \(error)")
+                #endif
                 return
             }
         }
@@ -205,7 +211,9 @@ actor SessionFileWatcher {
         do {
             try await appendMessage(contextId: ctxId, role: role, content: String(trimmed.prefix(8000)))
         } catch {
+            #if DEBUG
             print("[SessionWatcher] Append error: \(error)")
+            #endif
         }
     }
 
@@ -227,7 +235,9 @@ actor SessionFileWatcher {
         let (data, response) = try await URLSession.shared.data(for: req)
         if let http = response as? HTTPURLResponse, http.statusCode >= 400 {
             let body = String(data: data, encoding: .utf8) ?? ""
+            #if DEBUG
             print("[SessionWatcher] HTTP \(http.statusCode): \(body)")
+            #endif
         }
         return data
     }
@@ -240,7 +250,9 @@ actor SessionFileWatcher {
         payload["engine_type"] = "claude"
         let data = try await post(payload)
         let decoded = try JSONDecoder().decode(CreateResponse.self, from: data)
+        #if DEBUG
         print("[SessionWatcher] Created context \(decoded.id) for session \(sessionId.prefix(8))")
+        #endif
         return decoded.id
     }
 

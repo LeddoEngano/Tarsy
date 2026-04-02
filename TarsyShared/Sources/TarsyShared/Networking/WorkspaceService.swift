@@ -83,7 +83,9 @@ public class WorkspaceService: ObservableObject {
                 .execute()
                 .value
         } catch {
+            #if DEBUG
             print("[WorkspaceService] Fetch error: \(error)")
+            #endif
         }
         isLoading = false
     }

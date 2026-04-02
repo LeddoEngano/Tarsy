@@ -42,7 +42,9 @@ public class ChatService: ObservableObject {
             }
             return full
         } catch {
+            #if DEBUG
             print("[ChatService] UltraContext load error: \(error)")
+            #endif
             return nil
         }
     }

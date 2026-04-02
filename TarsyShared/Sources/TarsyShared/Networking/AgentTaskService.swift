@@ -21,7 +21,9 @@ public class AgentTaskService: ObservableObject {
                 .execute()
                 .value
         } catch {
+            #if DEBUG
             print("[AgentTaskService] Load error: \(error)")
+            #endif
         }
         isLoading = false
     }
@@ -37,7 +39,9 @@ public class AgentTaskService: ObservableObject {
                 .execute()
                 .value
         } catch {
+            #if DEBUG
             print("[AgentTaskService] Load workspace tasks error: \(error)")
+            #endif
             return []
         }
     }
@@ -72,7 +76,9 @@ public class AgentTaskService: ObservableObject {
             }
             return created
         } catch {
+            #if DEBUG
             print("[AgentTaskService] Create error: \(error)")
+            #endif
             return nil
         }
     }
@@ -105,7 +111,9 @@ public class AgentTaskService: ObservableObject {
                 }
             }
         } catch {
+            #if DEBUG
             print("[AgentTaskService] Update error: \(error)")
+            #endif
         }
     }
 
@@ -128,7 +136,9 @@ public class AgentTaskService: ObservableObject {
                 .lt("updated_at", value: formatter.string(from: cutoff))
                 .execute()
         } catch {
+            #if DEBUG
             print("[AgentTaskService] Cleanup error: \(error)")
+            #endif
         }
     }
 }

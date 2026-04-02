@@ -169,7 +169,9 @@ public class UltraContextClient: ObservableObject {
         do {
             sessions = try await listContexts()
         } catch {
+            #if DEBUG
             print("[UltraContext] Load sessions error: \(error)")
+            #endif
         }
         isLoading = false
     }

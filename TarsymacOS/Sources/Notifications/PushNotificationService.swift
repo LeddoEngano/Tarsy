@@ -126,7 +126,9 @@ class PushNotificationService {
                 options: .init(body: body)
             )
         } catch {
+            #if DEBUG
             print("[Push] Live Activity update failed: \(error)")
+            #endif
         }
     }
 
@@ -144,7 +146,9 @@ class PushNotificationService {
                 .insert(payload)
                 .execute()
         } catch {
+            #if DEBUG
             print("[Push] Failed to send remote push: \(error)")
+            #endif
         }
     }
 }

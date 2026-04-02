@@ -19,17 +19,25 @@ final class TLSCertificateManager {
     /// Generates a new identity on first call if none exists in Keychain.
     func getOrCreateIdentity() -> SecIdentity? {
         if let existing = loadIdentityFromKeychain() {
+            #if DEBUG
             print("[TLS] Loaded existing identity from Keychain")
+            #endif
             return existing
         }
 
+        #if DEBUG
         print("[TLS] No existing identity found, generating new self-signed certificate...")
+        #endif
         guard let identity = generateSelfSignedIdentity() else {
+            #if DEBUG
             print("[TLS] Failed to generate self-signed identity")
+            #endif
             return nil
         }
 
+        #if DEBUG
         print("[TLS] Self-signed identity generated and stored in Keychain")
+        #endif
         return identity
     }
 
@@ -88,18 +96,24 @@ final class TLSCertificateManager {
         }
 
         guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
+            #if DEBUG
             print("[TLS] Failed to extract public key")
+            #endif
             return nil
         }
 
         // 2. Create self-signed certificate using the system's certificate creation
         guard let certData = createSelfSignedCertificateData(publicKey: publicKey, privateKey: privateKey) else {
+            #if DEBUG
             print("[TLS] Failed to create certificate data")
+            #endif
             return nil
         }
 
         guard let certificate = SecCertificateCreateWithData(nil, certData as CFData) else {
+            #if DEBUG
             print("[TLS] Failed to create SecCertificate from data")
+            #endif
             return nil
         }
 
@@ -113,7 +127,9 @@ final class TLSCertificateManager {
 
         let addStatus = SecItemAdd(addCertQuery as CFDictionary, nil)
         guard addStatus == errSecSuccess || addStatus == errSecDuplicateItem else {
+            #if DEBUG
             print("[TLS] Failed to store certificate in Keychain: \(addStatus)")
+            #endif
             return nil
         }
 
@@ -128,7 +144,9 @@ final class TLSCertificateManager {
         // This is the most reliable way to create a self-signed cert on macOS
         // Export private key to PEM (in memory only — never written to disk)
         guard let keyData = SecKeyCopyExternalRepresentation(privateKey, nil) as Data? else {
+            #if DEBUG
             print("[TLS] Failed to export private key")
+            #endif
             return nil
         }
 
@@ -170,17 +188,23 @@ final class TLSCertificateManager {
             genCert.waitUntilExit()
 
             guard genCert.terminationStatus == 0 else {
+                #if DEBUG
                 print("[TLS] openssl cert generation failed with status \(genCert.terminationStatus)")
+                #endif
                 return nil
             }
         } catch {
+            #if DEBUG
             print("[TLS] openssl process failed: \(error)")
+            #endif
             return nil
         }
 
         let derData = certOutputPipe.fileHandleForReading.readDataToEndOfFile()
         guard !derData.isEmpty else {
+            #if DEBUG
             print("[TLS] Empty DER data from openssl")
+            #endif
             return nil
         }
 
@@ -237,6 +261,8 @@ final class TLSCertificateManager {
         for query in queries {
             SecItemDelete(query as CFDictionary)
         }
+        #if DEBUG
         print("[TLS] Identity deleted from Keychain")
+        #endif
     }
 }

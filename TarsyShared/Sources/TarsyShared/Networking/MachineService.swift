@@ -47,7 +47,9 @@ public class MachineService: ObservableObject {
             }
             isOnline = machine?.isRecentlyOnline ?? false
         } catch {
+            #if DEBUG
             print("[MachineService] Fetch error: \(error)")
+            #endif
         }
     }
 

@@ -63,7 +63,9 @@ actor ClaudeCodeSession: AIEngine {
         let expandedPath = (workspacePath as NSString).expandingTildeInPath
         let claudePath = findClaudeCLI()
 
-        print("[ClaudeCode] Starting bidirectional session \(id) at \(expandedPath)")
+        #if DEBUG
+        print("[ClaudeCode] Starting session \(id) at \(expandedPath)")
+        #endif
 
         var args = [
             "-p",
@@ -128,7 +130,9 @@ actor ClaudeCodeSession: AIEngine {
         self.stdinPipe = stdin
         self.isRunning = true
 
+        #if DEBUG
         print("[ClaudeCode] Session \(id) started with PID \(proc.processIdentifier)")
+        #endif
         onOutput?("\(AIEngineType.claude.readyMessage)\n")
     }
 
@@ -138,11 +142,15 @@ actor ClaudeCodeSession: AIEngine {
 
     func sendMessage(_ message: String, imagesJson: String?) {
         guard isRunning, let pipe = stdinPipe else {
+            #if DEBUG
             print("[ClaudeCode] Cannot send — process not running")
+            #endif
             return
         }
 
-        print("[ClaudeCode] Sending message (isRunning=\(isRunning), hasImages=\(imagesJson != nil)): \(message.prefix(80))...")
+        #if DEBUG
+        print("[ClaudeCode] Sending message: \(message.prefix(80))...")
+        #endif
 
         // Build content: if images are provided, use multimodal content blocks
         let content: Any
@@ -188,7 +196,9 @@ actor ClaudeCodeSession: AIEngine {
     func respondToQuestion(_ answer: String) {
         guard isRunning, let pipe = stdinPipe else { return }
 
+        #if DEBUG
         print("[ClaudeCode] Responding to question: \(answer)")
+        #endif
 
         // Send user response for AskUserQuestion
         let msg: [String: Any] = [
@@ -317,7 +327,9 @@ actor ClaudeCodeSession: AIEngine {
             if let subtype = json["subtype"] as? String, subtype == "init" {
                 if let sid = json["session_id"] as? String {
                     sessionId = sid
+                    #if DEBUG
                     print("[ClaudeCode] Session initialized: \(sid)")
+                    #endif
                     onSessionId?(sid)
                 }
             }
@@ -375,7 +387,9 @@ actor ClaudeCodeSession: AIEngine {
                     ])
                 }
 
+                #if DEBUG
                 print("[ClaudeCode] AskUserQuestion: \(questionsPayload.count) questions")
+                #endif
 
                 // Send all questions as JSON to iOS via onAskUser
                 if let jsonData = try? JSONSerialization.data(withJSONObject: questionsPayload),
@@ -404,11 +418,15 @@ actor ClaudeCodeSession: AIEngine {
               let input = request["input"] as? [String: Any] else { return }
 
         let reason = request["decision_reason"] as? String ?? ""
+        #if DEBUG
         print("[ClaudeCode] control_request: \(toolName) — \(reason)")
+        #endif
 
         // Auto-approve if tool was "Always Allowed" this session
         if alwaysAllowedTools.contains(toolName) {
+            #if DEBUG
             print("[ClaudeCode] Auto-approving \(toolName) (always allowed)")
+            #endif
             sendControlResponse(requestId: requestId, allow: true, input: input)
             return
         }
@@ -432,7 +450,9 @@ actor ClaudeCodeSession: AIEngine {
         let toolName = cleanInput.removeValue(forKey: "_tool_name") as? String
         cleanInput.removeValue(forKey: "_decision_reason")
 
+        #if DEBUG
         print("[ClaudeCode] Permission response: \(answer) for request \(requestId)")
+        #endif
 
         if answer.contains("Deny") {
             sendControlResponse(requestId: requestId, allow: false, input: nil)
@@ -441,7 +461,9 @@ actor ClaudeCodeSession: AIEngine {
             // "Always Allow" — remember tool for this session
             if answer.contains("Always"), let name = toolName {
                 alwaysAllowedTools.insert(name)
+                #if DEBUG
                 print("[ClaudeCode] Added \(name) to always-allowed tools")
+                #endif
             }
         }
         pendingPermissions.removeValue(forKey: requestId)
@@ -485,7 +507,9 @@ actor ClaudeCodeSession: AIEngine {
     private func handleExit() {
         isRunning = false
         onComplete?("Session ended")
+        #if DEBUG
         print("[ClaudeCode] Session \(id) exited")
+        #endif
     }
 
     private func findClaudeCLI() -> String {
@@ -504,7 +528,9 @@ actor ClaudeCodeSession: AIEngine {
         for path in paths {
             if FileManager.default.fileExists(atPath: path) { return path }
         }
+        #if DEBUG
         print("[ClaudeCode] WARNING: claude CLI not found in any of: \(paths)")
+        #endif
         return "/opt/homebrew/bin/claude"
     }
 }
