@@ -11,7 +11,7 @@ private enum Theme {
     static let textSecondary = Color(hex: "71717a")
     static let textMuted = Color(hex: "52525b")
     static let amber = Color(hex: "ffffff")
-    static let moss = Color(hex: "6bc77b")
+    static let moss = Color(hex: "ffffff")
     static let terracotta = Color(hex: "e5716a")
 }
 
