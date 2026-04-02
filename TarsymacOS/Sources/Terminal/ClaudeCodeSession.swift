@@ -15,6 +15,7 @@ actor ClaudeCodeSession: AIEngine {
     private var onOutput: (@Sendable (String) -> Void)?
     private var onComplete: (@Sendable (String) -> Void)?
     private var onAskUser: (@Sendable (String, [String]) -> Void)?
+    private var onPermissionRequest: (@Sendable (String, String, [String: Any]) -> Void)?
     private var onStatusUpdate: (@Sendable (String, Int, Int, Int) -> Void)?  // (model, input, output, contextWindow)
     private var onSessionId: (@Sendable (String) -> Void)?
     private var pendingAskUser = false // Track if last turn ended with AskUserQuestion
@@ -23,6 +24,9 @@ actor ClaudeCodeSession: AIEngine {
     private var lastModel: String = ""  // Last known model name
     private var lastContextWindow: Int = 0  // Context window from modelUsage
     private var lineBuffer: String = "" // Accumulates partial JSON lines between reads
+    // Permission protocol state
+    private var pendingPermissions: [String: [String: Any]] = [:]  // requestId -> tool input
+    private var alwaysAllowedTools: Set<String> = []  // Session-level auto-approved tools
 
     init(id: String, workspacePath: String, aiContext: String? = nil, permissionMode: AgentPermissionConfig.PermissionMode = .dangerous) {
         self.id = id
@@ -41,6 +45,10 @@ actor ClaudeCodeSession: AIEngine {
 
     func setAskUserHandler(_ handler: @escaping @Sendable (String, [String]) -> Void) {
         self.onAskUser = handler
+    }
+
+    func setPermissionHandler(_ handler: @escaping @Sendable (String, String, [String: Any]) -> Void) {
+        self.onPermissionRequest = handler
     }
 
     func setStatusHandler(_ handler: @escaping @Sendable (String, Int, Int, Int) -> Void) {
@@ -66,6 +74,9 @@ actor ClaudeCodeSession: AIEngine {
 
         if permissionMode == .dangerous {
             args.insert("--dangerously-skip-permissions", at: 1)
+        } else {
+            // Enable stdio-based permission prompts for remote approval from iOS
+            args.append(contentsOf: ["--permission-prompt-tool", "stdio"])
         }
 
         if let ctx = aiContext, !ctx.isEmpty {
@@ -311,6 +322,9 @@ actor ClaudeCodeSession: AIEngine {
                 }
             }
 
+        case "control_request":
+            handleControlRequest(json)
+
         default:
             break
         }
@@ -377,6 +391,91 @@ actor ClaudeCodeSession: AIEngine {
                     ?? input["query"] as? String
                     ?? name
                 onOutput?("🔧 \(name): \(desc)\n")
+            }
+        }
+    }
+
+    // MARK: - Permission Protocol (control_request / control_response)
+
+    private func handleControlRequest(_ json: [String: Any]) {
+        guard let requestId = json["request_id"] as? String,
+              let request = json["request"] as? [String: Any],
+              let toolName = request["tool_name"] as? String,
+              let input = request["input"] as? [String: Any] else { return }
+
+        let reason = request["decision_reason"] as? String ?? ""
+        print("[ClaudeCode] control_request: \(toolName) — \(reason)")
+
+        // Auto-approve if tool was "Always Allowed" this session
+        if alwaysAllowedTools.contains(toolName) {
+            print("[ClaudeCode] Auto-approving \(toolName) (always allowed)")
+            sendControlResponse(requestId: requestId, allow: true, input: input)
+            return
+        }
+
+        // Store pending permission with metadata for later response
+        var storedInput = input
+        storedInput["_decision_reason"] = reason
+        storedInput["_tool_name"] = toolName
+        pendingPermissions[requestId] = storedInput
+
+        // Forward to iOS via handler
+        onPermissionRequest?(requestId, toolName, storedInput)
+    }
+
+    func respondToPermission(requestId: String, answer: String) {
+        guard isRunning, let pipe = stdinPipe else { return }
+
+        let stored = pendingPermissions[requestId]
+        // Clean input: remove injected metadata fields
+        var cleanInput = stored ?? [:]
+        let toolName = cleanInput.removeValue(forKey: "_tool_name") as? String
+        cleanInput.removeValue(forKey: "_decision_reason")
+
+        print("[ClaudeCode] Permission response: \(answer) for request \(requestId)")
+
+        if answer.contains("Deny") {
+            sendControlResponse(requestId: requestId, allow: false, input: nil)
+        } else {
+            sendControlResponse(requestId: requestId, allow: true, input: cleanInput)
+            // "Always Allow" — remember tool for this session
+            if answer.contains("Always"), let name = toolName {
+                alwaysAllowedTools.insert(name)
+                print("[ClaudeCode] Added \(name) to always-allowed tools")
+            }
+        }
+        pendingPermissions.removeValue(forKey: requestId)
+    }
+
+    private func sendControlResponse(requestId: String, allow: Bool, input: [String: Any]?) {
+        guard let pipe = stdinPipe else { return }
+
+        let response: [String: Any]
+        if allow {
+            response = [
+                "type": "control_response",
+                "request_id": requestId,
+                "response": [
+                    "behavior": "allow",
+                    "updatedInput": input ?? [:]
+                ] as [String: Any]
+            ]
+        } else {
+            response = [
+                "type": "control_response",
+                "request_id": requestId,
+                "response": [
+                    "behavior": "deny",
+                    "message": "User denied this action"
+                ] as [String: Any]
+            ]
+        }
+
+        if let data = try? JSONSerialization.data(withJSONObject: response),
+           var jsonStr = String(data: data, encoding: .utf8) {
+            jsonStr += "\n"
+            if let bytes = jsonStr.data(using: .utf8) {
+                pipe.fileHandleForWriting.write(bytes)
             }
         }
     }

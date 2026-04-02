@@ -76,6 +76,14 @@ actor TerminalSessionManager {
         await claudeSessions[sessionId]?.respondToQuestion(answer)
     }
 
+    func setClaudePermissionHandler(sessionId: String, handler: @escaping @Sendable (String, String, [String: Any]) -> Void) async {
+        await claudeSessions[sessionId]?.setPermissionHandler(handler)
+    }
+
+    func respondToClaudePermission(_ requestId: String, answer: String, sessionId: String) async {
+        await claudeSessions[sessionId]?.respondToPermission(requestId: requestId, answer: answer)
+    }
+
     func closeClaudeSession(_ sessionId: String) async {
         await claudeSessions[sessionId]?.terminate()
         claudeSessions.removeValue(forKey: sessionId)
