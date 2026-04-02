@@ -89,6 +89,14 @@ public class AuthManager: ObservableObject {
                 return
             }
 
+            // Extract full name from Apple credential (only provided on first sign-in)
+            let fullName: String? = {
+                guard let nameComponents = appleIDCredential.fullName else { return nil }
+                let formatter = PersonNameComponentsFormatter()
+                let formatted = formatter.string(from: nameComponents).trimmingCharacters(in: .whitespaces)
+                return formatted.isEmpty ? nil : formatted
+            }()
+
             do {
                 let session = try await supabase.auth.signInWithIdToken(
                     credentials: .init(
@@ -97,7 +105,14 @@ public class AuthManager: ObservableObject {
                         nonce: currentNonce
                     )
                 )
-                currentUser = session.user
+
+                // Save Apple-provided name to user metadata so the profile picks it up
+                if let fullName {
+                    let updatedUser = try? await supabase.auth.update(user: UserAttributes(data: ["full_name": .string(fullName)]))
+                    currentUser = updatedUser ?? session.user
+                } else {
+                    currentUser = session.user
+                }
                 isAuthenticated = true
             } catch {
                 errorMessage = error.localizedDescription
