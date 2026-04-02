@@ -3,16 +3,16 @@ import TarsyShared
 import AuthenticationServices
 
 private enum Theme {
-    static let bg = Color(hex: "1a1a1a")
-    static let bgCard = Color(hex: "2a2a2a")
-    static let bgField = Color(hex: "252525")
-    static let border = Color(hex: "3a3a3a")
-    static let textPrimary = Color(hex: "e8e0d4")
-    static let textSecondary = Color(hex: "a89e91")
-    static let textMuted = Color(hex: "6b6b6b")
-    static let amber = Color(hex: "d4a574")
-    static let moss = Color(hex: "7a8b6f")
-    static let terracotta = Color(hex: "c4704b")
+    static let bg = Color(hex: "0a0a0a")
+    static let bgCard = Color(hex: "111111")
+    static let bgField = Color(hex: "181818")
+    static let border = Color(hex: "222222")
+    static let textPrimary = Color(hex: "ededed")
+    static let textSecondary = Color(hex: "666666")
+    static let textMuted = Color(hex: "555555")
+    static let amber = Color(hex: "ffffff")
+    static let moss = Color(hex: "b0b0b0")
+    static let terracotta = Color(hex: "888888")
 }
 
 struct SettingsView: View {

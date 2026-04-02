@@ -1,19 +1,18 @@
 import SwiftUI
 import TarsyShared
-import ScreenCaptureKit
 import AuthenticationServices
 
 private enum Theme {
-    static let bg = Color(hex: "1a1a1a")
-    static let bgCard = Color(hex: "2a2a2a")
-    static let bgField = Color(hex: "252525")
-    static let border = Color(hex: "3a3a3a")
-    static let textPrimary = Color(hex: "e8e0d4")
-    static let textSecondary = Color(hex: "a89e91")
-    static let textMuted = Color(hex: "6b6b6b")
-    static let amber = Color(hex: "d4a574")
-    static let moss = Color(hex: "7a8b6f")
-    static let terracotta = Color(hex: "c4704b")
+    static let bg = Color(hex: "0a0a0a")
+    static let bgCard = Color(hex: "111111")
+    static let bgField = Color(hex: "181818")
+    static let border = Color(hex: "222222")
+    static let textPrimary = Color(hex: "ededed")
+    static let textSecondary = Color(hex: "666666")
+    static let textMuted = Color(hex: "555555")
+    static let amber = Color(hex: "ffffff")
+    static let moss = Color(hex: "b0b0b0")
+    static let terracotta = Color(hex: "888888")
 }
 
 struct OnboardingWindow: View {
@@ -459,7 +458,11 @@ struct OnboardingWindow: View {
     }
 
     private func grantCurrentPermission() {
-        if permissionSubStep == .automation {
+        if permissionSubStep == .screenRecording {
+            // CGRequestScreenCaptureAccess() registers the app in the Screen Recording
+            // list AND opens System Settings. Just opening Settings doesn't add the app.
+            CGRequestScreenCaptureAccess()
+        } else if permissionSubStep == .automation {
             requestAutomationPermission()
         } else if let key = permissionInfo(for: permissionSubStep).settingsKey {
             openSettings(key)
@@ -671,23 +674,11 @@ struct OnboardingWindow: View {
         return result != .apiDisabled
     }
 
-    /// Check screen recording permission without triggering the system dialog.
-    /// CGPreflightScreenCaptureAccess() is unreliable on macOS 15+.
-    /// Instead, check if we can read window names from other processes —
-    /// this only works when screen recording permission is granted.
+    /// Check screen recording permission using CGPreflightScreenCaptureAccess().
+    /// NOTE: CGWindowListCopyWindowInfo is NOT reliable on macOS 15+ — it returns
+    /// window names for system windows even WITHOUT screen recording permission.
     private func checkScreenRecordingPermission() -> Bool {
-        guard let windowList = CGWindowListCopyWindowInfo([.optionOnScreenOnly], kCGNullWindowID) as? [[String: Any]] else {
-            return false
-        }
-        let myPID = ProcessInfo.processInfo.processIdentifier
-        for window in windowList {
-            guard let ownerPID = window[kCGWindowOwnerPID as String] as? Int32,
-                  ownerPID != myPID else { continue }
-            if let name = window[kCGWindowName as String] as? String, !name.isEmpty {
-                return true
-            }
-        }
-        return false
+        CGPreflightScreenCaptureAccess()
     }
 
     private func preAccessDirectories() -> Bool {
