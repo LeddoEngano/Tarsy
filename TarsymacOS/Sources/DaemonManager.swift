@@ -25,6 +25,11 @@ class DaemonManager: ObservableObject {
     private let remoteInput = RemoteInputService()
     private let relayClient = RelayClient()
     private var heartbeatTimer: Timer?
+    private var tokenRefreshTimer: Timer?
+    private var tokenRetryTask: Task<Void, Never>?
+    private var sleepObserver: Any?
+    private var wakeObserver: Any?
+    private var isReconnectingRelay = false
     private var devServerSessions: [String: String] = [:] // workspacePath -> terminalSessionId
     private var devServerDetectedPorts: [String: Int] = [:] // workspacePath -> detected port
     private var displaySleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
@@ -111,8 +116,10 @@ class DaemonManager: ObservableObject {
         // 3. Connect to relay for remote access
         await connectRelay()
 
-        // 4. Start heartbeat
+        // 4. Start heartbeat + token refresh + sleep/wake monitoring
         startHeartbeat()
+        startTokenRefresh()
+        observeSleepWake()
 
         preventSleep()
 
@@ -143,10 +150,16 @@ class DaemonManager: ObservableObject {
 
     func stop() {
         allowSleep()
+        removeSleepWakeObservers()
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
+        tokenRefreshTimer?.invalidate()
+        tokenRefreshTimer = nil
+        tokenRetryTask?.cancel()
+        tokenRetryTask = nil
         Task {
             await updateMachineStatus("offline")
+            await relayClient.disconnect()
             await wsServer?.stop()
         }
         isRunning = false
@@ -347,6 +360,17 @@ class DaemonManager: ObservableObject {
                     // Handle relay packets like local WebSocket packets
                     // Use "relay" as clientId so responses go back through relay
                     await self?.handlePacket(clientId: "relay", packet: packet)
+                }
+            },
+            onConnectionStateChanged: { [weak self] connected, attempt in
+                Task { @MainActor in
+                    if connected {
+                        self?.log("Relay connected")
+                    } else if attempt > 0 {
+                        self?.log("Relay disconnected — reconnecting (attempt \(attempt))")
+                    } else {
+                        self?.log("Relay disconnected — reconnecting automatically")
+                    }
                 }
             }
         )
@@ -1706,7 +1730,7 @@ class DaemonManager: ObservableObject {
             return
         }
 
-        log("streamStart: stack=\(stack), openClaw=\(isOpenClaw), streamUrl=\(streamUrl ?? "nil")")
+        log("streamStart: stack=\(stack), openClaw=\(isOpenClaw), streamUrl=\(streamUrl ?? "nil"), permission=\(CGPreflightScreenCaptureAccess()), capturing=\(screenCapture.isCapturing)")
 
         // H.264 hardware encoding for ALL connections (LAN + relay)
         let ipPayload = packet.payload?["ip"] ?? ""
@@ -2056,12 +2080,22 @@ class DaemonManager: ObservableObject {
         return address
     }
 
+    private static let maxDebugLogLength = 50_000 // ~500 lines
+
     private func log(_ msg: String) {
         let entry = "[\(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium))] \(msg)"
         #if DEBUG
         print(entry)
         #endif
         debugLog += entry + "\n"
+        // Trim to prevent unbounded memory growth in long-running sessions
+        if debugLog.count > Self.maxDebugLogLength {
+            let trimPoint = debugLog.index(debugLog.endIndex, offsetBy: -Self.maxDebugLogLength / 2)
+            // Find next newline to keep clean line boundaries
+            if let newlineIdx = debugLog[trimPoint...].firstIndex(of: "\n") {
+                debugLog = "... (log trimmed) ...\n" + String(debugLog[debugLog.index(after: newlineIdx)...])
+            }
+        }
     }
 
     private func registerMachine() async {
@@ -2255,6 +2289,7 @@ class DaemonManager: ObservableObject {
                 .eq("id", value: id.uuidString)
                 .execute()
         } catch {
+            log("Heartbeat failed: \(error.localizedDescription)")
         }
     }
 
@@ -2357,21 +2392,23 @@ class DaemonManager: ObservableObject {
                 )
 
                 // Set status handler for model/usage info
-                await terminalManager.setClaudeStatusHandler(sessionId: sid) { [weak self] model, inputTokens, outputTokens in
+                await terminalManager.setClaudeStatusHandler(sessionId: sid) { [weak self] model, inputTokens, outputTokens, contextWindow in
                     Task {
                         guard let self else { return }
+                        var payload = [
+                            "sessionId": sid,
+                            "model": model,
+                            "inputTokens": "\(inputTokens)",
+                            "outputTokens": "\(outputTokens)"
+                        ]
+                        if contextWindow > 0 { payload["contextWindow"] = "\(contextWindow)" }
                         await self.sendToClientOrRelay(
-                            WSPacket(action: .engineStatus, payload: [
-                                "sessionId": sid,
-                                "model": model,
-                                "inputTokens": "\(inputTokens)",
-                                "outputTokens": "\(outputTokens)"
-                            ]),
+                            WSPacket(action: .engineStatus, payload: payload),
                             to: self.lastActiveClientId
                         )
                         // Track context percent for Live Activity push updates
                         let total = inputTokens + outputTokens
-                        let windowSize = model.contains("opus") ? 1_000_000 : 200_000
+                        let windowSize = contextWindow > 0 ? contextWindow : (model.contains("opus") ? 1_000_000 : 200_000)
                         await MainActor.run {
                             self.sessionContextPercent[sid] = Double(total) / Double(windowSize) * 100
                         }
@@ -2794,14 +2831,16 @@ class DaemonManager: ObservableObject {
                     }
                 )
 
-                await terminalManager.setClaudeStatusHandler(sessionId: sid) { [weak self] model, inputTokens, outputTokens in
+                await terminalManager.setClaudeStatusHandler(sessionId: sid) { [weak self] model, inputTokens, outputTokens, contextWindow in
                     Task {
                         guard let self else { return }
+                        var payload = [
+                            "sessionId": sid, "model": model,
+                            "inputTokens": "\(inputTokens)", "outputTokens": "\(outputTokens)"
+                        ]
+                        if contextWindow > 0 { payload["contextWindow"] = "\(contextWindow)" }
                         await self.sendToClientOrRelay(
-                            WSPacket(action: .engineStatus, payload: [
-                                "sessionId": sid, "model": model,
-                                "inputTokens": "\(inputTokens)", "outputTokens": "\(outputTokens)"
-                            ]),
+                            WSPacket(action: .engineStatus, payload: payload),
                             to: self.lastActiveClientId
                         )
                     }
@@ -3789,9 +3828,96 @@ class DaemonManager: ObservableObject {
     private func startHeartbeat() {
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task {
-                await self?.updateMachineStatus("online")
+                await self?.heartbeatTick()
             }
         }
+    }
+
+    private func heartbeatTick() async {
+        // 1. Update machine status in Supabase
+        await updateMachineStatus("online")
+
+        // 2. Check relay connection health — force reconnect if dead
+        let relayConnected = await relayClient.connected
+        if !relayConnected && !isReconnectingRelay {
+            isReconnectingRelay = true
+            log("Heartbeat: relay is disconnected, forcing reconnect")
+            await relayClient.forceReconnect()
+            isReconnectingRelay = false
+        }
+    }
+
+    // MARK: - Periodic Token Refresh
+
+    private func startTokenRefresh() {
+        // Refresh auth token every 45 minutes (tokens expire after ~1 hour)
+        tokenRefreshTimer = Timer.scheduledTimer(withTimeInterval: 45 * 60, repeats: true) { [weak self] _ in
+            Task {
+                await self?.refreshAuthToken()
+            }
+        }
+    }
+
+    private func refreshAuthToken() async {
+        do {
+            let refreshed = try await supabase.auth.refreshSession()
+            cachedAuthToken = refreshed.accessToken
+            // Update relay client's token so it uses the fresh one
+            await relayClient.updateToken(refreshed.accessToken)
+            tokenRetryTask = nil
+            log("Auth token refreshed successfully")
+        } catch {
+            log("Auth token refresh failed: \(error.localizedDescription)")
+            // Retry once in 5 minutes (e.g., network not ready after wake)
+            tokenRetryTask?.cancel()
+            tokenRetryTask = Task {
+                try? await Task.sleep(nanoseconds: 5 * 60 * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                await self.refreshAuthToken()
+            }
+        }
+    }
+
+    // MARK: - Sleep/Wake Monitoring
+
+    private func observeSleepWake() {
+        let center = NSWorkspace.shared.notificationCenter
+
+        sleepObserver = center.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.log("System going to sleep")
+        }
+
+        wakeObserver = center.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.log("System woke from sleep — re-establishing connections")
+            Task { @MainActor in
+                // Re-acquire sleep prevention (may have been revoked)
+                self.preventSleep()
+
+                // Immediately update heartbeat
+                await self.updateMachineStatus("online")
+
+                // Force relay reconnection with fresh token
+                await self.refreshAuthToken()
+                await self.relayClient.forceReconnect()
+            }
+        }
+    }
+
+    private func removeSleepWakeObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        if let sleepObserver { center.removeObserver(sleepObserver) }
+        if let wakeObserver { center.removeObserver(wakeObserver) }
+        sleepObserver = nil
+        wakeObserver = nil
     }
 }
 
