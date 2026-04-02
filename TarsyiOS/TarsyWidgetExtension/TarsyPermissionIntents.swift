@@ -24,13 +24,17 @@ struct PermissionResponseIntent: AppIntent {
     @Parameter(title: "Workspace ID")
     var workspaceId: String
 
+    @Parameter(title: "Permission Request ID")
+    var permissionRequestId: String
+
     init() {}
 
-    init(sessionId: String, engineType: String, answer: String, workspaceId: String) {
+    init(sessionId: String, engineType: String, answer: String, workspaceId: String, permissionRequestId: String = "") {
         self.sessionId = sessionId
         self.engineType = engineType
         self.answer = answer
         self.workspaceId = workspaceId
+        self.permissionRequestId = permissionRequestId
     }
 
     func perform() async throws -> some IntentResult {
@@ -53,13 +57,16 @@ struct PermissionResponseIntent: AppIntent {
         // Write response for main app to pick up and send via WebSocket
         // Include a unique ID so the main app can deduplicate rapid taps
         if let defaults = UserDefaults(suiteName: K.appGroup) {
-            let response: [String: String] = [
+            var response: [String: String] = [
                 "sessionId": sessionId,
                 "engineType": engineType,
                 "answer": answer,
                 "workspaceId": workspaceId,
                 "responseId": UUID().uuidString,
             ]
+            if !permissionRequestId.isEmpty {
+                response["permissionRequestId"] = permissionRequestId
+            }
             if let data = try? JSONEncoder().encode(response) {
                 defaults.set(data, forKey: K.pendingResponseKey)
                 defaults.synchronize()

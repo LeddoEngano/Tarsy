@@ -480,6 +480,7 @@ struct WorkspaceView: View {
                 withAnimation {
                     interactiveQuestions = nil
                     interactiveOptions = nil
+                    pendingPermissionRequestId = nil
                 }
                 isAgentThinking = true
                 if let sessionId = notification.userInfo?["sessionId"] as? String {
@@ -1690,7 +1691,8 @@ struct WorkspaceView: View {
             sessionId: sessionId,
             engineType: engineType,
             questionKey: questionKey,
-            questionOptions: questionOptions
+            questionOptions: questionOptions,
+            permissionRequestId: pendingPermissionRequestId
         )
     }
 

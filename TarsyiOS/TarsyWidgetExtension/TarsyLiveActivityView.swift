@@ -217,7 +217,8 @@ struct TarsyLiveActivityWidget: Widget {
                         sessionId: sessionId,
                         engineType: context.state.engineTypeRaw ?? "claude",
                         answer: formattedAnswer,
-                        workspaceId: context.attributes.workspaceId
+                        workspaceId: context.attributes.workspaceId,
+                        permissionRequestId: context.state.permissionRequestId ?? ""
                     )) {
                         Text(option)
                             .font(.system(size: 12, weight: .semibold, design: .monospaced))

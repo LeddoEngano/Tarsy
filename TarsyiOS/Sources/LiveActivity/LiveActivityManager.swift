@@ -120,7 +120,7 @@ class LiveActivityManager: ObservableObject {
         Task { await activity.update(.init(state: state, staleDate: .now.addingTimeInterval(staleTTL))) }
     }
 
-    func updateStatus(workspaceId: String, status: String, tabId: String? = nil, message: String? = nil, sessionId: String? = nil, engineType: String? = nil, questionKey: String? = nil, questionOptions: [String]? = nil) {
+    func updateStatus(workspaceId: String, status: String, tabId: String? = nil, message: String? = nil, sessionId: String? = nil, engineType: String? = nil, questionKey: String? = nil, questionOptions: [String]? = nil, permissionRequestId: String? = nil) {
         let activityKey = key(workspaceId: workspaceId, tabId: tabId)
         guard let activity = activities[activityKey],
               let startDate = startDates[activityKey] else { return }
@@ -137,7 +137,8 @@ class LiveActivityManager: ObservableObject {
             sessionId: status == "waiting" ? sessionId : nil,
             engineTypeRaw: status == "waiting" ? engineType : nil,
             questionKey: status == "waiting" ? questionKey : nil,
-            questionOptions: status == "waiting" ? questionOptions : nil
+            questionOptions: status == "waiting" ? questionOptions : nil,
+            permissionRequestId: status == "waiting" ? permissionRequestId : nil
         )
 
         let content = ActivityContent(state: state, staleDate: .now.addingTimeInterval(staleTTL))
@@ -325,8 +326,8 @@ class LiveActivityManager: ObservableObject {
 
     /// Callback invoked when a permission response arrives from the Live Activity widget buttons.
     /// Set this from the app root to forward responses via WebSocket.
-    /// Parameters: (sessionId, answer, engineType, workspaceId)
-    var onPermissionResponse: ((String, String, String, String) -> Void)?
+    /// Parameters: (sessionId, answer, engineType, workspaceId, permissionRequestId?)
+    var onPermissionResponse: ((String, String, String, String, String?) -> Void)?
 
     private var darwinObserverRegistered = false
 
@@ -399,7 +400,8 @@ class LiveActivityManager: ObservableObject {
         }
 
         // Forward the response to the WebSocket connection
-        onPermissionResponse?(sessionId, answer, engineType, workspaceId)
+        let permissionRequestId = response["permissionRequestId"]
+        onPermissionResponse?(sessionId, answer, engineType, workspaceId, permissionRequestId)
 
         // Notify in-app UI (WorkspaceView) to clear the question overlay
         NotificationCenter.default.post(

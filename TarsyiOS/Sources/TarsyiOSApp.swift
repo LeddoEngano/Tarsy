@@ -110,10 +110,18 @@ struct TarsyiOSApp: App {
                     subscriptionManager.profileService = profileService
                     subscriptionManager.start()
                     // Wire Live Activity widget permission buttons → WebSocket
-                    LiveActivityManager.shared.onPermissionResponse = { [weak connectionManager] sessionId, answer, engineType, _ in
+                    LiveActivityManager.shared.onPermissionResponse = { [weak connectionManager] sessionId, answer, engineType, _, permissionRequestId in
+                        var payload: [String: String] = [
+                            "sessionId": sessionId,
+                            "answer": answer,
+                            "engineType": engineType
+                        ]
+                        if let permId = permissionRequestId, !permId.isEmpty {
+                            payload["permissionRequestId"] = permId
+                        }
                         connectionManager?.send(WSPacket(
                             action: .engineUserResponse,
-                            payload: ["sessionId": sessionId, "answer": answer, "engineType": engineType]
+                            payload: payload
                         ))
                     }
                     LiveActivityManager.shared.startWidgetResponseObserver()

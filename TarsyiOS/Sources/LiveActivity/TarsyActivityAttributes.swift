@@ -28,8 +28,9 @@ struct TarsyActivityAttributes: ActivityAttributes {
         let engineTypeRaw: String?   // Engine type raw value for response packet
         let questionKey: String?     // Question text (used as answer dict key)
         let questionOptions: [String]? // Available options for quick-action buttons
+        let permissionRequestId: String? // Control protocol request ID (for permission responses)
 
-        init(status: String, currentTool: String, currentToolIcon: String, startedAt: Double, contextPercent: Double = 0, message: String? = nil, sessionId: String? = nil, engineTypeRaw: String? = nil, questionKey: String? = nil, questionOptions: [String]? = nil) {
+        init(status: String, currentTool: String, currentToolIcon: String, startedAt: Double, contextPercent: Double = 0, message: String? = nil, sessionId: String? = nil, engineTypeRaw: String? = nil, questionKey: String? = nil, questionOptions: [String]? = nil, permissionRequestId: String? = nil) {
             self.status = status
             self.currentTool = currentTool
             self.currentToolIcon = currentToolIcon
@@ -40,6 +41,7 @@ struct TarsyActivityAttributes: ActivityAttributes {
             self.engineTypeRaw = engineTypeRaw
             self.questionKey = questionKey
             self.questionOptions = questionOptions
+            self.permissionRequestId = permissionRequestId
         }
     }
 }
