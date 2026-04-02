@@ -100,6 +100,7 @@ public class ConnectionManager: ObservableObject {
         connection = nil
         relayTask?.cancel(with: .goingAway, reason: nil)
         relayTask = nil
+        relaySession?.invalidateAndCancel()
         relaySession = nil
         reconnectTimer?.invalidate()
         reconnectTimer = nil
@@ -155,6 +156,8 @@ public class ConnectionManager: ObservableObject {
         connection = nil
         relayTask?.cancel(with: .goingAway, reason: nil)
         relayTask = nil
+        relaySession?.invalidateAndCancel()
+        relaySession = nil
         isConnected = false
         isConnecting = false
         isReconnecting = false
@@ -282,6 +285,7 @@ public class ConnectionManager: ObservableObject {
             if self?.relayTask != nil {
                 self?.relayTask?.cancel(with: .goingAway, reason: nil)
                 self?.relayTask = nil
+                self?.relaySession?.invalidateAndCancel()
                 self?.relaySession = nil
                 self?.pingTimer?.invalidate()
                 self?.pingTimer = nil
@@ -408,6 +412,7 @@ public class ConnectionManager: ObservableObject {
         if relayTask != nil {
             relayTask?.cancel(with: .goingAway, reason: nil)
             relayTask = nil
+            relaySession?.invalidateAndCancel()
             relaySession = nil
         }
 
@@ -799,19 +804,9 @@ public class ConnectionManager: ObservableObject {
             return false
         }
 
-        // Create SecCertificate and extract public key
-        guard let certificate = SecCertificateCreateWithData(nil, certData as CFData) else {
-            return false
-        }
-
-        var trust: SecTrust?
-        let policy = SecPolicyCreateBasicX509()
-        guard SecTrustCreateWithCertificates(certificate, policy, &trust) == errSecSuccess,
-              let trustRef = trust else {
-            return false
-        }
-
-        guard let publicKey = SecTrustCopyKey(trustRef) else {
+        // Extract public key directly from certificate (no trust evaluation needed)
+        guard let certificate = SecCertificateCreateWithData(nil, certData as CFData),
+              let publicKey = SecCertificateCopyKey(certificate) else {
             return false
         }
 
@@ -837,18 +832,9 @@ public class ConnectionManager: ObservableObject {
             return false
         }
 
-        guard let certificate = SecCertificateCreateWithData(nil, certData as CFData) else {
-            return false
-        }
-
-        var trust: SecTrust?
-        let policy = SecPolicyCreateBasicX509()
-        guard SecTrustCreateWithCertificates(certificate, policy, &trust) == errSecSuccess,
-              let trustRef = trust else {
-            return false
-        }
-
-        guard let publicKey = SecTrustCopyKey(trustRef) else {
+        // Extract public key directly from certificate (no trust evaluation needed)
+        guard let certificate = SecCertificateCreateWithData(nil, certData as CFData),
+              let publicKey = SecCertificateCopyKey(certificate) else {
             return false
         }
 

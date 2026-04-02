@@ -77,6 +77,8 @@ actor RelayClient {
         stopPing()
         webSocket?.cancel(with: .goingAway, reason: nil)
         webSocket = nil
+        session?.invalidateAndCancel()
+        session = nil
         let wasConnected = isConnected
         isConnected = false
         reconnectAttempts = 0

@@ -36,15 +36,20 @@ actor SessionFileWatcher {
         Task { await markExistingFiles() }
 
         // Poll every 5 seconds for new content
-        Task { @MainActor in
-            Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
-                Task { await SessionFileWatcher.shared.scanAndSync() }
+        Task {
+            let newTimer = await MainActor.run {
+                Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+                    Task { await SessionFileWatcher.shared.scanAndSync() }
+                }
             }
+            self.timer = newTimer
         }
     }
 
     func stop() {
         isRunning = false
+        timer?.invalidate()
+        timer = nil
     }
 
     // MARK: - Initial mark

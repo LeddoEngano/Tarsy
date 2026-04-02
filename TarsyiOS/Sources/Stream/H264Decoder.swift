@@ -20,6 +20,7 @@ class H264Decoder: ObservableObject {
     private var codecDetected = true // Default to H.264, switch to HEVC if VPS detected
     private var frameCount = 0
     private var fpsTimer: Timer?
+    private let ciContext = CIContext()
     private let startCode = Data([0x00, 0x00, 0x00, 0x01])
     private let processingQueue = DispatchQueue(label: "video.decoding", qos: .userInteractive)
     private var totalFramesReceived = 0
@@ -422,10 +423,9 @@ class H264Decoder: ObservableObject {
         }
 
         let ci = CIImage(cvPixelBuffer: pb)
-        let ctx = CIContext()
         let w = CVPixelBufferGetWidth(pb)
         let h = CVPixelBufferGetHeight(pb)
-        guard let cg = ctx.createCGImage(ci, from: CGRect(x: 0, y: 0, width: w, height: h)) else {
+        guard let cg = ciContext.createCGImage(ci, from: CGRect(x: 0, y: 0, width: w, height: h)) else {
 #if DEBUG
             print("[Screenshot] CIContext.createCGImage failed")
 #endif
