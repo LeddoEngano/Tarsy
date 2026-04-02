@@ -1,6 +1,13 @@
 import ActivityKit
 import Foundation
 
+/// Shared constants for widget ↔ app communication (this file compiles in both targets)
+enum TarsyLiveActivityConstants {
+    static let appGroup = "group.com.tarsy.ios"
+    static let pendingResponseKey = "pendingPermissionResponse"
+    static let darwinNotificationName = "com.tarsy.ios.permissionResponse"
+}
+
 struct TarsyActivityAttributes: ActivityAttributes {
     /// Fixed data that doesn't change during the activity
     let workspaceId: String

@@ -359,10 +359,8 @@ class LiveActivityManager: ObservableObject {
 
     private var darwinObserverRegistered = false
 
-    /// App Group identifier shared with the widget extension
-    private let appGroupId = "group.com.tarsy.ios"
-    /// UserDefaults key for pending permission responses
-    private let pendingResponseKey = "pendingPermissionResponse"
+    private let appGroupId = TarsyLiveActivityConstants.appGroup
+    private let pendingResponseKey = TarsyLiveActivityConstants.pendingResponseKey
     /// Tracks the last processed response ID to deduplicate rapid taps
     private var lastProcessedResponseId: String?
 
@@ -376,7 +374,7 @@ class LiveActivityManager: ObservableObject {
             CFNotificationCenterGetDarwinNotifyCenter(),
             nil,
             Self.darwinCallback,
-            "com.tarsy.ios.permissionResponse" as CFString,
+            TarsyLiveActivityConstants.darwinNotificationName as CFString,
             nil,
             .deliverImmediately
         )

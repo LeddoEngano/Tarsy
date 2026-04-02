@@ -2,12 +2,7 @@ import ActivityKit
 import AppIntents
 import Foundation
 
-/// App Group identifier shared between main app and widget extension
-let tarsyAppGroup = "group.com.tarsy.ios"
-/// UserDefaults key for pending permission responses from widget → app
-let pendingPermissionResponseKey = "pendingPermissionResponse"
-/// Darwin notification name to wake up the main app when a response is written
-let permissionResponseNotificationName = "com.tarsy.ios.permissionResponse"
+private let K = TarsyLiveActivityConstants.self
 
 /// Intent triggered by Live Activity permission buttons (Deny, Allow, Allow All).
 /// Runs in the widget extension process WITHOUT opening the app.
@@ -57,7 +52,7 @@ struct PermissionResponseIntent: AppIntent {
 
         // Write response for main app to pick up and send via WebSocket
         // Include a unique ID so the main app can deduplicate rapid taps
-        if let defaults = UserDefaults(suiteName: tarsyAppGroup) {
+        if let defaults = UserDefaults(suiteName: K.appGroup) {
             let response: [String: String] = [
                 "sessionId": sessionId,
                 "engineType": engineType,
@@ -66,7 +61,7 @@ struct PermissionResponseIntent: AppIntent {
                 "responseId": UUID().uuidString,
             ]
             if let data = try? JSONEncoder().encode(response) {
-                defaults.set(data, forKey: pendingPermissionResponseKey)
+                defaults.set(data, forKey: K.pendingResponseKey)
                 defaults.synchronize()
             }
         }
@@ -74,7 +69,7 @@ struct PermissionResponseIntent: AppIntent {
         // Wake up main app via cross-process Darwin notification
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),
-            CFNotificationName(permissionResponseNotificationName as CFString),
+            CFNotificationName(K.darwinNotificationName as CFString),
             nil, nil, true
         )
 
