@@ -166,8 +166,10 @@ public class ConnectionManager: ObservableObject {
         guard let data = try? packet.encode() else { return }
 
         if connectionMode == .relay {
+            let isControlPacket = packet.action == .auth || packet.action == .e2eEncrypted
+                || packet.action == .e2eKeyExchange || packet.action == .ping || packet.action == .pong
             // Encrypt text packets for relay transit (E2E — relay can't read)
-            if e2e.isReady, packet.action != .auth, packet.action != .e2eEncrypted,
+            if e2e.isReady, !isControlPacket,
                let encrypted = e2e.encryptBinary(data) {
                 let envelope = WSPacket(
                     action: .e2eEncrypted,
@@ -178,6 +180,10 @@ public class ConnectionManager: ObservableObject {
                     sendViaRelay(envelopeData)
                     return
                 }
+            }
+            // Allow control packets through unencrypted; drop data packets if E2E not ready
+            if !isControlPacket && !e2e.isReady {
+                return
             }
             sendViaRelay(data)
         } else {
@@ -545,9 +551,18 @@ public class ConnectionManager: ObservableObject {
                         forHost: h
                     )
                     if !verified {
-                        // Still connected but E2E may be compromised — reset and rely on TLS only
+                        if connectionMode == .relay {
+                            errorMessage = "E2E verification failed — connection rejected for security"
+                            disconnect()
+                            return
+                        }
                         e2e.reset()
                     }
+                } else if connectionMode == .relay {
+                    // Relay requires E2E signature — reject if missing
+                    errorMessage = "E2E verification failed — connection rejected for security"
+                    disconnect()
+                    return
                 }
             }
             // Notify listeners that we successfully reconnected
@@ -569,8 +584,51 @@ public class ConnectionManager: ObservableObject {
                 send(WSPacket(action: .e2eKeyExchange, payload: ["e2ePublicKey": e2e.publicKeyBase64]))
             }
         case .e2eKeyExchangeResponse:
-            if let remoteKey = packet.payload?["e2ePublicKey"] {
-                _ = e2e.completeKeyExchange(remotePublicKeyBase64: remoteKey)
+            if let remoteKey = packet.payload?["e2ePublicKey"],
+               e2e.completeKeyExchange(remotePublicKeyBase64: remoteKey) {
+                // Verify E2E key is signed by the TLS certificate (prevents relay MITM)
+                guard let sigB64 = packet.payload?["e2eKeySignature"],
+                      let certB64 = packet.payload?["tlsCertificate"] else {
+                    // No signature provided — reject connection (daemon needs update)
+                    errorMessage = "E2E verification failed — connection rejected for security"
+                    disconnect()
+                    return
+                }
+                // Verify signature; use host for TOFU if available, otherwise verify without pinning
+                if let h = fingerprintHost {
+                    let verified = verifyE2EKeyBinding(
+                        e2ePublicKey: remoteKey,
+                        signatureBase64: sigB64,
+                        certificateBase64: certB64,
+                        forHost: h
+                    )
+                    if verified {
+                        // TOFU: save fingerprint on first connection
+                        if loadPinnedFingerprint(forHost: h) == nil,
+                           let certData = Data(base64Encoded: certB64) {
+                            let fp = SHA256.hash(data: certData)
+                                .map { String(format: "%02x", $0) }
+                                .joined(separator: ":")
+                            savePinnedFingerprint(fp, forHost: h)
+                        }
+                    } else {
+                        errorMessage = "E2E verification failed — connection rejected for security"
+                        disconnect()
+                        return
+                    }
+                } else {
+                    // No host for TOFU pinning (relay-only) — still verify signature is valid
+                    let verified = verifyE2ESignature(
+                        e2ePublicKey: remoteKey,
+                        signatureBase64: sigB64,
+                        certificateBase64: certB64
+                    )
+                    if !verified {
+                        errorMessage = "E2E verification failed — connection rejected for security"
+                        disconnect()
+                        return
+                    }
+                }
             }
         case .auth, .pong:
             lastPongTime = Date()
@@ -768,6 +826,47 @@ public class ConnectionManager: ObservableObject {
         )
 
         return verified
+    }
+
+    /// Verifies the E2E key signature without TOFU pinning.
+    /// Used for relay-only connections where no host is known for fingerprint storage.
+    private func verifyE2ESignature(e2ePublicKey: String, signatureBase64: String, certificateBase64: String) -> Bool {
+        guard let signatureData = Data(base64Encoded: signatureBase64),
+              let certData = Data(base64Encoded: certificateBase64),
+              let keyData = e2ePublicKey.data(using: .utf8) else {
+            return false
+        }
+
+        guard let certificate = SecCertificateCreateWithData(nil, certData as CFData) else {
+            return false
+        }
+
+        var trust: SecTrust?
+        let policy = SecPolicyCreateBasicX509()
+        guard SecTrustCreateWithCertificates(certificate, policy, &trust) == errSecSuccess,
+              let trustRef = trust else {
+            return false
+        }
+
+        guard let publicKey = SecTrustCopyKey(trustRef) else {
+            return false
+        }
+
+        var error: Unmanaged<CFError>?
+        return SecKeyVerifySignature(
+            publicKey,
+            .rsaSignatureMessagePSSSHA256,
+            keyData as CFData,
+            signatureData as CFData,
+            &error
+        )
+    }
+
+    /// Returns a stable host key for fingerprint storage.
+    /// For relay-only connections (no LAN host known), returns nil to skip TOFU pinning
+    /// rather than sharing a single key across different machines.
+    private var fingerprintHost: String? {
+        return host
     }
 
     // MARK: - Fingerprint Keychain Storage
