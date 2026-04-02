@@ -1525,22 +1525,32 @@ struct WorkspaceView: View {
 
                 // Engine status (model, tokens, context %)
                 case .engineStatus:
-                    if let model = packet.payload?["model"] {
-                        engineModel = model
-                    }
+                    let statusModel = packet.payload?["model"] ?? ""
+                    let statusSessionId = packet.payload?["sessionId"] ?? ""
+                    let statusTabId = tabId(forSession: statusSessionId) ?? currentTab.id
+
                     if let input = packet.payload?["inputTokens"].flatMap({ Int($0) }),
                        let output = packet.payload?["outputTokens"].flatMap({ Int($0) }) {
                         let total = input + output
-                        // Context window sizes by model family
+                        let model = statusModel.isEmpty ? engineModel : statusModel
+                        // Use contextWindow from CLI when available, fallback to model-based estimate
                         let windowSize: Int
-                        if engineModel.contains("opus") { windowSize = 1_000_000 }
-                        else if engineModel.contains("sonnet") { windowSize = 200_000 }
-                        else if engineModel.contains("haiku") { windowSize = 200_000 }
+                        if let cw = packet.payload?["contextWindow"].flatMap({ Int($0) }), cw > 0 {
+                            windowSize = cw
+                        } else if model.contains("opus") { windowSize = 1_000_000 }
                         else { windowSize = 200_000 }
-                        contextPercent = Double(total) / Double(windowSize) * 100
-                        let statusSessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
-                        let statusTabId = tabId(forSession: statusSessionId) ?? currentTab.id
-                        LiveActivityManager.shared.updateContext(workspaceId: workspace.id.uuidString, contextPercent: contextPercent, tabId: statusTabId)
+                        let percent = Double(total) / Double(windowSize) * 100
+
+                        if isActiveTabSession(packet) {
+                            if !statusModel.isEmpty { engineModel = statusModel }
+                            contextPercent = percent
+                        } else {
+                            updateBackgroundTabState(sessionId: statusSessionId) { state in
+                                if !statusModel.isEmpty { state.engineModel = statusModel }
+                                state.contextPercent = percent
+                            }
+                        }
+                        LiveActivityManager.shared.updateContext(workspaceId: workspace.id.uuidString, contextPercent: percent, tabId: statusTabId)
                     }
 
                 // Git pull result
@@ -1638,10 +1648,11 @@ struct WorkspaceView: View {
     private var engineDisplayName: String {
         let engine = currentTab.engineType ?? .claude
         if engineModel.isEmpty { return engine.displayName }
-        // Shorten model name: "claude-opus-4-6-20260301" -> "Opus 4.6"
+        // Shorten model name: "claude-opus-4-6" -> "Opus 4.6"
         let model = engineModel
             .replacingOccurrences(of: "claude-", with: "")
-            .replacingOccurrences(of: "20\\d{6}", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "-?20\\d{6}", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "(\\d)-(\\d)", with: "$1.$2", options: .regularExpression)
             .replacingOccurrences(of: "-", with: " ")
             .trimmingCharacters(in: .whitespaces)
             .capitalized
