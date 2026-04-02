@@ -282,6 +282,7 @@ struct OnboardingWindow: View {
                 appleSignInDelegate = delegate
                 let controller = ASAuthorizationController(authorizationRequests: [request])
                 controller.delegate = delegate
+                controller.presentationContextProvider = delegate
                 controller.performRequests()
             }
 
@@ -934,11 +935,15 @@ struct OAuthButtonView: View {
 
 // MARK: - Apple Sign In Delegate
 
-class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate {
+class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
     let onCompletion: (Result<ASAuthorization, Error>) -> Void
 
     init(onCompletion: @escaping (Result<ASAuthorization, Error>) -> Void) {
         self.onCompletion = onCompletion
+    }
+
+    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
+        NSApplication.shared.keyWindow ?? ASPresentationAnchor()
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {

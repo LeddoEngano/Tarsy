@@ -29,8 +29,7 @@ xcodebuild \
     -derivedDataPath "$BUILD_DIR/DerivedData" \
     -archivePath "$BUILD_DIR/$APP_NAME.xcarchive" \
     archive \
-    CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
-    CODE_SIGN_STYLE="Manual" \
+    CODE_SIGN_STYLE="Automatic" \
     DEVELOPMENT_TEAM="J2M334NJ3L" \
     | tail -5
 
