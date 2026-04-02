@@ -23,18 +23,18 @@ enum TarsyTheme {
     static let statusError = Color(hex: "e5716a")
 
     // Fonts
-    static let bodyFont = Font.custom("Inter", size: 17)
-    static let bodyFontSmall = Font.custom("Inter", size: 12)
-    static let bodyFontLarge = Font.custom("Inter", size: 20)
+    static let monoFont = Font.system(.body, design: .monospaced)
+    static let monoFontSmall = Font.system(.caption, design: .monospaced)
+    static let monoFontLarge = Font.system(.title3, design: .monospaced)
 
-    // Legacy aliases
-    static let monoFont = bodyFont
-    static let monoFontSmall = bodyFontSmall
-    static let monoFontLarge = bodyFontLarge
+    // Aliases
+    static let bodyFont = monoFont
+    static let bodyFontSmall = monoFontSmall
+    static let bodyFontLarge = monoFontLarge
 
-    /// Central font factory — use this everywhere instead of .system()
+    /// Central font factory
     static func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font.custom("Inter", size: size).weight(weight)
+        Font.system(size: size, weight: weight, design: .monospaced)
     }
 }
 
