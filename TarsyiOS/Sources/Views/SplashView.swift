@@ -1,8 +1,9 @@
 import SwiftUI
 
 struct SplashView: View {
-    @State private var opacity = 0.0
-    @State private var scale = 0.8
+    @State private var showEyes = false
+    @State private var showText = false
+    @State private var showLoader = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -10,32 +11,42 @@ struct SplashView: View {
             TarsyTheme.backgroundPrimary
                 .ignoresSafeArea()
 
-            VStack(spacing: 20) {
-                TarsyEyes(size: 80)
+            VStack(spacing: 28) {
+                TarsyEyes(size: 140)
+                    .scaleEffect(showEyes ? 1 : 0.5)
+                    .opacity(showEyes ? 1 : 0)
 
-                Text("TARSY")
-                    .font(.system(size: 48, weight: .bold, design: .monospaced))
-                    .foregroundColor(TarsyTheme.accentAmber)
+                VStack(spacing: 8) {
+                    Text("TARSY")
+                        .font(.system(size: 48, weight: .bold, design: .monospaced))
+                        .foregroundColor(TarsyTheme.accentAmber)
 
-                Text("remote agent controller")
-                    .font(TarsyTheme.monoFontSmall)
-                    .foregroundColor(TarsyTheme.textSecondary)
+                    Text("remote agent controller")
+                        .font(TarsyTheme.monoFontSmall)
+                        .foregroundColor(TarsyTheme.textSecondary)
+                }
+                .opacity(showText ? 1 : 0)
+                .offset(y: showText ? 0 : 10)
 
                 ProgressView()
                     .tint(TarsyTheme.accentAmber)
-                    .padding(.top, 8)
+                    .opacity(showLoader ? 1 : 0)
             }
-            .scaleEffect(scale)
-            .opacity(opacity)
         }
         .onAppear {
             if reduceMotion {
-                opacity = 1
-                scale = 1
+                showEyes = true
+                showText = true
+                showLoader = true
             } else {
-                withAnimation(.easeOut(duration: 0.6)) {
-                    opacity = 1
-                    scale = 1
+                withAnimation(.spring(duration: 0.5, bounce: 0.3)) {
+                    showEyes = true
+                }
+                withAnimation(.easeOut(duration: 0.4).delay(0.35)) {
+                    showText = true
+                }
+                withAnimation(.easeOut(duration: 0.3).delay(0.6)) {
+                    showLoader = true
                 }
             }
         }
