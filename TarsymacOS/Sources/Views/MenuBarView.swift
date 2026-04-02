@@ -146,6 +146,11 @@ struct MenuBarView: View {
                 await daemonManager.start()
             }
         }
+        .onAppear {
+            updateChecker.onWillTerminate = { [weak daemonManager] in
+                daemonManager?.stop()
+            }
+        }
     }
 
     // MARK: - Components
@@ -245,21 +250,40 @@ struct MenuBarView: View {
 
                 Spacer()
 
-                Button {
-                    updateChecker.dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(TarsyTheme.font(size: 8, weight: .medium))
-                        .foregroundColor(Theme.textMuted)
+                if case .idle = updateChecker.updateState {
+                    Button {
+                        updateChecker.dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(TarsyTheme.font(size: 8, weight: .medium))
+                            .foregroundColor(Theme.textMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .pointerOnHover()
                 }
-                .buttonStyle(.plain)
-                .pointerOnHover()
             }
 
+            updateButton
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.bgCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.amber.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+
+    @ViewBuilder
+    private var updateButton: some View {
+        switch updateChecker.updateState {
+        case .idle:
             Button {
-                NSWorkspace.shared.open(update.downloadURL)
+                Task { await updateChecker.downloadAndInstall() }
             } label: {
-                Text("Download")
+                Text("Update")
                     .font(TarsyTheme.font(size: 11, weight: .medium))
                     .foregroundColor(Theme.bg)
                     .frame(maxWidth: .infinity)
@@ -271,16 +295,54 @@ struct MenuBarView: View {
             }
             .buttonStyle(.plain)
             .pointerOnHover()
+
+        case .downloading(let progress):
+            VStack(spacing: 4) {
+                ProgressView(value: progress)
+                    .tint(Theme.amber)
+
+                Text("Downloading… \(Int(progress * 100))%")
+                    .font(TarsyTheme.font(size: 10))
+                    .foregroundColor(Theme.textSecondary)
+            }
+
+        case .installing:
+            HStack(spacing: 6) {
+                ProgressView()
+                    .scaleEffect(0.5)
+                    .frame(width: 12, height: 12)
+
+                Text("Installing…")
+                    .font(TarsyTheme.font(size: 10))
+                    .foregroundColor(Theme.textSecondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 5)
+
+        case .failed(let message):
+            VStack(spacing: 4) {
+                Text(message)
+                    .font(TarsyTheme.font(size: 10))
+                    .foregroundColor(Theme.terracotta)
+                    .lineLimit(2)
+
+                Button {
+                    Task { await updateChecker.downloadAndInstall() }
+                } label: {
+                    Text("Retry")
+                        .font(TarsyTheme.font(size: 11, weight: .medium))
+                        .foregroundColor(Theme.bg)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Theme.amber)
+                        )
+                }
+                .buttonStyle(.plain)
+                .pointerOnHover()
+            }
         }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Theme.bgCard)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Theme.amber.opacity(0.2), lineWidth: 1)
-                )
-        )
     }
 }
 

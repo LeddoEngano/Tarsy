@@ -5,7 +5,7 @@ const nextConfig = {
       {
         source: "/download/macos",
         destination:
-          "https://xtblbghhlkroskzljqcl.supabase.co/storage/v1/object/public/tarsy-releases/Tarsy-1.0.5.dmg",
+          "https://xtblbghhlkroskzljqcl.supabase.co/storage/v1/object/public/tarsy-releases/Tarsy-1.0.6.dmg",
         permanent: false,
       },
     ];
