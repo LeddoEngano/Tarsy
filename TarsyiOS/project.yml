@@ -52,6 +52,8 @@ targets:
         com.apple.developer.applesignin:
           - Default
         aps-environment: production
+        com.apple.security.application-groups:
+          - group.com.tarsy.ios
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "1"
@@ -73,6 +75,11 @@ targets:
           - Info.plist
       - path: Sources/LiveActivity/TarsyActivityAttributes.swift
         buildPhase: sources
+    entitlements:
+      path: TarsyWidgetExtension/TarsyWidgetExtension.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.tarsy.ios
     info:
       path: TarsyWidgetExtension/Info.plist
       properties:
