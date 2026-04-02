@@ -2,8 +2,7 @@ import SwiftUI
 
 /// Animated Tarsy eyes — two solid white circles (no pupils).
 /// Left eye is smaller, right eye is bigger. Aligned vertically.
-/// Expressive like a little creature: random darts, blinks, waves,
-/// shape morphs (heart/star), suspicious squints, and widens.
+/// Expressive like a little robot: random behaviors with personality.
 struct TarsyEyes: View {
     let size: CGFloat
     var animated: Bool = true
@@ -22,38 +21,34 @@ struct TarsyEyes: View {
         let shouldAnimate = animated && !reduceMotion
 
         ZStack {
-            // Eyes
             HStack(spacing: size * 0.1) {
                 Circle()
                     .fill(.white)
-                    .frame(width: size * 0.38, height: size * 0.38)
+                    .frame(width: size * 0.30, height: size * 0.30)
                     .scaleEffect(x: leftEye.scaleX, y: leftEye.scaleY)
                     .offset(x: leftEye.offsetX, y: leftEye.offsetY)
 
                 Circle()
                     .fill(.white)
-                    .frame(width: size * 0.42, height: size * 0.42)
+                    .frame(width: size * 0.48, height: size * 0.48)
                     .scaleEffect(x: rightEye.scaleX, y: rightEye.scaleY)
                     .offset(x: rightEye.offsetX, y: rightEye.offsetY)
             }
             .opacity(eyesOpacity)
 
-            // Shape morph overlay
-            Group {
-                switch morphShape {
-                case .heart:
-                    Image(systemName: "heart.fill")
-                        .font(.system(size: size * 0.4))
+            // Morph overlay — two shapes replacing each eye
+            if morphShape != .none {
+                HStack(spacing: size * 0.1) {
+                    morphIcon
+                        .font(.system(size: size * 0.26))
                         .foregroundStyle(.white)
-                case .star:
-                    Image(systemName: "star.fill")
-                        .font(.system(size: size * 0.4))
+
+                    morphIcon
+                        .font(.system(size: size * 0.42))
                         .foregroundStyle(.white)
-                case .none:
-                    EmptyView()
                 }
+                .opacity(morphOpacity)
             }
-            .opacity(morphOpacity)
         }
         .frame(width: size, height: size * 0.5)
         .task(id: shouldAnimate) {
@@ -65,14 +60,15 @@ struct TarsyEyes: View {
     // MARK: - Animation Loop
 
     private func runLoop() async {
-        try? await Task.sleep(for: .milliseconds(500))
+        try? await Task.sleep(for: .milliseconds(800))
         while !Task.isCancelled {
             await perform(pickBehavior())
-            try? await Task.sleep(for: .milliseconds(Int.random(in: 300...900)))
+            // Breathe between animations — chill, not hyperactive
+            try? await Task.sleep(for: .milliseconds(Int.random(in: 1500...4000)))
         }
     }
 
-    // MARK: - Behaviors
+    // MARK: - Behavior Selection
 
     private enum Behavior {
         case blink, doubleBlink
@@ -82,6 +78,14 @@ struct TarsyEyes: View {
         case widen
         case suspiciousSquint
         case morphHeart, morphStar
+        case bounce
+        case sleepy
+        case shy
+        case crossEyed
+        case eyeRoll
+        case peek
+        case headShake
+        case excited
     }
 
     private func pickBehavior() -> Behavior {
@@ -92,11 +96,19 @@ struct TarsyEyes: View {
             (.dartLeft, 3),
             (.lookUp, 2),
             (.lookDown, 2),
-            (.wave, 3),
+            (.wave, 2),
             (.widen, 2),
             (.suspiciousSquint, 2),
             (.morphHeart, 1),
             (.morphStar, 1),
+            (.bounce, 2),
+            (.sleepy, 1),
+            (.shy, 2),
+            (.crossEyed, 1),
+            (.eyeRoll, 2),
+            (.peek, 1),
+            (.headShake, 2),
+            (.excited, 2),
         ]
         let total = table.reduce(0) { $0 + $1.1 }
         var roll = Int.random(in: 0..<total)
@@ -120,6 +132,14 @@ struct TarsyEyes: View {
         case .suspiciousSquint: await doSuspiciousSquint()
         case .morphHeart:       await doMorph(.heart)
         case .morphStar:        await doMorph(.star)
+        case .bounce:           await doBounce()
+        case .sleepy:           await doSleepy()
+        case .shy:              await doShy()
+        case .crossEyed:        await doCrossEyed()
+        case .eyeRoll:          await doEyeRoll()
+        case .peek:             await doPeek()
+        case .headShake:        await doHeadShake()
+        case .excited:          await doExcited()
         }
     }
 
@@ -156,7 +176,7 @@ struct TarsyEyes: View {
             rightEye.scaleX = 0.95
             rightEye.scaleY = 0.95
         }
-        try? await Task.sleep(for: .milliseconds(Int.random(in: 400...900)))
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 500...1200)))
         withAnimation(.spring(duration: 0.14, bounce: 0.1)) {
             resetEyes()
         }
@@ -176,7 +196,7 @@ struct TarsyEyes: View {
             rightEye.scaleX = s
             rightEye.scaleY = s
         }
-        try? await Task.sleep(for: .milliseconds(Int.random(in: 500...1000)))
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 600...1200)))
         withAnimation(.easeInOut(duration: 0.3)) {
             resetEyes()
         }
@@ -190,20 +210,17 @@ struct TarsyEyes: View {
         let cycles = Int.random(in: 2...3)
 
         for _ in 0..<cycles {
-            // Left up
             withAnimation(.easeInOut(duration: 0.18)) {
                 leftEye.offsetY = -amp
             }
             try? await Task.sleep(for: .milliseconds(100))
 
-            // Right up, left down
             withAnimation(.easeInOut(duration: 0.18)) {
                 rightEye.offsetY = -amp
                 leftEye.offsetY = 0
             }
             try? await Task.sleep(for: .milliseconds(100))
 
-            // Right down
             withAnimation(.easeInOut(duration: 0.18)) {
                 rightEye.offsetY = 0
             }
@@ -216,17 +233,17 @@ struct TarsyEyes: View {
         try? await Task.sleep(for: .milliseconds(200))
     }
 
-    // MARK: - Widen
+    // MARK: - Widen (surprise)
 
     private func doWiden() async {
         withAnimation(.spring(duration: 0.2, bounce: 0.35)) {
-            leftEye.scaleX = 1.22
-            leftEye.scaleY = 1.22
-            rightEye.scaleX = 1.22
-            rightEye.scaleY = 1.22
+            leftEye.scaleX = 1.25
+            leftEye.scaleY = 1.25
+            rightEye.scaleX = 1.25
+            rightEye.scaleY = 1.25
         }
-        try? await Task.sleep(for: .milliseconds(Int.random(in: 400...800)))
-        withAnimation(.easeInOut(duration: 0.25)) {
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 500...1000)))
+        withAnimation(.easeInOut(duration: 0.3)) {
             resetEyes()
         }
         try? await Task.sleep(for: .milliseconds(300))
@@ -235,21 +252,271 @@ struct TarsyEyes: View {
     // MARK: - Suspicious squint
 
     private func doSuspiciousSquint() async {
-        // Slowly narrow the eyes
         withAnimation(.easeInOut(duration: 0.8)) {
             leftEye.scaleX = 0.75
-            leftEye.scaleY = 0.45
+            leftEye.scaleY = 0.4
             rightEye.scaleX = 0.75
-            rightEye.scaleY = 0.45
+            rightEye.scaleY = 0.4
         }
         try? await Task.sleep(for: .milliseconds(900))
-        // Hold the stare...
-        try? await Task.sleep(for: .milliseconds(Int.random(in: 600...1200)))
-        // Slowly return
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 800...1800)))
         withAnimation(.easeInOut(duration: 0.6)) {
             resetEyes()
         }
         try? await Task.sleep(for: .milliseconds(700))
+    }
+
+    // MARK: - Bounce (happy)
+
+    private func doBounce() async {
+        let bounceHeight = step * 1.8
+        let bounces = Int.random(in: 2...4)
+
+        for i in 0..<bounces {
+            let factor = 1.0 - (Double(i) * 0.2) // each bounce smaller
+            withAnimation(.spring(duration: 0.15, bounce: 0.4)) {
+                leftEye.offsetY = -bounceHeight * factor
+                rightEye.offsetY = -bounceHeight * factor
+                leftEye.scaleY = 1.1
+                rightEye.scaleY = 1.1
+            }
+            try? await Task.sleep(for: .milliseconds(160))
+
+            withAnimation(.spring(duration: 0.12, bounce: 0.1)) {
+                leftEye.offsetY = 0
+                rightEye.offsetY = 0
+                // Squish on landing
+                leftEye.scaleX = 1.08
+                leftEye.scaleY = 0.88
+                rightEye.scaleX = 1.08
+                rightEye.scaleY = 0.88
+            }
+            try? await Task.sleep(for: .milliseconds(100))
+
+            withAnimation(.spring(duration: 0.1)) {
+                leftEye.scaleX = 1
+                leftEye.scaleY = 1
+                rightEye.scaleX = 1
+                rightEye.scaleY = 1
+            }
+            try? await Task.sleep(for: .milliseconds(80))
+        }
+        resetEyes()
+    }
+
+    // MARK: - Sleepy
+
+    private func doSleepy() async {
+        // Eyelids droop slowly
+        withAnimation(.easeInOut(duration: 1.0)) {
+            leftEye.scaleY = 0.3
+            rightEye.scaleY = 0.3
+            leftEye.offsetY = step * 0.5
+            rightEye.offsetY = step * 0.5
+        }
+        try? await Task.sleep(for: .milliseconds(1200))
+
+        // Almost closed...
+        withAnimation(.easeInOut(duration: 0.8)) {
+            leftEye.scaleY = 0.1
+            rightEye.scaleY = 0.1
+        }
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 800...1500)))
+
+        // Snap awake!
+        withAnimation(.spring(duration: 0.18, bounce: 0.4)) {
+            leftEye.scaleX = 1.3
+            leftEye.scaleY = 1.3
+            rightEye.scaleX = 1.3
+            rightEye.scaleY = 1.3
+            leftEye.offsetY = 0
+            rightEye.offsetY = 0
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+
+        withAnimation(.easeOut(duration: 0.25)) {
+            resetEyes()
+        }
+        try? await Task.sleep(for: .milliseconds(250))
+    }
+
+    // MARK: - Shy (hide to one side)
+
+    private func doShy() async {
+        let dir: CGFloat = Bool.random() ? 1 : -1
+
+        withAnimation(.easeInOut(duration: 0.4)) {
+            leftEye.offsetX = step * 3 * dir
+            rightEye.offsetX = step * 3 * dir
+            leftEye.scaleX = 0.7
+            leftEye.scaleY = 0.7
+            rightEye.scaleX = 0.7
+            rightEye.scaleY = 0.7
+        }
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 800...1500)))
+
+        // Peek back a little
+        withAnimation(.easeInOut(duration: 0.3)) {
+            leftEye.offsetX = step * 1.5 * dir
+            rightEye.offsetX = step * 1.5 * dir
+            leftEye.scaleX = 0.85
+            leftEye.scaleY = 0.85
+            rightEye.scaleX = 0.85
+            rightEye.scaleY = 0.85
+        }
+        try? await Task.sleep(for: .milliseconds(500))
+
+        withAnimation(.spring(duration: 0.25, bounce: 0.15)) {
+            resetEyes()
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+    }
+
+    // MARK: - Cross-eyed
+
+    private func doCrossEyed() async {
+        withAnimation(.spring(duration: 0.2, bounce: 0.2)) {
+            leftEye.offsetX = step * 1.5
+            rightEye.offsetX = -step * 1.5
+        }
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 600...1200)))
+
+        // Shake it off
+        withAnimation(.spring(duration: 0.15, bounce: 0.3)) {
+            leftEye.offsetX = -step * 0.5
+            rightEye.offsetX = step * 0.5
+        }
+        try? await Task.sleep(for: .milliseconds(120))
+
+        withAnimation(.spring(duration: 0.2, bounce: 0.1)) {
+            resetEyes()
+        }
+        try? await Task.sleep(for: .milliseconds(200))
+    }
+
+    // MARK: - Eye roll (dramatic)
+
+    private func doEyeRoll() async {
+        // Look down first
+        withAnimation(.easeInOut(duration: 0.2)) {
+            leftEye.offsetY = step * 1.2
+            rightEye.offsetY = step * 1.2
+        }
+        try? await Task.sleep(for: .milliseconds(200))
+
+        // Roll up slowly (the classic eye roll)
+        withAnimation(.easeInOut(duration: 0.5)) {
+            leftEye.offsetY = -step * 2
+            rightEye.offsetY = -step * 2
+            leftEye.scaleY = 0.85
+            rightEye.scaleY = 0.85
+        }
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 600...1000)))
+
+        // Come back with a half-close (unimpressed)
+        withAnimation(.easeInOut(duration: 0.3)) {
+            leftEye.offsetY = 0
+            rightEye.offsetY = 0
+            leftEye.scaleY = 0.6
+            rightEye.scaleY = 0.6
+        }
+        try? await Task.sleep(for: .milliseconds(500))
+
+        withAnimation(.easeOut(duration: 0.3)) {
+            resetEyes()
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+    }
+
+    // MARK: - Peek (hide and seek)
+
+    private func doPeek() async {
+        // Both eyes shrink away
+        withAnimation(.easeIn(duration: 0.3)) {
+            leftEye.scaleX = 0
+            leftEye.scaleY = 0
+            rightEye.scaleX = 0
+            rightEye.scaleY = 0
+        }
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 500...900)))
+
+        // One eye peeks out
+        withAnimation(.spring(duration: 0.2, bounce: 0.3)) {
+            rightEye.scaleX = 0.8
+            rightEye.scaleY = 0.8
+        }
+        try? await Task.sleep(for: .milliseconds(400))
+
+        // Other eye joins
+        withAnimation(.spring(duration: 0.2, bounce: 0.3)) {
+            leftEye.scaleX = 0.8
+            leftEye.scaleY = 0.8
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+
+        // Both back to full
+        withAnimation(.spring(duration: 0.2, bounce: 0.25)) {
+            resetEyes()
+        }
+        try? await Task.sleep(for: .milliseconds(200))
+    }
+
+    // MARK: - Head shake (nope)
+
+    private func doHeadShake() async {
+        let shakes = Int.random(in: 2...3)
+        let dist = step * 1.5
+
+        for _ in 0..<shakes {
+            withAnimation(.easeInOut(duration: 0.1)) {
+                leftEye.offsetX = -dist
+                rightEye.offsetX = -dist
+            }
+            try? await Task.sleep(for: .milliseconds(110))
+
+            withAnimation(.easeInOut(duration: 0.1)) {
+                leftEye.offsetX = dist
+                rightEye.offsetX = dist
+            }
+            try? await Task.sleep(for: .milliseconds(110))
+        }
+
+        withAnimation(.spring(duration: 0.15, bounce: 0.1)) {
+            resetEyes()
+        }
+        try? await Task.sleep(for: .milliseconds(150))
+    }
+
+    // MARK: - Excited (vibrate + grow)
+
+    private func doExcited() async {
+        // Grow with excitement
+        withAnimation(.spring(duration: 0.15, bounce: 0.3)) {
+            leftEye.scaleX = 1.15
+            leftEye.scaleY = 1.15
+            rightEye.scaleX = 1.15
+            rightEye.scaleY = 1.15
+        }
+        try? await Task.sleep(for: .milliseconds(150))
+
+        // Rapid tiny vibrations
+        for _ in 0..<6 {
+            let jx = CGFloat.random(in: -step * 0.5...step * 0.5)
+            let jy = CGFloat.random(in: -step * 0.4...step * 0.4)
+            withAnimation(.linear(duration: 0.04)) {
+                leftEye.offsetX = jx
+                leftEye.offsetY = jy
+                rightEye.offsetX = jx + CGFloat.random(in: -step * 0.2...step * 0.2)
+                rightEye.offsetY = jy + CGFloat.random(in: -step * 0.2...step * 0.2)
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+
+        // Settle back down
+        withAnimation(.spring(duration: 0.25, bounce: 0.15)) {
+            resetEyes()
+        }
+        try? await Task.sleep(for: .milliseconds(250))
     }
 
     // MARK: - Shape morph (heart / star)
@@ -258,29 +525,36 @@ struct TarsyEyes: View {
         case none, heart, star
     }
 
+    @ViewBuilder
+    private var morphIcon: some View {
+        switch morphShape {
+        case .heart: Image(systemName: "heart.fill")
+        case .star:  Image(systemName: "star.fill")
+        case .none:  EmptyView()
+        }
+    }
+
     private func doMorph(_ shape: MorphShape) async {
         morphShape = shape
 
-        // Eyes converge and fade out, shape fades in
-        withAnimation(.easeInOut(duration: 0.35)) {
-            leftEye.offsetX = step * 2
-            rightEye.offsetX = -step * 2
-            leftEye.scaleX = 0.5
-            leftEye.scaleY = 0.5
-            rightEye.scaleX = 0.5
-            rightEye.scaleY = 0.5
+        // Eyes shrink in place, shapes fade in on top
+        withAnimation(.easeInOut(duration: 0.3)) {
+            leftEye.scaleX = 0.3
+            leftEye.scaleY = 0.3
+            rightEye.scaleX = 0.3
+            rightEye.scaleY = 0.3
             eyesOpacity = 0
             morphOpacity = 1
         }
-        try? await Task.sleep(for: .milliseconds(Int.random(in: 900...1500)))
+        try? await Task.sleep(for: .milliseconds(Int.random(in: 1200...2200)))
 
-        // Shape fades out, eyes return
-        withAnimation(.easeInOut(duration: 0.35)) {
+        // Shapes fade out, eyes grow back
+        withAnimation(.spring(duration: 0.3, bounce: 0.2)) {
             resetEyes()
             eyesOpacity = 1
             morphOpacity = 0
         }
-        try? await Task.sleep(for: .milliseconds(400))
+        try? await Task.sleep(for: .milliseconds(350))
         morphShape = .none
     }
 
