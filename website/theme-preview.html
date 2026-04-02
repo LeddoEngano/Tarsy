@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tarsy Theme Preview</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@700;800&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'JetBrains Mono', monospace;
+    background: #0e0e0e;
+    color: #ccc;
+    padding: 40px 24px;
+  }
+
+  h1 {
+    font-family: 'Outfit', sans-serif;
+    text-align: center;
+    font-size: 32px;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 13px;
+    color: #666;
+    margin-bottom: 48px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  .theme-card {
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid #222;
+  }
+
+  .theme-header {
+    padding: 20px 24px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .theme-name {
+    font-family: 'Outfit', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+  }
+  .theme-tag {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid;
+  }
+
+  /* Swatch row */
+  .swatches {
+    display: flex;
+    gap: 6px;
+    padding: 0 24px 16px;
+  }
+  .swatch {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.06);
+    position: relative;
+  }
+  .swatch-label {
+    font-size: 8px;
+    text-align: center;
+    margin-top: 3px;
+    opacity: 0.5;
+  }
+  .swatch-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  /* Mini UI preview */
+  .preview {
+    padding: 20px 24px 24px;
+    border-top: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .preview-navbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-radius: 10px;
+    margin-bottom: 12px;
+  }
+  .preview-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .preview-logo-icon {
+    width: 20px;
+    height: 20px;
+    background: #000;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .preview-logo-icon::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    background: #fff;
+    border-radius: 50%;
+    box-shadow: 7px 0 0 0 #fff;
+    margin-left: -3px;
+  }
+  .preview-logo-text {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+  }
+  .preview-btn {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 5px 12px;
+    border-radius: 999px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .preview-hero {
+    padding: 16px;
+  }
+  .preview-badge {
+    font-size: 8px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid;
+    display: inline-block;
+    margin-bottom: 10px;
+  }
+  .preview-h1 {
+    font-family: 'Outfit', sans-serif;
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.1;
+    margin-bottom: 8px;
+  }
+  .preview-p {
+    font-size: 10px;
+    line-height: 1.6;
+    margin-bottom: 14px;
+  }
+  .preview-cta-row {
+    display: flex;
+    gap: 8px;
+  }
+  .preview-cta {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 10px;
+    letter-spacing: 0.5px;
+  }
+  .preview-cta-outline {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 10px;
+    letter-spacing: 0.5px;
+    border: 1px solid;
+    background: transparent;
+  }
+
+  /* Feature cards */
+  .preview-features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 14px;
+    padding: 0 16px 8px;
+  }
+  .preview-feature {
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid;
+  }
+  .preview-feature-title {
+    font-size: 9px;
+    font-weight: 600;
+    margin-bottom: 3px;
+  }
+  .preview-feature-desc {
+    font-size: 8px;
+    line-height: 1.5;
+  }
+
+  /* Terminal */
+  .preview-terminal {
+    margin: 14px 16px 8px;
+    border-radius: 10px;
+    border: 1px solid;
+    overflow: hidden;
+  }
+  .preview-terminal-bar {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 8px 12px;
+    border-bottom: 1px solid;
+  }
+  .preview-terminal-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+  .preview-terminal-body {
+    padding: 10px 12px;
+    font-size: 9px;
+    line-height: 1.8;
+  }
+</style>
+</head>
+<body>
+
+<h1>Tarsy Theme Tester</h1>
+<p class="subtitle">Compare themes side by side. Each shows a mini preview of how the landing page would look.</p>
+
+<div class="grid" id="grid"></div>
+
+<script>
+const themes = [
+  {
+    name: "Zinc Pure",
+    tag: "Monochrome",
+    desc: "100% fiel a logo. Zero cor. Hierarquia so com peso de branco.",
+    ref: "Apple, Nothing, Teenage Engineering",
+    colors: {
+      bg:        "#131316",
+      surface:   "#1c1c21",
+      overlay:   "#2a2a30",
+      textPri:   "#e4e4e7",
+      textSec:   "#71717a",
+      muted:     "#52525b",
+      accent:    "#ffffff",
+      accentSec: "#a1a1aa",
+      success:   "#a1a1aa",
+      error:     "#71717a",
+    }
+  },
+  {
+    name: "Arctic Blue",
+    tag: "Cool",
+    desc: "Azul muted como accent. Profissional, tech, confiavel.",
+    ref: "Linear, GitHub Dark, Arc",
+    colors: {
+      bg:        "#131316",
+      surface:   "#1c1c21",
+      overlay:   "#2a2a30",
+      textPri:   "#e4e4e7",
+      textSec:   "#71717a",
+      muted:     "#52525b",
+      accent:    "#6e8cef",
+      accentSec: "#4a6cd4",
+      success:   "#a1a1aa",
+      error:     "#ef6b6b",
+    }
+  },
+  {
+    name: "Lavender",
+    tag: "Premium",
+    desc: "Lilac/roxo. Moderno, sofisticado, premium feel.",
+    ref: "Raycast, Vercel, Framer",
+    colors: {
+      bg:        "#131316",
+      surface:   "#1c1c21",
+      overlay:   "#2a2a30",
+      textPri:   "#e4e4e7",
+      textSec:   "#71717a",
+      muted:     "#52525b",
+      accent:    "#a78bfa",
+      accentSec: "#8b6de8",
+      success:   "#a1a1aa",
+      error:     "#f87171",
+    }
+  },
+  {
+    name: "Teal",
+    tag: "Dev-native",
+    desc: "Verde/teal. Remete a terminal, dev tools, fresh.",
+    ref: "Warp, Hyper, iTerm",
+    colors: {
+      bg:        "#131316",
+      surface:   "#1c1c21",
+      overlay:   "#2a2a30",
+      textPri:   "#e4e4e7",
+      textSec:   "#71717a",
+      muted:     "#52525b",
+      accent:    "#5eb5a6",
+      accentSec: "#4a9e90",
+      success:   "#5eb5a6",
+      error:     "#ef6b6b",
+    }
+  },
+  {
+    name: "Ember",
+    tag: "Warm",
+    desc: "Amber/peach muted. Acolhedor, quente, distinto.",
+    ref: "One Dark, Gruvbox, Obsidian",
+    colors: {
+      bg:        "#151413",
+      surface:   "#1e1d1b",
+      overlay:   "#2d2b28",
+      textPri:   "#e5e2de",
+      textSec:   "#7a7672",
+      muted:     "#5a5754",
+      accent:    "#e0a06a",
+      accentSec: "#c48a55",
+      success:   "#a3b08c",
+      error:     "#d47b6b",
+    }
+  },
+  {
+    name: "Rose",
+    tag: "Bold",
+    desc: "Pink/rose. Energetico, moderno, ousado.",
+    ref: "Dribbble, Figma, Pitch",
+    colors: {
+      bg:        "#141316",
+      surface:   "#1d1c21",
+      overlay:   "#2b2a30",
+      textPri:   "#e4e4e7",
+      textSec:   "#71717a",
+      muted:     "#52525b",
+      accent:    "#f472b6",
+      accentSec: "#db5ca0",
+      success:   "#a1a1aa",
+      error:     "#f472b6",
+    }
+  },
+  {
+    name: "Mint",
+    tag: "Fresh",
+    desc: "Verde claro/mint. Limpo, energetico, otimista.",
+    ref: "Supabase, Notion, Cron",
+    colors: {
+      bg:        "#131415",
+      surface:   "#1b1d1e",
+      overlay:   "#282b2c",
+      textPri:   "#e4e6e7",
+      textSec:   "#6b7275",
+      muted:     "#515759",
+      accent:    "#34d399",
+      accentSec: "#2ab882",
+      success:   "#34d399",
+      error:     "#ef6b6b",
+    }
+  },
+  {
+    name: "Gold",
+    tag: "Luxe",
+    desc: "Dourado sutil. Luxuoso, premium, exclusivo.",
+    ref: "Craft, Bear, 1Password",
+    colors: {
+      bg:        "#141312",
+      surface:   "#1d1c1a",
+      overlay:   "#2c2a27",
+      textPri:   "#e5e3df",
+      textSec:   "#7d7972",
+      muted:     "#5c5850",
+      accent:    "#d4a84b",
+      accentSec: "#b89040",
+      success:   "#a3b08c",
+      error:     "#d47b6b",
+    }
+  },
+];
+
+function render() {
+  const grid = document.getElementById('grid');
+
+  themes.forEach(t => {
+    const c = t.colors;
+    const card = document.createElement('div');
+    card.className = 'theme-card';
+    card.style.background = c.bg;
+
+    card.innerHTML = `
+      <!-- Header -->
+      <div class="theme-header">
+        <span class="theme-name" style="color: ${c.textPri}">${t.name}</span>
+        <span class="theme-tag" style="color: ${c.accent}; border-color: ${c.accent}33">${t.tag}</span>
+      </div>
+
+      <!-- Swatches -->
+      <div class="swatches">
+        ${[
+          ['bg', c.bg], ['surface', c.surface], ['overlay', c.overlay],
+          ['text', c.textPri], ['sec', c.textSec], ['muted', c.muted],
+          ['accent', c.accent], ['acc2', c.accentSec]
+        ].map(([label, color]) => `
+          <div class="swatch-col">
+            <div class="swatch" style="background: ${color}"></div>
+            <span class="swatch-label" style="color: ${c.textSec}">${label}</span>
+          </div>
+        `).join('')}
+      </div>
+
+      <!-- Description -->
+      <div style="padding: 0 24px 12px; font-size: 10px; color: ${c.textSec}; line-height: 1.6;">
+        ${t.desc}<br>
+        <span style="color: ${c.muted}">Ref: ${t.ref}</span>
+      </div>
+
+      <!-- Preview -->
+      <div class="preview" style="background: ${c.bg}">
+        <!-- Navbar -->
+        <div class="preview-navbar" style="background: ${c.surface}; border: 1px solid ${c.overlay}55">
+          <div class="preview-logo">
+            <div class="preview-logo-icon"></div>
+            <span class="preview-logo-text" style="color: ${c.accent}">TARSY</span>
+          </div>
+          <span class="preview-btn" style="background: ${c.accent}; color: ${c.bg}">Download</span>
+        </div>
+
+        <!-- Hero -->
+        <div class="preview-hero">
+          <span class="preview-badge" style="color: ${c.accent}; border-color: ${c.accent}33">Remote dev, redefined</span>
+          <div class="preview-h1" style="color: ${c.textPri}">
+            Ship code from your <span style="color: ${c.accent}">pocket</span>
+          </div>
+          <p class="preview-p" style="color: ${c.textSec}">
+            Control your Mac dev environment from your iPhone. Live streaming, AI coding agents, and remote access.
+          </p>
+          <div class="preview-cta-row">
+            <span class="preview-cta" style="background: ${c.accent}; color: ${c.bg}">Download for Mac</span>
+            <span class="preview-cta-outline" style="color: ${c.accent}; border-color: ${c.accent}44">iPhone — Soon</span>
+          </div>
+        </div>
+
+        <!-- Features -->
+        <div class="preview-features">
+          <div class="preview-feature" style="background: ${c.surface}; border-color: ${c.overlay}66">
+            <div class="preview-feature-title" style="color: ${c.textPri}">Live Streaming</div>
+            <div class="preview-feature-desc" style="color: ${c.textSec}">Real-time screen from Mac to iPhone</div>
+          </div>
+          <div class="preview-feature" style="background: ${c.surface}; border-color: ${c.overlay}66">
+            <div class="preview-feature-title" style="color: ${c.textPri}">AI Engines</div>
+            <div class="preview-feature-desc" style="color: ${c.textSec}">Claude, Gemini, Codex, Aider</div>
+          </div>
+        </div>
+
+        <!-- Terminal -->
+        <div class="preview-terminal" style="background: ${c.surface}; border-color: ${c.overlay}88">
+          <div class="preview-terminal-bar" style="border-color: ${c.overlay}66">
+            <span class="preview-terminal-dot" style="background: ${c.muted}"></span>
+            <span class="preview-terminal-dot" style="background: ${c.textSec}"></span>
+            <span class="preview-terminal-dot" style="background: ${c.accentSec}"></span>
+            <span style="font-size: 8px; color: ${c.muted}; margin-left: 8px">~/my-project</span>
+          </div>
+          <div class="preview-terminal-body" style="color: ${c.textPri}">
+            $ claude "fix auth bug"<br>
+            <span style="color: ${c.textSec}">&nbsp; Scanning codebase...</span><br>
+            <span style="color: ${c.success}">&nbsp; + Fixed validateToken()</span><br>
+            <span style="color: ${c.success}">&nbsp; + All 128 tests passing</span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    grid.appendChild(card);
+  });
+}
+
+render();
+</script>
+</body>
+</html>
