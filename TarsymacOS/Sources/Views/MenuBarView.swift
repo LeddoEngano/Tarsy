@@ -25,11 +25,11 @@ struct MenuBarView: View {
             // Header
             HStack(alignment: .center) {
                 Text("tarsy")
-                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 14, weight: .bold))
                     .foregroundColor(Theme.textPrimary)
 
                 Text("v\(updateChecker.currentVersion)")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TarsyTheme.font(size: 10))
                     .foregroundColor(Theme.textMuted)
 
                 Spacer()
@@ -47,7 +47,7 @@ struct MenuBarView: View {
                         )
 
                     Text(daemonManager.isRunning ? "online" : "offline")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .font(TarsyTheme.font(size: 10, weight: .medium))
                         .foregroundColor(daemonManager.isRunning ? Theme.moss : Theme.terracotta)
                 }
             }
@@ -119,10 +119,10 @@ struct MenuBarView: View {
             if showUpToDateToast {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 11))
+                        .font(TarsyTheme.font(size: 11))
                         .foregroundColor(Theme.moss)
                     Text("You're up to date")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11, weight: .medium))
                         .foregroundColor(Theme.textPrimary)
                 }
                 .padding(.horizontal, 14)
@@ -168,13 +168,13 @@ struct MenuBarView: View {
                         .frame(width: 16, height: 16)
                 } else {
                     Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 11))
+                        .font(TarsyTheme.font(size: 11))
                         .foregroundColor(Theme.textSecondary)
                         .frame(width: 16, alignment: .center)
                 }
 
                 Text("Check for Updates")
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(Theme.textPrimary)
 
                 Spacer()
@@ -208,12 +208,12 @@ struct MenuBarView: View {
     ) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(TarsyTheme.font(size: 11))
                 .foregroundColor(color)
                 .frame(width: 16, alignment: .center)
 
             Text(label)
-                .font(.system(size: 12, design: .monospaced))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(Theme.textPrimary)
 
             Spacer()
@@ -228,16 +228,16 @@ struct MenuBarView: View {
             HStack(spacing: 8) {
                 Image(systemName: "arrow.down.circle.fill")
                     .foregroundColor(Theme.amber)
-                    .font(.system(size: 14))
+                    .font(TarsyTheme.font(size: 14))
 
                 VStack(alignment: .leading, spacing: 1) {
                     Text("v\(update.version) available")
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11, weight: .semibold))
                         .foregroundColor(Theme.textPrimary)
 
                     if let notes = update.releaseNotes {
                         Text(notes)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TarsyTheme.font(size: 10))
                             .foregroundColor(Theme.textSecondary)
                             .lineLimit(2)
                     }
@@ -249,7 +249,7 @@ struct MenuBarView: View {
                     updateChecker.dismiss()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 8, weight: .medium))
+                        .font(TarsyTheme.font(size: 8, weight: .medium))
                         .foregroundColor(Theme.textMuted)
                 }
                 .buttonStyle(.plain)
@@ -260,7 +260,7 @@ struct MenuBarView: View {
                 NSWorkspace.shared.open(update.downloadURL)
             } label: {
                 Text("Download")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 11, weight: .medium))
                     .foregroundColor(Theme.bg)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 5)

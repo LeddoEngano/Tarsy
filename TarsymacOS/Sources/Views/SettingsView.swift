@@ -96,12 +96,12 @@ struct SettingsView: View {
                         .fill(Theme.border)
                         .frame(width: 52, height: 52)
                     Text(initials)
-                        .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                        .font(TarsyTheme.font(size: 20, weight: .semibold))
                         .foregroundColor(Theme.amber)
                 }
 
                 Text(authManager.currentUser?.email ?? "unknown")
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13, weight: .medium))
                     .foregroundColor(Theme.textPrimary)
             }
             .padding(.bottom, 24)
@@ -147,7 +147,7 @@ struct SettingsView: View {
                         showDeleteConfirmation = true
                     } label: {
                         Text("Delete Account")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TarsyTheme.font(size: 11))
                             .foregroundColor(Theme.terracotta.opacity(0.7))
                     }
                     .buttonStyle(.plain)
@@ -156,7 +156,7 @@ struct SettingsView: View {
 
                 if let error = deleteError {
                     Text(error)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TarsyTheme.font(size: 10))
                         .foregroundColor(Theme.terracotta)
                         .lineLimit(2)
                 }
@@ -171,11 +171,11 @@ struct SettingsView: View {
 
             VStack(spacing: 6) {
                 Text("sign in")
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 16, weight: .bold))
                     .foregroundColor(Theme.textPrimary)
 
                 Text("sign in to connect your devices")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TarsyTheme.font(size: 11))
                     .foregroundColor(Theme.textSecondary)
             }
             .padding(.bottom, 16)
@@ -194,9 +194,9 @@ struct SettingsView: View {
                     }) {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
-                                .font(.system(size: 9, weight: .medium))
+                                .font(TarsyTheme.font(size: 9, weight: .medium))
                             Text("back")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(TarsyTheme.font(size: 11))
                         }
                         .foregroundColor(Theme.textMuted)
                     }
@@ -274,9 +274,9 @@ struct SettingsView: View {
                 if !confirmPassword.isEmpty && confirmPassword != password {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
+                            .font(TarsyTheme.font(size: 10))
                         Text("passwords don't match")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TarsyTheme.font(size: 11))
                     }
                     .foregroundColor(Theme.terracotta)
                     .padding(.top, 2)
@@ -286,9 +286,9 @@ struct SettingsView: View {
             if let error = authManager.errorMessage {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10))
+                        .font(TarsyTheme.font(size: 10))
                     Text(error)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11))
                 }
                 .foregroundColor(Theme.terracotta)
                 .padding(.top, 2)
@@ -313,7 +313,7 @@ struct SettingsView: View {
                         .frame(width: 14, height: 14)
                 }
                 Text(isSignUp ? "create account" : "sign in")
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12, weight: .medium))
             }
             .foregroundColor(Theme.bg)
             .frame(maxWidth: .infinity)
@@ -337,7 +337,7 @@ struct SettingsView: View {
     private var signInToggle: some View {
         Button(action: { isSignUp.toggle() }) {
             Text(isSignUp ? "already have an account? sign in" : "no account? sign up")
-                .font(.system(size: 11, design: .monospaced))
+                .font(TarsyTheme.font(size: 11))
                 .foregroundColor(Theme.textMuted)
         }
         .buttonStyle(.plain)
@@ -347,12 +347,12 @@ struct SettingsView: View {
     private func signInStyledTextField(_ placeholder: String, text: Binding<String>) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "envelope")
-                .font(.system(size: 12))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(Theme.textMuted)
                 .frame(width: 16)
             TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
                 .textFieldStyle(.plain)
-                .font(.system(size: 12, design: .monospaced))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(Theme.textPrimary)
         }
         .padding(10)
@@ -369,25 +369,25 @@ struct SettingsView: View {
     private func signInStyledSecureField(_ placeholder: String, text: Binding<String>) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "lock")
-                .font(.system(size: 12))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(Theme.textMuted)
                 .frame(width: 16)
 
             if showPassword {
                 TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(Theme.textPrimary)
             } else {
                 SecureField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(Theme.textPrimary)
             }
 
             Button(action: { showPassword.toggle() }) {
                 Image(systemName: showPassword ? "eye.slash" : "eye")
-                    .font(.system(size: 11))
+                    .font(TarsyTheme.font(size: 11))
                     .foregroundColor(Theme.textMuted)
             }
             .buttonStyle(.plain)
@@ -440,11 +440,11 @@ struct SettingsView: View {
     private func connectionRow(label: String, value: String, valueColor: Color = Theme.textPrimary) -> some View {
         HStack {
             Text(label)
-                .font(.system(size: 12, design: .monospaced))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(Theme.textSecondary)
             Spacer()
             Text(value)
-                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                .font(TarsyTheme.font(size: 12, weight: .medium))
                 .foregroundColor(valueColor)
         }
     }
@@ -453,9 +453,9 @@ struct SettingsView: View {
         Button(action: action) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .font(.system(size: 11))
+                    .font(TarsyTheme.font(size: 11))
                 Text(label)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12))
             }
             .foregroundColor(Theme.textSecondary)
             .frame(maxWidth: .infinity)
@@ -475,7 +475,7 @@ struct SettingsView: View {
 
     private func linkLabel(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 11, design: .monospaced))
+            .font(TarsyTheme.font(size: 11))
             .foregroundColor(Theme.textMuted)
             .underline(color: Theme.textMuted.opacity(0.5))
     }

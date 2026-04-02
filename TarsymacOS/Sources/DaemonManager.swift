@@ -366,6 +366,24 @@ class DaemonManager: ObservableObject {
                 Task { @MainActor in
                     if connected {
                         self?.log("Relay connected")
+                        // Send detected agents to relay clients (mirrors LAN onConnect behavior)
+                        let agents = self?.detectedAgents ?? []
+                        if !agents.isEmpty {
+                            let packet = WSPacket(
+                                action: .agentsDetected,
+                                payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
+                            )
+                            await self?.sendToClientOrRelay(packet, to: "relay")
+                        }
+                        // Send OpenClaw availability
+                        let openclawInstalled = await self?.openClaw.isInstalled() ?? false
+                        await self?.sendToClientOrRelay(
+                            WSPacket(action: .openclawStatus, payload: [
+                                "installed": openclawInstalled ? "true" : "false",
+                                "running": "false"
+                            ]),
+                            to: "relay"
+                        )
                     } else if attempt > 0 {
                         self?.log("Relay disconnected — reconnecting (attempt \(attempt))")
                     } else {

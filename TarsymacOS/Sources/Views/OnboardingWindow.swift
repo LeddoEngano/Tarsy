@@ -109,13 +109,13 @@ struct OnboardingWindow: View {
                     .clipShape(RoundedRectangle(cornerRadius: 5))
 
                 Text("tarsy")
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 16, weight: .bold))
                     .foregroundColor(Theme.textPrimary)
 
                 Spacer()
 
                 Text("setup")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TarsyTheme.font(size: 11))
                     .foregroundColor(Theme.textMuted)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
@@ -156,16 +156,16 @@ struct OnboardingWindow: View {
         return HStack(spacing: 6) {
             if done {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 8, weight: .bold))
+                    .font(TarsyTheme.font(size: 8, weight: .bold))
                     .foregroundColor(Theme.moss)
             } else {
                 Text("\(index + 1)")
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 9, weight: .bold))
                     .foregroundColor(active ? Theme.amber : Theme.textMuted)
             }
 
             Text(label)
-                .font(.system(size: 10, weight: active ? .semibold : .regular, design: .monospaced))
+                .font(TarsyTheme.font(size: 10, weight: active ? .semibold : .regular))
                 .foregroundColor(done ? Theme.moss : active ? Theme.amber : Theme.textMuted)
         }
         .padding(.horizontal, 10)
@@ -218,9 +218,9 @@ struct OnboardingWindow: View {
                     }) {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
-                                .font(.system(size: 9, weight: .medium))
+                                .font(TarsyTheme.font(size: 9, weight: .medium))
                             Text("back")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(TarsyTheme.font(size: 11))
                         }
                         .foregroundColor(Theme.textMuted)
                     }
@@ -255,11 +255,11 @@ struct OnboardingWindow: View {
     private var loginHeader: some View {
         VStack(spacing: 6) {
             Text("welcome to tarsy")
-                .font(.system(size: 18, weight: .bold, design: .monospaced))
+                .font(TarsyTheme.font(size: 18, weight: .bold))
                 .foregroundColor(Theme.textPrimary)
 
             Text("sign in to connect your devices")
-                .font(.system(size: 12, design: .monospaced))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(Theme.textSecondary)
         }
     }
@@ -312,9 +312,9 @@ struct OnboardingWindow: View {
                 if !confirmPassword.isEmpty && confirmPassword != password {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 10))
+                            .font(TarsyTheme.font(size: 10))
                         Text("passwords don't match")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TarsyTheme.font(size: 11))
                     }
                     .foregroundColor(Theme.terracotta)
                     .padding(.top, 2)
@@ -324,9 +324,9 @@ struct OnboardingWindow: View {
             if let error = authManager.errorMessage {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10))
+                        .font(TarsyTheme.font(size: 10))
                     Text(error)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(TarsyTheme.font(size: 11))
                 }
                 .foregroundColor(Theme.terracotta)
                 .padding(.top, 2)
@@ -351,7 +351,7 @@ struct OnboardingWindow: View {
                         .frame(width: 14, height: 14)
                 }
                 Text(isSignUp ? "create account" : "sign in")
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13, weight: .medium))
             }
             .foregroundColor(Theme.bg)
             .frame(maxWidth: .infinity)
@@ -375,7 +375,7 @@ struct OnboardingWindow: View {
     private var loginToggle: some View {
         Button(action: { isSignUp.toggle() }) {
             Text(isSignUp ? "already have an account? sign in" : "no account? sign up")
-                .font(.system(size: 11, design: .monospaced))
+                .font(TarsyTheme.font(size: 11))
                 .foregroundColor(Theme.textMuted)
         }
         .buttonStyle(.plain)
@@ -401,7 +401,7 @@ struct OnboardingWindow: View {
             .buttonStyle(.plain)
             .pointerOnHover()
         }
-        .font(.system(size: 10, design: .monospaced))
+        .font(TarsyTheme.font(size: 10))
         .padding(.bottom, 20)
     }
 
@@ -484,26 +484,26 @@ struct OnboardingWindow: View {
                         .fill(info.isGranted ? Theme.moss.opacity(0.1) : Theme.amber.opacity(0.1))
                         .frame(width: 64, height: 64)
                     Image(systemName: info.isGranted ? "checkmark" : info.icon)
-                        .font(.system(size: info.isGranted ? 22 : 26, weight: info.isGranted ? .bold : .regular))
+                        .font(TarsyTheme.font(size: info.isGranted ? 22 : 26, weight: info.isGranted ? .bold : .regular))
                         .foregroundColor(info.isGranted ? Theme.moss : Theme.amber)
                 }
                 .padding(.bottom, 16)
 
                 // Title
                 Text(info.title)
-                    .font(.system(size: 18, weight: .bold, design: .monospaced))
+                    .font(TarsyTheme.font(size: 18, weight: .bold))
                     .foregroundColor(Theme.textPrimary)
                     .padding(.bottom, 4)
 
                 // Step indicator
                 Text("step \(permissionSubStep.rawValue + 1) of \(totalPermissions)")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 10, weight: .medium))
                     .foregroundColor(Theme.textMuted)
                     .padding(.bottom, 14)
 
                 // Why explanation
                 Text(info.why)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(Theme.textSecondary)
                     .multilineTextAlignment(.center)
                     .lineSpacing(3)
@@ -520,18 +520,18 @@ struct OnboardingWindow: View {
                     VStack(spacing: 10) {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark.circle.fill")
-                                .font(.system(size: 14))
+                                .font(TarsyTheme.font(size: 14))
                             Text("granted")
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                .font(TarsyTheme.font(size: 13, weight: .medium))
                         }
                         .foregroundColor(Theme.moss)
 
                         Button(action: { advanceToNextUngranted() }) {
                             HStack(spacing: 5) {
                                 Text(allPermissionsGranted ? "continue" : "next")
-                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .font(TarsyTheme.font(size: 12, weight: .medium))
                                 Image(systemName: "arrow.right")
-                                    .font(.system(size: 10, weight: .medium))
+                                    .font(TarsyTheme.font(size: 10, weight: .medium))
                             }
                             .foregroundColor(Theme.textSecondary)
                             .padding(.horizontal, 16)
@@ -548,9 +548,9 @@ struct OnboardingWindow: View {
                     Button(action: { grantCurrentPermission() }) {
                         HStack(spacing: 6) {
                             Image(systemName: "lock.open")
-                                .font(.system(size: 11))
+                                .font(TarsyTheme.font(size: 11))
                             Text("grant permission")
-                                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                                .font(TarsyTheme.font(size: 13, weight: .medium))
                         }
                         .foregroundColor(Theme.bg)
                         .padding(.horizontal, 24)
@@ -610,7 +610,7 @@ struct OnboardingWindow: View {
         VStack(spacing: 6) {
             HStack {
                 Text("\(grantedCount) of \(totalPermissions) granted")
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 10, weight: .medium))
                     .foregroundColor(allPermissionsGranted ? Theme.moss : Theme.textSecondary)
                 Spacer()
             }
@@ -725,12 +725,12 @@ struct OnboardingWindow: View {
                 .padding(.bottom, 16)
 
             Text("tarsy is ready")
-                .font(.system(size: 20, weight: .bold, design: .monospaced))
+                .font(TarsyTheme.font(size: 20, weight: .bold))
                 .foregroundColor(Theme.textPrimary)
                 .padding(.bottom, 4)
 
             Text("everything is set up and running")
-                .font(.system(size: 12, design: .monospaced))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(Theme.textSecondary)
                 .padding(.bottom, 24)
 
@@ -739,7 +739,7 @@ struct OnboardingWindow: View {
                 .padding(.bottom, 28)
 
             Text("tarsy runs in your menu bar.\nopen the app on your iPhone to start.")
-                .font(.system(size: 11, design: .monospaced))
+                .font(TarsyTheme.font(size: 11))
                 .foregroundColor(Theme.textMuted)
                 .multilineTextAlignment(.center)
                 .lineSpacing(3)
@@ -783,9 +783,9 @@ struct OnboardingWindow: View {
         Button(action: { closeWindow() }) {
             HStack(spacing: 8) {
                 Image(systemName: "menubar.arrow.up.rectangle")
-                    .font(.system(size: 12))
+                    .font(TarsyTheme.font(size: 12))
                 Text("minimize to menu bar")
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13, weight: .medium))
             }
             .foregroundColor(Theme.bg)
             .frame(maxWidth: 260)
@@ -802,12 +802,12 @@ struct OnboardingWindow: View {
     private func readyRow(icon: String, text: String) -> some View {
         HStack(spacing: 10) {
             Image(systemName: icon)
-                .font(.system(size: 10))
+                .font(TarsyTheme.font(size: 10))
                 .foregroundColor(Theme.moss)
                 .frame(width: 16, alignment: .center)
 
             Text(text)
-                .font(.system(size: 11, design: .monospaced))
+                .font(TarsyTheme.font(size: 11))
                 .foregroundColor(Theme.textSecondary)
 
             Spacer()
@@ -825,12 +825,12 @@ struct OnboardingWindow: View {
     private func styledTextField(_ placeholder: String, text: Binding<String>) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "envelope")
-                .font(.system(size: 12))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(Theme.textMuted)
                 .frame(width: 16)
             TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13, design: .monospaced))
+                .font(TarsyTheme.font(size: 13))
                 .foregroundColor(Theme.textPrimary)
         }
         .padding(12)
@@ -847,25 +847,25 @@ struct OnboardingWindow: View {
     private func styledSecureField(_ placeholder: String, text: Binding<String>) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "lock")
-                .font(.system(size: 12))
+                .font(TarsyTheme.font(size: 12))
                 .foregroundColor(Theme.textMuted)
                 .frame(width: 16)
 
             if showPassword {
                 TextField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13))
                     .foregroundColor(Theme.textPrimary)
             } else {
                 SecureField("", text: text, prompt: Text(placeholder).foregroundColor(Theme.textMuted))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 13, design: .monospaced))
+                    .font(TarsyTheme.font(size: 13))
                     .foregroundColor(Theme.textPrimary)
             }
 
             Button(action: { showPassword.toggle() }) {
                 Image(systemName: showPassword ? "eye.slash" : "eye")
-                    .font(.system(size: 12))
+                    .font(TarsyTheme.font(size: 12))
                     .foregroundColor(Theme.textMuted)
             }
             .buttonStyle(.plain)
@@ -901,7 +901,7 @@ struct OAuthButtonView: View {
             HStack(spacing: 8) {
                 if isSystemImage {
                     Image(systemName: icon)
-                        .font(.system(size: 18, weight: .medium))
+                        .font(TarsyTheme.font(size: 18, weight: .medium))
                         .frame(width: 18, height: 18)
                 } else {
                     Image(icon)
@@ -910,7 +910,7 @@ struct OAuthButtonView: View {
                         .frame(width: 18, height: 18)
                 }
                 Text(label)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(TarsyTheme.font(size: 14, weight: .medium))
             }
             .foregroundColor(.white)
             .frame(maxWidth: .infinity)
@@ -968,30 +968,6 @@ extension View {
     }
 }
 
-// Color extension for macOS
-extension Color {
-    init(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        var int: UInt64 = 0
-        Scanner(string: hex).scanHexInt64(&int)
-        let a, r, g, b: UInt64
-        switch hex.count {
-        case 6:
-            (a, r, g, b) = (255, (int >> 16) & 0xFF, (int >> 8) & 0xFF, int & 0xFF)
-        case 8:
-            (a, r, g, b) = ((int >> 24) & 0xFF, (int >> 16) & 0xFF, (int >> 8) & 0xFF, int & 0xFF)
-        default:
-            (a, r, g, b) = (255, 0, 0, 0)
-        }
-        self.init(
-            .sRGB,
-            red: Double(r) / 255,
-            green: Double(g) / 255,
-            blue: Double(b) / 255,
-            opacity: Double(a) / 255
-        )
-    }
-}
 
 #if DEBUG
 #Preview("Onboarding") {
