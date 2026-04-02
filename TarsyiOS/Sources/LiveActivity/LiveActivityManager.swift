@@ -16,6 +16,18 @@ class LiveActivityManager: ObservableObject {
     /// Activities go stale after this interval without updates, triggering the "Updating…" fallback UI
     private let staleTTL: TimeInterval = 120
 
+    /// Natural-looking pupil positions for the animated Tarsy eyes
+    private let pupilPositions: [(x: Double, y: Double)] = [
+        (0, 0),          // center
+        (0.3, 0),        // right
+        (-0.3, 0),       // left
+        (0, -0.25),      // up
+        (0.2, 0.15),     // down-right
+        (-0.2, 0.15),    // down-left
+        (0.15, -0.2),    // up-right
+        (-0.15, -0.2),   // up-left
+    ]
+
     private init() {}
 
     // MARK: - Keys
@@ -50,11 +62,14 @@ class LiveActivityManager: ObservableObject {
             engineIcon: engineType.iconName
         )
 
+        let pupil = randomPupil()
         let state = TarsyActivityAttributes.ContentState(
             status: "running",
             currentTool: "Starting",
             currentToolIcon: "arrow.triangle.2.circlepath",
-            startedAt: now
+            startedAt: now,
+            pupilX: pupil.x,
+            pupilY: pupil.y
         )
 
         do {
@@ -88,13 +103,16 @@ class LiveActivityManager: ObservableObject {
 
         if let cp = contextPercent { contextPercents[activityKey] = cp }
         let cp = contextPercents[activityKey] ?? 0
+        let pupil = randomPupil()
 
         let state = TarsyActivityAttributes.ContentState(
             status: "running",
             currentTool: tool.displayName,
             currentToolIcon: tool.iconName,
             startedAt: startDate,
-            contextPercent: cp
+            contextPercent: cp,
+            pupilX: pupil.x,
+            pupilY: pupil.y
         )
 
         Task { await activity.update(.init(state: state, staleDate: .now.addingTimeInterval(staleTTL))) }
@@ -108,32 +126,42 @@ class LiveActivityManager: ObservableObject {
               let startDate = startDates[activityKey] else { return }
 
         let currentState = activity.content.state
+        let pupil = randomPupil()
         let state = TarsyActivityAttributes.ContentState(
             status: currentState.status,
             currentTool: currentState.currentTool,
             currentToolIcon: currentState.currentToolIcon,
             startedAt: startDate,
             contextPercent: contextPercent,
-            message: currentState.message
+            message: currentState.message,
+            pupilX: pupil.x,
+            pupilY: pupil.y
         )
 
         Task { await activity.update(.init(state: state, staleDate: .now.addingTimeInterval(staleTTL))) }
     }
 
-    func updateStatus(workspaceId: String, status: String, tabId: String? = nil, message: String? = nil) {
+    func updateStatus(workspaceId: String, status: String, tabId: String? = nil, message: String? = nil, sessionId: String? = nil, engineType: String? = nil, questionKey: String? = nil, questionOptions: [String]? = nil) {
         let activityKey = key(workspaceId: workspaceId, tabId: tabId)
         guard let activity = activities[activityKey],
               let startDate = startDates[activityKey] else { return }
 
         let cp = contextPercents[activityKey] ?? 0
         let currentState = activity.content.state
+        let pupil = randomPupil()
         let state = TarsyActivityAttributes.ContentState(
             status: status,
             currentTool: status == "waiting" ? "Needs input" : currentState.currentTool,
             currentToolIcon: status == "waiting" ? "questionmark.circle" : currentState.currentToolIcon,
             startedAt: startDate,
             contextPercent: cp,
-            message: status == "waiting" ? message : nil
+            message: status == "waiting" ? message : nil,
+            pupilX: pupil.x,
+            pupilY: pupil.y,
+            sessionId: status == "waiting" ? sessionId : nil,
+            engineTypeRaw: status == "waiting" ? engineType : nil,
+            questionKey: status == "waiting" ? questionKey : nil,
+            questionOptions: status == "waiting" ? questionOptions : nil
         )
 
         let content = ActivityContent(state: state, staleDate: .now.addingTimeInterval(staleTTL))
@@ -256,6 +284,11 @@ class LiveActivityManager: ObservableObject {
         Task { await removeAllLiveActivityTokens() }
     }
 
+    /// Returns a random pupil position from the preset list
+    private func randomPupil() -> (x: Double, y: Double) {
+        pupilPositions.randomElement() ?? (0, 0)
+    }
+
     var hasActiveActivities: Bool {
         !activities.isEmpty || !Activity<TarsyActivityAttributes>.activities.filter({
             $0.activityState == .active || $0.activityState == .stale
@@ -316,4 +349,89 @@ class LiveActivityManager: ObservableObject {
 #endif
         }
     }
+
+    // MARK: - Widget Permission Response Observer
+
+    /// Callback invoked when a permission response arrives from the Live Activity widget buttons.
+    /// Set this from the app root to forward responses via WebSocket.
+    /// Parameters: (sessionId, answer, engineType, workspaceId)
+    var onPermissionResponse: ((String, String, String, String) -> Void)?
+
+    private var darwinObserverRegistered = false
+
+    /// App Group identifier shared with the widget extension
+    private let appGroupId = "group.com.tarsy.ios"
+    /// UserDefaults key for pending permission responses
+    private let pendingResponseKey = "pendingPermissionResponse"
+    /// Tracks the last processed response ID to deduplicate rapid taps
+    private var lastProcessedResponseId: String?
+
+    /// Start observing Darwin notifications from the widget extension.
+    /// Call once from the app root after setting `onPermissionResponse`.
+    func startWidgetResponseObserver() {
+        guard !darwinObserverRegistered else { return }
+        darwinObserverRegistered = true
+
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            nil,
+            Self.darwinCallback,
+            "com.tarsy.ios.permissionResponse" as CFString,
+            nil,
+            .deliverImmediately
+        )
+
+        // Check for any pending response from a previous widget interaction
+        // (e.g., if the app was killed when the user tapped a button)
+        processWidgetResponse()
+    }
+
+    /// C-function callback for Darwin notification — dispatches to MainActor
+    private static let darwinCallback: CFNotificationCallback = { _, _, _, _, _ in
+        Task { @MainActor in
+            LiveActivityManager.shared.processWidgetResponse()
+        }
+    }
+
+    /// Read a pending permission response from App Group UserDefaults,
+    /// update the Live Activity, and forward via the `onPermissionResponse` callback.
+    func processWidgetResponse() {
+        guard let defaults = UserDefaults(suiteName: appGroupId),
+              let data = defaults.data(forKey: pendingResponseKey),
+              let response = try? JSONDecoder().decode([String: String].self, from: data),
+              let sessionId = response["sessionId"],
+              let answer = response["answer"],
+              let engineType = response["engineType"],
+              let workspaceId = response["workspaceId"] else { return }
+
+        // Clear the pending response immediately to prevent double-processing
+        defaults.removeObject(forKey: pendingResponseKey)
+        defaults.synchronize()
+
+        // Update Live Activity back to "running"
+        updateStatus(workspaceId: workspaceId, status: "running")
+
+        // Forward the response to the WebSocket connection
+        onPermissionResponse?(sessionId, answer, engineType, workspaceId)
+
+        // Notify in-app UI (WorkspaceView) to clear the question overlay
+        NotificationCenter.default.post(
+            name: .widgetPermissionResponseProcessed,
+            object: nil,
+            userInfo: [
+                "workspaceId": workspaceId,
+                "sessionId": sessionId,
+            ]
+        )
+
+#if DEBUG
+        print("[LiveActivity] Processed widget permission response: \(answer) for session \(sessionId)")
+#endif
+    }
+}
+
+extension Notification.Name {
+    /// Posted when a permission response from the Live Activity widget has been processed.
+    /// userInfo contains "workspaceId" and "sessionId".
+    static let widgetPermissionResponseProcessed = Notification.Name("widgetPermissionResponseProcessed")
 }
