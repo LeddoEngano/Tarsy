@@ -450,28 +450,30 @@ actor ClaudeCodeSession: AIEngine {
     private func sendControlResponse(requestId: String, allow: Bool, input: [String: Any]?) {
         guard let pipe = stdinPipe else { return }
 
-        let response: [String: Any]
+        let permissionResult: [String: Any]
         if allow {
-            response = [
-                "type": "control_response",
-                "request_id": requestId,
-                "response": [
-                    "behavior": "allow",
-                    "updatedInput": input ?? [:]
-                ] as [String: Any]
+            permissionResult = [
+                "behavior": "allow",
+                "updatedInput": input ?? [:]
             ]
         } else {
-            response = [
-                "type": "control_response",
-                "request_id": requestId,
-                "response": [
-                    "behavior": "deny",
-                    "message": "User denied this action"
-                ] as [String: Any]
+            permissionResult = [
+                "behavior": "deny",
+                "message": "User denied this action"
             ]
         }
 
-        if let data = try? JSONSerialization.data(withJSONObject: response),
+        // SDK format: nested response with subtype "success"
+        let envelope: [String: Any] = [
+            "type": "control_response",
+            "response": [
+                "subtype": "success",
+                "request_id": requestId,
+                "response": permissionResult
+            ] as [String: Any]
+        ]
+
+        if let data = try? JSONSerialization.data(withJSONObject: envelope),
            var jsonStr = String(data: data, encoding: .utf8) {
             jsonStr += "\n"
             if let bytes = jsonStr.data(using: .utf8) {
