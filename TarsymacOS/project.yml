@@ -42,6 +42,8 @@ targets:
         com.apple.security.network.client: true
         com.apple.security.network.server: true
         com.apple.security.automation.apple-events: true
+        keychain-access-groups:
+          - "$(AppIdentifierPrefix)com.tarsy.macos"
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tarsy.macos

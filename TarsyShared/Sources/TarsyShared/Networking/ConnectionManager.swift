@@ -863,10 +863,12 @@ public class ConnectionManager: ObservableObject {
     }
 
     /// Returns a stable host key for fingerprint storage.
-    /// For relay-only connections (no LAN host known), returns nil to skip TOFU pinning
-    /// rather than sharing a single key across different machines.
+    /// Only used for LAN connections where the host IP is directly verified.
+    /// For relay connections, returns nil to skip TOFU pinning — even if `host` is set
+    /// from a previous LAN attempt (e.g., smartConnect fallback), the relay path should
+    /// use signature-only verification since the LAN host context doesn't apply.
     private var fingerprintHost: String? {
-        return host
+        return connectionMode == .lan ? host : nil
     }
 
     // MARK: - Fingerprint Keychain Storage

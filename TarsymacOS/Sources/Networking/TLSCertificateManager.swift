@@ -216,7 +216,7 @@ final class TLSCertificateManager {
     /// Signs data with the TLS private key (RSA-PSS SHA256).
     /// Used to bind E2E public keys to the TLS identity, preventing relay MITM.
     func sign(_ data: Data) -> Data? {
-        guard let identity = loadIdentityFromKeychain() else { return nil }
+        guard let identity = getOrCreateIdentity() else { return nil }
 
         var privateKeyRef: SecKey?
         let status = SecIdentityCopyPrivateKey(identity, &privateKeyRef)
@@ -237,7 +237,7 @@ final class TLSCertificateManager {
 
     /// Returns the DER-encoded certificate data for verification on the iOS side.
     func certificateDER() -> Data? {
-        guard let identity = loadIdentityFromKeychain() else { return nil }
+        guard let identity = getOrCreateIdentity() else { return nil }
         var certRef: SecCertificate?
         let status = SecIdentityCopyCertificate(identity, &certRef)
         guard status == errSecSuccess, let cert = certRef else { return nil }
