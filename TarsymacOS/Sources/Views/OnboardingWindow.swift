@@ -465,6 +465,8 @@ struct OnboardingWindow: View {
             CGRequestScreenCaptureAccess()
         } else if permissionSubStep == .automation {
             requestAutomationPermission()
+        } else if permissionSubStep == .filesAndFolders {
+            requestFilesAndFoldersPermission()
         } else if let key = permissionInfo(for: permissionSubStep).settingsKey {
             openSettings(key)
         }
@@ -682,31 +684,43 @@ struct OnboardingWindow: View {
         CGPreflightScreenCaptureAccess()
     }
 
+    /// Check that we have access to TCC-protected directories (Desktop and Documents).
+    /// Non-protected directories (Developer, Code, etc.) don't require TCC consent,
+    /// so we must specifically verify the protected ones.
     private func preAccessDirectories() -> Bool {
         let fm = FileManager.default
-        let dirs = [
+        let tccProtectedDirs = [
             NSHomeDirectory() + "/Desktop",
             NSHomeDirectory() + "/Documents",
-            NSHomeDirectory() + "/Projects",
-            NSHomeDirectory() + "/Developer",
-            NSHomeDirectory() + "/Code",
-            NSHomeDirectory() + "/repos",
-            NSHomeDirectory() + "/dev",
-            NSHomeDirectory() + "/work",
-            NSHomeDirectory() + "/src",
-            NSHomeDirectory()
         ]
 
-        var accessCount = 0
-        for dir in dirs {
+        for dir in tccProtectedDirs {
             if fm.fileExists(atPath: dir) {
-                if let _ = try? fm.contentsOfDirectory(atPath: dir) {
-                    accessCount += 1
+                if (try? fm.contentsOfDirectory(atPath: dir)) == nil {
+                    return false
                 }
             }
         }
 
-        return accessCount >= 2
+        return true
+    }
+
+    /// Force access to TCC-protected directories to trigger the macOS consent dialog.
+    /// Simply opening System Settings does NOT grant permission — the app must actually
+    /// attempt file access so macOS shows its native "would like to access" dialog.
+    private func requestFilesAndFoldersPermission() {
+        let fm = FileManager.default
+        let tccProtectedDirs = [
+            NSHomeDirectory() + "/Desktop",
+            NSHomeDirectory() + "/Documents",
+        ]
+
+        for dir in tccProtectedDirs {
+            if fm.fileExists(atPath: dir) {
+                // This triggers the TCC consent dialog for each protected directory
+                _ = try? fm.contentsOfDirectory(atPath: dir)
+            }
+        }
     }
 
     private func openSettings(_ key: String) {
