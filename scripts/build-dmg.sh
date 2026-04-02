@@ -38,10 +38,15 @@ echo "==> Exporting app from archive..."
 ARCHIVE_APP="$BUILD_DIR/$APP_NAME.xcarchive/Products/Applications/$SCHEME.app"
 cp -R "$ARCHIVE_APP" "$APP_PATH"
 
-# ─── Re-sign with Developer ID (deep) ───────────────────────────────
+# Remove development provisioning profile (incompatible with Developer ID signing)
+rm -f "$APP_PATH/Contents/embedded.provisionprofile"
+
+# ─── Re-sign with Developer ID ──────────────────────────────────────
 echo "==> Signing with Developer ID..."
 ENTITLEMENTS="$ROOT_DIR/TarsymacOS/TarsymacOS.entitlements"
-codesign --force --deep --options runtime \
+
+# Sign the main executable (no --deep; there are no nested frameworks)
+codesign --force --options runtime \
     --entitlements "$ENTITLEMENTS" \
     --sign "$SIGN_IDENTITY" \
     "$APP_PATH"
