@@ -18,10 +18,10 @@ const APNS_TEAM_ID = Deno.env.get("APNS_TEAM_ID") ?? "";
 const APNS_PRIVATE_KEY_B64 = Deno.env.get("APNS_PRIVATE_KEY") ?? "";
 const APNS_BUNDLE_ID = Deno.env.get("APNS_BUNDLE_ID") || "com.tarsy.ios";
 
-// Use sandbox for development, production for release
-const APNS_HOST = Deno.env.get("APNS_PRODUCTION") === "true"
-  ? "https://api.push.apple.com"
-  : "https://api.sandbox.push.apple.com";
+// Try production first, then sandbox — covers both App Store and Xcode builds
+const APNS_HOSTS = Deno.env.get("APNS_PRODUCTION") === "true"
+  ? ["https://api.push.apple.com", "https://api.sandbox.push.apple.com"]
+  : ["https://api.sandbox.push.apple.com", "https://api.push.apple.com"];
 
 interface PushNotification {
   id: string;
@@ -92,41 +92,45 @@ async function sendAPNs(
   badgeCount: number,
   workspaceId?: string
 ): Promise<boolean> {
-  try {
-    const payload: Record<string, unknown> = {
-      aps: {
-        alert: { title, body },
-        sound: "default",
-        badge: badgeCount,
-      },
-    };
-    if (workspaceId) {
-      payload.workspace_id = workspaceId;
-    }
-    const response = await fetch(
-      `${APNS_HOST}/3/device/${deviceToken}`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `bearer ${token}`,
-          "apns-topic": APNS_BUNDLE_ID,
-          "apns-push-type": "alert",
-          "apns-priority": "10",
-        },
-        body: JSON.stringify(payload),
-      }
-    );
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error(`APNs error for ${deviceToken}: ${response.status} ${error}`);
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.error(`APNs send failed for ${deviceToken}:`, err);
-    return false;
+  const payload: Record<string, unknown> = {
+    aps: {
+      alert: { title, body },
+      sound: "default",
+      badge: badgeCount,
+    },
+  };
+  if (workspaceId) {
+    payload.workspace_id = workspaceId;
   }
+  const payloadBody = JSON.stringify(payload);
+  const headers = {
+    Authorization: `bearer ${token}`,
+    "apns-topic": APNS_BUNDLE_ID,
+    "apns-push-type": "alert",
+    "apns-priority": "10",
+  };
+
+  // Try both APNs environments — covers App Store and Xcode builds
+  for (const host of APNS_HOSTS) {
+    try {
+      const response = await fetch(
+        `${host}/3/device/${deviceToken}`,
+        { method: "POST", headers, body: payloadBody }
+      );
+
+      if (response.ok) {
+        console.log(`APNs OK via ${host.includes("sandbox") ? "sandbox" : "production"} for ${deviceToken.substring(0, 8)}...`);
+        return true;
+      }
+
+      const error = await response.text();
+      console.log(`APNs ${response.status} via ${host.includes("sandbox") ? "sandbox" : "production"}: ${error}`);
+    } catch (err) {
+      console.error(`APNs send failed (${host}) for ${deviceToken}:`, err);
+    }
+  }
+
+  return false;
 }
 
 serve(async (req) => {
