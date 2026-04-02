@@ -9,7 +9,7 @@ struct TarsyIcon: View {
             RoundedRectangle(cornerRadius: size * 0.22)
                 .fill(
                     LinearGradient(
-                        colors: [Color(hex: "2a2218"), Color(hex: "1a1a1a")],
+                        colors: [Color(hex: "111111"), Color(hex: "0a0a0a")],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
@@ -25,7 +25,7 @@ struct TarsyIcon: View {
 
                 // Subtle mouth/nose
                 Capsule()
-                    .fill(Color(hex: "3a3025"))
+                    .fill(Color(hex: "222222"))
                     .frame(width: size * 0.08, height: size * 0.04)
             }
             .offset(y: -size * 0.02)
@@ -37,14 +37,14 @@ struct TarsyIcon: View {
         ZStack {
             // Outer glow
             Circle()
-                .fill(Color(hex: "d4a574").opacity(0.3))
+                .fill(Color.white.opacity(0.15))
                 .frame(width: diameter * 1.15, height: diameter * 1.15)
 
             // Eye
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [Color(hex: "e8c088"), Color(hex: "d4a574")],
+                        colors: [Color(hex: "ffffff"), Color(hex: "d0d0d0")],
                         center: .center,
                         startRadius: 0,
                         endRadius: diameter * 0.5
@@ -54,7 +54,7 @@ struct TarsyIcon: View {
 
             // Pupil
             Circle()
-                .fill(Color(hex: "1a1a1a"))
+                .fill(Color(hex: "0a0a0a"))
                 .frame(width: diameter * 0.45, height: diameter * 0.45)
                 .offset(x: diameter * 0.05, y: -diameter * 0.05)
 

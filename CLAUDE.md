@@ -167,17 +167,17 @@ This builds a Release archive, signs with Developer ID, creates a DMG (via `crea
 
 ## Design System
 
-Tarsy uses a **warm, earthy, retro-70s aesthetic** — inspired by the Anthropic/Claude design language. Dark backgrounds with terracotta, amber, and moss green accents. All UI uses monospaced fonts.
+Tarsy uses a **monochrome, high-contrast dark aesthetic**. Near-black backgrounds with white and gray accents. All UI uses monospaced fonts.
 
 The theme is defined in `TarsyiOS/Sources/Theme/TarsyTheme.swift`:
 
-- **Backgrounds:** `#1a1a1a`, `#2a2a2a`, `#3a3a3a`
-- **Text:** warm beige `#e8e0d4` (primary), `#a89e91` (secondary)
-- **Accents:** amber `#d4a574`, terracotta `#c4704b`, moss `#7a8b6f`
-- **Status:** running = moss, starting = amber, idle = gray, error = terracotta
+- **Backgrounds:** `#0a0a0a`, `#111111`, `#222222`
+- **Text:** light gray `#ededed` (primary), `#666666` (secondary)
+- **Accents:** white `#ffffff`, medium gray `#888888`, light gray `#b0b0b0`
+- **Status:** running = `#b0b0b0`, starting = white, idle = `#555555`, error = `#888888`
 - **Fonts:** monospaced throughout (`Font.system(.body, design: .monospaced)`)
 
-When building new UI, always use `TarsyTheme` colors and fonts. Never use system defaults or blue tints. The feel should be warm, close, and inviting — not cold or corporate. The website and email templates also follow this palette.
+When building new UI, always use `TarsyTheme` colors and fonts. Never use system defaults or blue tints. The feel should be minimal, clean, and typographic — not colorful or corporate.
 
 ## Rules
 
