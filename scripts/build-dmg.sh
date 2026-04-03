@@ -33,30 +33,28 @@ xcodebuild \
     DEVELOPMENT_TEAM="J2M334NJ3L" \
     | tail -5
 
-# ─── Export app from archive ─────────────────────────────────────────
+# ─── Export and re-sign with Developer ID ────────────────────────────
 echo "==> Exporting app from archive..."
 ARCHIVE_APP="$BUILD_DIR/$APP_NAME.xcarchive/Products/Applications/$SCHEME.app"
 cp -R "$ARCHIVE_APP" "$APP_PATH"
 
-# Remove development provisioning profile (incompatible with Developer ID signing)
-rm -f "$APP_PATH/Contents/embedded.provisionprofile"
+# Embed the Developer ID provisioning profile (macOS 26+ AMFI requires it)
+DEVID_PROFILE="$HOME/Library/MobileDevice/Provisioning Profiles/07789465-803c-4d02-8fd8-46d61a5480d9.provisionprofile"
+cp "$DEVID_PROFILE" "$APP_PATH/Contents/embedded.provisionprofile"
 
-# ─── Re-sign with Developer ID ──────────────────────────────────────
 echo "==> Signing with Developer ID..."
 
-# Extract expanded entitlements from the archived app and strip restricted
-# entitlements that require a provisioning profile (keychain-access-groups,
-# com.apple.application-identifier, com.apple.developer.team-identifier).
-# Developer ID apps can access their own keychain group without the explicit
-# entitlement — AMFI on macOS 26+ rejects restricted entitlements that lack
-# an authorizing provisioning profile.
-ENTITLEMENTS="$BUILD_DIR/entitlements-expanded.plist"
+# Extract entitlements from the archived app, stripping restricted entitlements
+# that are not included in the Developer ID profile. On macOS, Sign In with Apple
+# works for Developer ID apps via the App ID capability without the explicit
+# entitlement in the binary.
+ENTITLEMENTS="$BUILD_DIR/entitlements-devid.plist"
 codesign -d --entitlements - --xml "$ARCHIVE_APP" > "$ENTITLEMENTS"
 /usr/libexec/PlistBuddy -c "Delete :keychain-access-groups" "$ENTITLEMENTS" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Delete :com.apple.application-identifier" "$ENTITLEMENTS" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.team-identifier" "$ENTITLEMENTS" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Delete :com.apple.developer.applesignin" "$ENTITLEMENTS" 2>/dev/null || true
 
-# Sign the main executable (no --deep; there are no nested frameworks)
 codesign --force --options runtime \
     --entitlements "$ENTITLEMENTS" \
     --sign "$SIGN_IDENTITY" \
