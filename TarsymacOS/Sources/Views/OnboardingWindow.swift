@@ -957,7 +957,12 @@ class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate, ASAuthor
     }
 
     func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        NSApplication.shared.keyWindow ?? ASPresentationAnchor()
+        // Menu bar apps (LSUIElement) often have no keyWindow.
+        // Fall back to any visible window so the Apple Sign In sheet can present.
+        NSApplication.shared.keyWindow
+            ?? NSApplication.shared.windows.first(where: { $0.isVisible })
+            ?? NSApplication.shared.windows.first
+            ?? ASPresentationAnchor()
     }
 
     func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {

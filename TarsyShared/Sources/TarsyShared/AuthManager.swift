@@ -227,7 +227,12 @@ class MacAuthPresenter: NSObject, ASWebAuthenticationPresentationContextProvidin
     static let shared = MacAuthPresenter()
 
     func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        NSApplication.shared.keyWindow ?? ASPresentationAnchor()
+        // Menu bar apps (LSUIElement) often have no keyWindow.
+        // Fall back to any visible window so the auth session can present.
+        NSApplication.shared.keyWindow
+            ?? NSApplication.shared.windows.first(where: { $0.isVisible })
+            ?? NSApplication.shared.windows.first
+            ?? ASPresentationAnchor()
     }
 }
 #elseif os(iOS)

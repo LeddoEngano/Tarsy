@@ -32,6 +32,9 @@ struct TarsymacOSApp: App {
                         await authManager.handleOAuthCallback(url: url)
                     }
                 }
+                .onAppear {
+                    appDelegate.authManager = authManager
+                }
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
@@ -46,6 +49,7 @@ struct TarsymacOSApp: App {
                 .onAppear {
                     updateChecker.startPeriodicChecks()
                     appDelegate.daemonManager = daemonManager
+                    appDelegate.authManager = authManager
                 }
         } label: {
             if updateChecker.shouldShowBanner {
@@ -69,6 +73,7 @@ struct TarsymacOSApp: App {
 
 class TarsyAppDelegate: NSObject, NSApplicationDelegate {
     var daemonManager: DaemonManager?
+    var authManager: AuthManager?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         checkIfRunningFromDMG()
@@ -76,6 +81,18 @@ class TarsyAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         daemonManager?.markOfflineSync()
+    }
+
+    /// Handle deep-link URLs (OAuth callbacks) that arrive via the system
+    /// rather than through ASWebAuthenticationSession's own callback.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls {
+            guard url.scheme == "com.tarsy.macos",
+                  url.host == "login-callback" else { continue }
+            Task { @MainActor in
+                await authManager?.handleOAuthCallback(url: url)
+            }
+        }
     }
 
     private func checkIfRunningFromDMG() {
