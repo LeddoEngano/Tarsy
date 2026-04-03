@@ -24,8 +24,6 @@ struct SettingsView: View {
     @State private var isSignUp = false
     @State private var showEmailForm = false
     @State private var showPassword = false
-    @State private var appleSignInDelegate: AppleSignInDelegate?
-
     @State private var showDeleteConfirmation = false
     @State private var deleteConfirmText = ""
     @State private var isDeleting = false

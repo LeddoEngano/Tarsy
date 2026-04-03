@@ -22,8 +22,6 @@ struct OnboardingWindow: View {
     @State private var email = ""
     @State private var password = ""
     @State private var isSignUp = false
-    @State private var appleSignInDelegate: AppleSignInDelegate?
-
     @State private var showPassword = false
     @State private var showEmailForm = false
     @State private var confirmPassword = ""
@@ -200,23 +198,6 @@ struct OnboardingWindow: View {
 
     private var loginStep: some View {
         VStack(spacing: 0) {
-            // Debug log panel
-            if !authManager.debugLogs.isEmpty {
-                let allLogs = authManager.debugLogs.joined(separator: "\n")
-                ScrollView {
-                    Text(allLogs)
-                        .font(.system(size: 9, design: .monospaced))
-                        .foregroundColor(Theme.textSecondary)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .frame(maxHeight: 100)
-                .padding(8)
-                .background(Color.black.opacity(0.5))
-                .cornerRadius(6)
-                .padding(.horizontal, 20)
-            }
-
             Spacer()
 
             loginHeader
@@ -950,38 +931,6 @@ struct OAuthButtonView: View {
                 isHovered = hovering
             }
         }
-    }
-}
-
-// MARK: - Apple Sign In Delegate
-
-class AppleSignInDelegate: NSObject, ASAuthorizationControllerDelegate, ASAuthorizationControllerPresentationContextProviding {
-    let onCompletion: (Result<ASAuthorization, Error>) -> Void
-    let authManager: AuthManager
-
-    init(authManager: AuthManager, onCompletion: @escaping (Result<ASAuthorization, Error>) -> Void) {
-        self.authManager = authManager
-        self.onCompletion = onCompletion
-    }
-
-    func presentationAnchor(for controller: ASAuthorizationController) -> ASPresentationAnchor {
-        let window = NSApplication.shared.keyWindow
-            ?? NSApplication.shared.windows.first(where: { $0.isVisible })
-            ?? NSApplication.shared.windows.first
-            ?? ASPresentationAnchor()
-        Task { @MainActor in authManager.debugLog("presentationAnchor: \(window), isVisible=\(window.isVisible), frame=\(window.frame)") }
-        return window
-    }
-
-    func authorizationController(controller: ASAuthorizationController, didCompleteWithAuthorization authorization: ASAuthorization) {
-        Task { @MainActor in authManager.debugLog("didComplete: success, credential=\(type(of: authorization.credential))") }
-        onCompletion(.success(authorization))
-    }
-
-    func authorizationController(controller: ASAuthorizationController, didCompleteWithError error: Error) {
-        let nsError = error as NSError
-        Task { @MainActor in authManager.debugLog("didComplete: error domain=\(nsError.domain) code=\(nsError.code) desc=\(nsError.localizedDescription)") }
-        onCompletion(.failure(error))
     }
 }
 
