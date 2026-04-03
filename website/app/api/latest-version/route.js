@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 // Update these values when releasing a new version of the macOS app.
-const LATEST_VERSION = "1.0.9";
+const LATEST_VERSION = "1.0.10";
 const DOWNLOAD_URL = "https://www.tarsy.dev/download/macos";
 const RELEASE_NOTES = null;
 

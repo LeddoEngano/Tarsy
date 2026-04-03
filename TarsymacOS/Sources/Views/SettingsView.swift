@@ -25,6 +25,7 @@ struct SettingsView: View {
     @State private var showEmailForm = false
     @State private var showPassword = false
     @State private var appleSignInDelegate: AppleSignInDelegate?
+
     @State private var showDeleteConfirmation = false
     @State private var deleteConfirmText = ""
     @State private var isDeleting = false
@@ -233,19 +234,7 @@ struct SettingsView: View {
                 label: "Sign in with Apple",
                 isSystemImage: true
             ) {
-                let provider = ASAuthorizationAppleIDProvider()
-                let request = provider.createRequest()
-                let nonce = authManager.generateNonce()
-                request.requestedScopes = [.email, .fullName]
-                request.nonce = authManager.sha256(nonce)
-                let delegate = AppleSignInDelegate { result in
-                    Task { await authManager.handleAppleSignIn(result: result) }
-                }
-                appleSignInDelegate = delegate
-                let controller = ASAuthorizationController(authorizationRequests: [request])
-                controller.delegate = delegate
-                controller.presentationContextProvider = delegate
-                controller.performRequests()
+                Task { await authManager.signInWithAppleOAuth() }
             }
 
             oauthButton(

@@ -9,6 +9,12 @@ public class AuthManager: ObservableObject {
     @Published public var isLoading = true
     @Published public var currentUser: User?
     @Published public var errorMessage: String?
+    @Published public var debugLogs: [String] = []
+
+    public func debugLog(_ message: String) {
+        let ts = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
+        debugLogs.append("[\(ts)] \(message)")
+    }
 
     private var currentNonce: String?
 
@@ -124,6 +130,74 @@ public class AuthManager: ObservableObject {
             }
         }
 
+        isLoading = false
+    }
+
+    // MARK: - Sign in with Apple (OAuth — no entitlement required)
+
+    public func signInWithAppleOAuth() async {
+        debugLog("signInWithAppleOAuth: start")
+        isLoading = true
+        errorMessage = nil
+        do {
+            #if os(iOS)
+            let scheme = "com.tarsy.ios"
+            #elseif os(macOS)
+            let scheme = "com.tarsy.macos"
+            #endif
+            let redirectURL = URL(string: "\(scheme)://login-callback")!
+            debugLog("scheme=\(scheme) redirect=\(redirectURL)")
+
+            let oauthURL = try supabase.auth.getOAuthSignInURL(
+                provider: .apple,
+                redirectTo: redirectURL
+            )
+            debugLog("oauthURL=\(oauthURL.absoluteString.prefix(80))...")
+
+            debugLog("Starting ASWebAuthenticationSession...")
+            let callbackURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
+                let session = ASWebAuthenticationSession(
+                    url: oauthURL,
+                    callbackURLScheme: scheme
+                ) { url, error in
+                    if let url {
+                        continuation.resume(returning: url)
+                    } else if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(throwing: NSError(domain: "AuthManager", code: -1, userInfo: [NSLocalizedDescriptionKey: "OAuth cancelled"]))
+                    }
+                }
+                #if os(macOS)
+                session.presentationContextProvider = MacAuthPresenter.shared
+                #elseif os(iOS)
+                session.presentationContextProvider = IOSAuthPresenter.shared
+                #endif
+                session.prefersEphemeralWebBrowserSession = false
+                let started = session.start()
+                Task { @MainActor in self.debugLog("session.start() returned \(started)") }
+            }
+
+            debugLog("callbackURL=\(callbackURL.absoluteString.prefix(80))...")
+            let session = try await supabase.auth.session(from: callbackURL)
+            debugLog("session OK, user=\(session.user.id)")
+            currentUser = session.user
+            isAuthenticated = true
+        } catch {
+            debugLog("ERROR: \(error)")
+            let nsError = error as NSError
+            if nsError.domain == ASWebAuthenticationSessionErrorDomain,
+               nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
+                debugLog("User cancelled")
+            } else if let session = try? await supabase.auth.session {
+                debugLog("Recovered existing session")
+                currentUser = session.user
+                isAuthenticated = true
+            } else {
+                errorMessage = error.localizedDescription
+                debugLog("Final error: \(error.localizedDescription)")
+            }
+        }
         isLoading = false
     }
 
