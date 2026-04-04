@@ -1845,9 +1845,9 @@ class DaemonManager: ObservableObject {
             scale = 1.0
             bitrate = 6_000_000
         } else {
-            fps = 20
-            scale = 0.75
-            bitrate = 2_000_000
+            fps = 24
+            scale = 0.85
+            bitrate = 3_000_000
         }
 
         do {
@@ -1860,7 +1860,7 @@ class DaemonManager: ObservableObject {
                 let displayHeight = Int(CGFloat(NSScreen.main?.frame.height ?? 1080) * scale)
 
                 let encoder = H264Encoder()
-                encoder.configure(width: displayWidth, height: displayHeight, fps: fps, bitrate: bitrate)
+                encoder.configure(width: displayWidth, height: displayHeight, fps: fps, bitrate: bitrate, isRelay: isRelay)
                 self.h264Encoder = encoder
 
                 setupEncoderFrameRelay(encoder: encoder, isRelay: isRelay, clientId: clientId)
@@ -1944,7 +1944,7 @@ class DaemonManager: ObservableObject {
             let captureWidth = Int(window.frame.width * scale)
             let captureHeight = Int(window.frame.height * scale)
             let encoder = H264Encoder()
-            encoder.configure(width: captureWidth, height: captureHeight, fps: fps, bitrate: bitrate)
+            encoder.configure(width: captureWidth, height: captureHeight, fps: fps, bitrate: bitrate, isRelay: isRelay)
             self.h264Encoder = encoder
 
             setupEncoderFrameRelay(encoder: encoder, isRelay: isRelay, clientId: clientId)
@@ -1998,7 +1998,8 @@ class DaemonManager: ObservableObject {
         let sendInFlight = OSAllocatedUnfairLock(initialState: false)
         encoder.onEncodedFrame = { [weak encoder] encodedData in
             let framePayload: Data
-            if e2eRef.isReady, let encrypted = e2eRef.encryptBinary(encodedData) {
+            // Only E2E-encrypt on relay (LAN is already TLS-protected, skip for lower latency)
+            if isRelay, e2eRef.isReady, let encrypted = e2eRef.encryptBinary(encodedData) {
                 framePayload = encrypted
             } else {
                 framePayload = encodedData
@@ -2007,16 +2008,17 @@ class DaemonManager: ObservableObject {
             var prefixedData = Data("H264".utf8)
             prefixedData.append(framePayload)
 
+            let alreadyInFlight = sendInFlight.withLock { val -> Bool in
+                if val { return true }
+                val = true
+                return false
+            }
+            guard !alreadyInFlight else {
+                encoder?.reportFrameDropped()
+                return
+            }
+
             if isRelay {
-                let alreadyInFlight = sendInFlight.withLock { val -> Bool in
-                    if val { return true }
-                    val = true
-                    return false
-                }
-                guard !alreadyInFlight else {
-                    encoder?.reportFrameDropped()
-                    return
-                }
                 Task { [weak encoder] in
                     let enc = encoder
                     await relay.sendBinary(prefixedData) {
@@ -2025,9 +2027,11 @@ class DaemonManager: ObservableObject {
                     }
                 }
             } else {
-                encoder?.reportFrameDelivered()
-                Task {
+                Task { [weak encoder] in
+                    let enc = encoder
                     await wsServer?.broadcastBinary(prefixedData)
+                    sendInFlight.withLock { $0 = false }
+                    enc?.reportFrameDelivered()
                 }
             }
         }

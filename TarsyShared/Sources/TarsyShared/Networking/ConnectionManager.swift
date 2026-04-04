@@ -258,6 +258,7 @@ public class ConnectionManager: ObservableObject {
         let plainParams = NWParameters.tcp
         let wsOpts = NWProtocolWebSocket.Options()
         wsOpts.autoReplyPing = true
+        wsOpts.maximumMessageSize = 4 * 1024 * 1024
         plainParams.defaultProtocolStack.applicationProtocols.insert(wsOpts, at: 0)
         let plainConn = NWConnection(to: .url(url), using: plainParams)
 
@@ -370,15 +371,8 @@ public class ConnectionManager: ObservableObject {
                     let prefixStr = prefix.count == 4 ? String(data: prefix, encoding: .utf8) : nil
 
                     if prefixStr == "H264" {
-                        // Try E2E decryption, fall back to unencrypted (LAN with TLS)
-                        let payload = Data(data.dropFirst(4))
-                        if self?.e2e.isReady == true, let decrypted = self?.e2e.decryptBinary(payload) {
-                            var frameData = Data("H264".utf8)
-                            frameData.append(decrypted)
-                            self?.onStreamFrameReceived?(frameData)
-                        } else {
-                            self?.onStreamFrameReceived?(data)
-                        }
+                        // LAN frames are unencrypted (TLS protects the channel) — skip E2E
+                        self?.onStreamFrameReceived?(data)
                     } else if prefixStr == "SCRN" {
                         let payload = Data(data.dropFirst(4))
                         if self?.e2e.isReady == true, let decrypted = self?.e2e.decryptBinary(payload) {
@@ -780,6 +774,7 @@ public class ConnectionManager: ObservableObject {
 
         let wsOptions = NWProtocolWebSocket.Options()
         wsOptions.autoReplyPing = true
+        wsOptions.maximumMessageSize = 4 * 1024 * 1024 // 4MB — enough for large H.264 keyframes
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
 
         return parameters

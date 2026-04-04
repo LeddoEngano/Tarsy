@@ -25,8 +25,8 @@ targets:
         CFBundleIconName: AppIcon
         CFBundleDisplayName: Tarsy
         CFBundleName: Tarsy
-        CFBundleShortVersionString: "1.0.11"
-        CFBundleVersion: "12"
+        CFBundleShortVersionString: "1.0.13"
+        CFBundleVersion: "14"
         LSUIElement: true
         LSApplicationCategoryType: "public.app-category.developer-tools"
         NSAppleEventsUsageDescription: "Tarsy needs to control your browser to manage tabs and navigate pages."

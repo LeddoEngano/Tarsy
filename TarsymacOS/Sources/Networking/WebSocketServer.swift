@@ -80,6 +80,7 @@ actor WebSocketServer {
         }
 
         let wsOptions = NWProtocolWebSocket.Options()
+        wsOptions.maximumMessageSize = 4 * 1024 * 1024 // 4MB — enough for large H.264 keyframes
         parameters.defaultProtocolStack.applicationProtocols.insert(wsOptions, at: 0)
 
         let newListener = try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: port)!)
@@ -149,9 +150,9 @@ actor WebSocketServer {
         connection.send(content: data, contentContext: context, isComplete: true, completion: .idempotent)
     }
 
-    /// Send raw binary data to all connected clients
+    /// Send raw binary data to all authenticated clients
     func broadcastBinary(_ data: Data) {
-        for clientId in connections.keys {
+        for clientId in authenticatedClients {
             sendBinary(data, to: clientId)
         }
     }
@@ -241,6 +242,15 @@ actor WebSocketServer {
 
         let clientId = UUID().uuidString
         connections[clientId] = connection
+
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .failed, .cancelled:
+                Task { await self?.removeConnection(clientId) }
+            default:
+                break
+            }
+        }
 
         connection.start(queue: .global(qos: .userInitiated))
         receiveLoop(connection: connection, clientId: clientId, authenticated: false, clientIP: ip)

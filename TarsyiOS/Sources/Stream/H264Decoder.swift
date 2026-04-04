@@ -254,29 +254,40 @@ class H264Decoder: ObservableObject {
 
     private func parseNALUnits(_ data: Data) -> [Data] {
         var units: [Data] = []
-        var searchStart = data.startIndex
+        data.withUnsafeBytes { buffer in
+            guard let base = buffer.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+            let count = buffer.count
+            var i = 0
 
-        while searchStart < data.endIndex {
-            guard let startRange = data.range(of: startCode, in: searchStart..<data.endIndex) else {
-                break
+            // Find first start code
+            while i < count - 3 {
+                if base[i] == 0 && base[i+1] == 0 && base[i+2] == 0 && base[i+3] == 1 {
+                    break
+                }
+                i += 1
             }
 
-            let nalStart = startRange.upperBound
-            let nextStart: Data.Index
-            if let nextRange = data.range(of: startCode, in: nalStart..<data.endIndex) {
-                nextStart = nextRange.lowerBound
-            } else {
-                nextStart = data.endIndex
-            }
+            while i < count - 3 {
+                // Skip past current start code
+                let nalStart = i + 4
+                guard nalStart < count else { break }
 
-            if nalStart < nextStart {
-                units.append(Data(data[nalStart..<nextStart]))
+                // Scan for next start code
+                var j = nalStart
+                while j < count - 3 {
+                    if base[j] == 0 && base[j+1] == 0 && base[j+2] == 0 && base[j+3] == 1 {
+                        break
+                    }
+                    j += 1
+                }
+                let nalEnd = (j < count - 3) ? j : count
+
+                if nalStart < nalEnd {
+                    units.append(Data(bytes: base + nalStart, count: nalEnd - nalStart))
+                }
+                i = nalEnd
             }
-            searchStart = nalStart
-            if searchStart == nextStart { break }
-            searchStart = nextStart
         }
-
         return units
     }
 

@@ -28,7 +28,7 @@ class H264Encoder {
     private var consecutiveDrops: Int = 0
     private var consecutiveSuccess: Int = 0
     private var lastAdjustTime: CFAbsoluteTime = 0
-    private let adjustInterval: CFAbsoluteTime = 2.0 // Adjust every 2 seconds max
+    private var adjustInterval: CFAbsoluteTime = 2.0
 
     /// Call when a frame was successfully delivered to the client
     func reportFrameDelivered() {
@@ -78,7 +78,7 @@ class H264Encoder {
         #endif
     }
 
-    func configure(width: Int, height: Int, fps: Int, bitrate: Int) {
+    func configure(width: Int, height: Int, fps: Int, bitrate: Int, isRelay: Bool = false) {
         self.width = Int32(width)
         self.height = Int32(height)
         self.currentFps = fps
@@ -86,6 +86,7 @@ class H264Encoder {
         self.currentBitrate = bitrate
         self.minBitrate = bitrate / 5
         self.maxBitrate = bitrate * 3
+        self.adjustInterval = isRelay ? 1.0 : 2.0
 
         // Tear down existing session
         if let session {
@@ -139,8 +140,8 @@ class H264Encoder {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_DataRateLimits,
                            value: dataRateLimit as CFArray)
 
-        // Keyframe interval: every 3 seconds
-        let keyframeInterval = fps * 3
+        // Keyframe interval: 2s for relay (faster recovery from loss), 3s for LAN
+        let keyframeInterval = fps * (isRelay ? 2 : 3)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval,
                            value: keyframeInterval as CFNumber)
 
