@@ -694,9 +694,11 @@ class DaemonManager: ObservableObject {
     }
 
     private func handleScanRepos(clientId: String, packet: WSPacket) async {
-        let scanner = RepoScanner()
+        log("scanRepos: starting scan for client \(clientId)")
+        var scanner = RepoScanner()
         let repos = await scanner.scan()
-        log("scanRepos: found \(repos.count) repos")
+        let gitInstalled = scanner.gitAvailable
+        log("scanRepos: found \(repos.count) repos, git installed: \(gitInstalled)")
 
         do {
             let data = try JSONEncoder().encode(repos)
@@ -708,8 +710,12 @@ class DaemonManager: ObservableObject {
                 )
                 return
             }
+            var payload = ["repos": json]
+            if !gitInstalled {
+                payload["git_missing"] = "true"
+            }
             await sendToClientOrRelay(
-                WSPacket(action: .workspaceScanResult, payload: ["repos": json], id: packet.id),
+                WSPacket(action: .workspaceScanResult, payload: payload, id: packet.id),
                 to: clientId
             )
         } catch {

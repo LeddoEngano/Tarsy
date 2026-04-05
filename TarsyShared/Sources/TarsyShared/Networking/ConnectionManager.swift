@@ -18,6 +18,7 @@ public class ConnectionManager: ObservableObject {
     @Published public var connectionMode: ConnectionMode = .disconnected
     @Published public var detectedAgents: [AIEngineType] = []
     @Published public var openclawAvailable = false
+    @Published public var gitMissingOnMac = false
 
     // LAN connection (Network.framework)
     private var connection: NWConnection?
@@ -642,6 +643,11 @@ public class ConnectionManager: ObservableObject {
         case .openclawStatus:
             if let installed = packet.payload?["installed"] {
                 openclawAvailable = installed == "true"
+            }
+            notifyListeners(packet)
+        case .workspaceScanResult:
+            if packet.payload?["git_missing"] == "true" {
+                gitMissingOnMac = true
             }
             notifyListeners(packet)
         case .sudoRequest:

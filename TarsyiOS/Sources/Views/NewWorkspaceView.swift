@@ -131,10 +131,24 @@ struct NewWorkspaceView: View {
                     }
                 }
             } else if !isScanning {
-                Text("no repos found. connect your mac first.")
-                    .font(TarsyTheme.monoFontSmall)
-                    .foregroundColor(TarsyTheme.textSecondary)
-                    .padding(12)
+                VStack(spacing: 8) {
+                    Text(error != nil ? (error ?? "") : "no repos found. connect your mac first.")
+                        .font(TarsyTheme.monoFontSmall)
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .padding(12)
+
+                    if error != nil {
+                        Button(action: { scanRepos() }) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.caption)
+                                Text("retry")
+                                    .font(TarsyTheme.monoFontSmall)
+                            }
+                            .foregroundColor(TarsyTheme.accentAmber)
+                        }
+                    }
+                }
             }
 
             // Toggle to manual
@@ -365,7 +379,9 @@ struct NewWorkspaceView: View {
     // MARK: - Actions
 
     private func scanRepos() {
+        guard !isScanning else { return }
         isScanning = true
+        error = nil
 
         // Register listener BEFORE sending to avoid race condition
         connectionManager.addListener("scan_repos") { packet in
@@ -389,9 +405,9 @@ struct NewWorkspaceView: View {
 
         connectionManager.send(WSPacket(action: .workspaceScanRepos))
 
-        // Timeout
+        // Timeout — generous to allow concurrent git enrichment on macOS
         Task {
-            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            try? await Task.sleep(nanoseconds: 25_000_000_000)
             await MainActor.run {
                 if isScanning {
                     isScanning = false
