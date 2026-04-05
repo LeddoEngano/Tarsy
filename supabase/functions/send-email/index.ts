@@ -22,6 +22,7 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 interface EmailContent {
   subject: string;
   html: string;
+  attachments?: { filename: string; content: string; content_type: string }[];
 }
 
 function escapeHtml(s: string): string {
@@ -198,7 +199,8 @@ function feedbackEmail(
   title: string,
   description: string,
   platform: string,
-  appVersion?: string
+  appVersion?: string,
+  imageBase64?: string
 ): EmailContent {
   const typeLabels: Record<string, string> = {
     bug: "Bug Report",
@@ -219,8 +221,13 @@ function feedbackEmail(
   const safePlatform = escapeHtml(platform);
   const safeVersion = appVersion ? escapeHtml(appVersion) : "n/a";
 
+  const attachments = imageBase64
+    ? [{ filename: "screenshot.jpg", content: imageBase64, content_type: "image/jpeg" }]
+    : undefined;
+
   return {
     subject: `[${label}] ${title}`,
+    attachments,
     html: `
 <!DOCTYPE html>
 <html>
@@ -248,6 +255,8 @@ function feedbackEmail(
     <div class="content-box">
       <p style="margin: 0;">${safeDesc}</p>
     </div>
+
+    ${imageBase64 ? `<div style="margin: 16px 0;"><img src="cid:feedback-screenshot" style="max-width: 100%; border-radius: 8px; border: 1px solid #3a3a3a;" alt="Screenshot"></div>` : ""}
 
     <div class="meta">From: ${safeName} (${safeEmail})</div>
     <div class="meta">Platform: ${safePlatform} | App version: ${safeVersion}</div>
@@ -277,6 +286,7 @@ async function sendEmail(to: string, content: EmailContent): Promise<{ success: 
       to: [to],
       subject: content.subject,
       html: content.html,
+      ...(content.attachments && { attachments: content.attachments }),
     }),
   });
 
@@ -314,6 +324,7 @@ interface DirectPayload {
   feedback_description?: string;
   feedback_platform?: string;
   feedback_app_version?: string;
+  feedback_image_base64?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +364,7 @@ serve(async (req) => {
 
     const { email_type, email, display_name, subscription_end_date,
             feedback_type, feedback_title, feedback_description,
-            feedback_platform, feedback_app_version } = body as DirectPayload;
+            feedback_platform, feedback_app_version, feedback_image_base64 } = body as DirectPayload;
 
     if (!email_type) {
       return new Response(JSON.stringify({ error: "email_type is required" }), { status: 400 });
@@ -371,7 +382,8 @@ serve(async (req) => {
         feedback_title,
         feedback_description,
         feedback_platform || "ios",
-        feedback_app_version
+        feedback_app_version,
+        feedback_image_base64
       );
       const result = await sendEmail("support@tarsy.dev", content);
       console.log(`Feedback email (${feedback_type}): ${result.success ? "sent" : result.error}`);

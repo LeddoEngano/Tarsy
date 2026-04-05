@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 import TarsyShared
 
 struct FeedbackView: View {
@@ -9,6 +10,8 @@ struct FeedbackView: View {
     @State private var isSubmitting = false
     @State private var showSuccess = false
     @State private var errorMessage: String?
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var attachedImage: UIImage?
 
     enum FeedbackType: String, CaseIterable {
         case bug
@@ -36,6 +39,9 @@ struct FeedbackView: View {
         NavigationStack {
             ZStack {
                 TarsyTheme.backgroundPrimary.ignoresSafeArea()
+                    .onTapGesture {
+                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                    }
 
                 if showSuccess {
                     successView
@@ -55,6 +61,16 @@ struct FeedbackView: View {
                         .font(TarsyTheme.font(size: 16, weight: .semibold))
                         .foregroundColor(TarsyTheme.textPrimary)
                 }
+            }
+        }
+        .onChange(of: selectedPhotoItem) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self),
+                   let image = UIImage(data: data) {
+                    attachedImage = image
+                }
+                selectedPhotoItem = nil
             }
         }
     }
@@ -152,6 +168,53 @@ struct FeedbackView: View {
                         }
                 }
 
+                // Screenshot attachment
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("screenshot")
+                        .font(TarsyTheme.font(size: 11, weight: .semibold))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .textCase(.uppercase)
+
+                    if let image = attachedImage {
+                        ZStack(alignment: .topTrailing) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fit)
+                                .frame(maxHeight: 200)
+                                .cornerRadius(8)
+
+                            Button {
+                                withAnimation { attachedImage = nil }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(TarsyTheme.font(size: 20))
+                                    .foregroundColor(TarsyTheme.textPrimary)
+                                    .background(TarsyTheme.backgroundPrimary.clipShape(Circle()))
+                            }
+                            .offset(x: -6, y: 6)
+                        }
+                    } else {
+                        PhotosPicker(selection: $selectedPhotoItem, matching: .screenshots) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "camera")
+                                    .font(TarsyTheme.font(size: 14))
+                                Text("attach screenshot")
+                                    .font(TarsyTheme.font(size: 12))
+                            }
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 48)
+                            .background(TarsyTheme.backgroundSecondary)
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(style: StrokeStyle(lineWidth: 1, dash: [6]))
+                                    .foregroundColor(TarsyTheme.backgroundTertiary)
+                            )
+                        }
+                    }
+                }
+
                 // Error
                 if let errorMessage {
                     Text(errorMessage)
@@ -234,7 +297,7 @@ struct FeedbackView: View {
                 return
             }
 
-            let body: [String: String] = [
+            var body: [String: String] = [
                 "email_type": "feedback",
                 "feedback_type": feedbackType.rawValue,
                 "feedback_title": title.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -242,6 +305,13 @@ struct FeedbackView: View {
                 "feedback_platform": "ios",
                 "feedback_app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
             ]
+
+            // Attach image as base64 JPEG (max ~500KB after compression)
+            if let image = attachedImage,
+               let jpegData = image.jpegData(compressionQuality: 0.5) {
+                let base64 = jpegData.base64EncodedString()
+                body["feedback_image_base64"] = base64
+            }
 
             try await supabase.functions.invoke(
                 "send-email",
