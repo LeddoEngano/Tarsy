@@ -149,6 +149,19 @@ function removeConnection(ws: WebSocket, code?: number, reason?: string) {
       if (userClients.size === 0) clients.delete(info.userId);
     }
     console.log(`[Relay] Client disconnected: ${shortId(info.userId)} (code=${code ?? "?"}, reason=${reason || "none"})`);
+
+    // Notify machine when last client disconnects so it can stop streaming
+    const remainingClients = clients.get(info.userId);
+    if (!remainingClients || remainingClients.size === 0) {
+      const machine = machines.get(info.userId);
+      if (machine && machine.readyState === WebSocket.OPEN) {
+        machine.send(JSON.stringify({
+          id: crypto.randomUUID(),
+          action: "relay:no_clients",
+          payload: { timestamp: new Date().toISOString() },
+        }));
+      }
+    }
   }
 
   connections.delete(ws);
