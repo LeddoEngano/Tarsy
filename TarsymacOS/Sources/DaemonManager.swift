@@ -40,6 +40,11 @@ class DaemonManager: ObservableObject {
     private var detectedSlashCommands: [[String: String]] = []
     private let e2e = E2ECrypto()       // LAN E2E
     private let relayE2E = E2ECrypto() // Relay E2E (separate key pair)
+
+    // MARK: - UltraContext Overlay (experimental, dev only)
+    #if DEBUG
+    private let overlayManager = OverlayManager()
+    #endif
     private let agentTaskService = AgentTaskService()
     private var sessionTaskMap: [String: UUID] = [:] // sessionId -> agentTask.id
     /// Last terminal-state packet per session (engineComplete, engineAskUser).
@@ -153,10 +158,19 @@ class DaemonManager: ObservableObject {
         Task { await SessionFileWatcher.shared.start() }
         log("UltraContext session watcher started")
 
+        // 9. UltraContext Overlay — floating button on terminal windows (dev only)
+        #if DEBUG
+        overlayManager.start()
+        log("UltraContext overlay started (dev)")
+        #endif
+
         isRunning = true
     }
 
     func stop() {
+        #if DEBUG
+        overlayManager.stop()
+        #endif
         allowSleep()
         removeSleepWakeObservers()
         heartbeatTimer?.invalidate()
