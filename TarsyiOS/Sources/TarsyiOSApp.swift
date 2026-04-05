@@ -79,6 +79,9 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     }
 
     static weak var deepLinkRouter: DeepLinkRouter?
+
+    /// Background task identifier for keeping WebSocket alive while agents are running
+    static var AppDelegate.backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
 }
 
 @main
@@ -139,8 +142,29 @@ struct TarsyiOSApp: App {
                 .onChange(of: scenePhase) { _, newPhase in
                     switch newPhase {
                     case .background:
-                        connectionManager.disconnect()
+                        // Keep WebSocket alive if agents are running, otherwise disconnect
+                        if LiveActivityManager.shared.hasActiveActivities {
+                            // End any previous background task
+                            if AppDelegate.backgroundTaskId != .invalid {
+                                UIApplication.shared.endBackgroundTask(AppDelegate.backgroundTaskId)
+                            }
+                            AppDelegate.backgroundTaskId = UIApplication.shared.beginBackgroundTask(withName: "TarsyAgentSession") { [weak connectionManager] in
+                                // Time expired — clean up and disconnect
+                                connectionManager?.disconnect()
+                                if AppDelegate.backgroundTaskId != .invalid {
+                                    UIApplication.shared.endBackgroundTask(AppDelegate.backgroundTaskId)
+                                    AppDelegate.backgroundTaskId = .invalid
+                                }
+                            }
+                        } else {
+                            connectionManager.disconnect()
+                        }
                     case .active:
+                        // End background task if we had one
+                        if AppDelegate.backgroundTaskId != .invalid {
+                            UIApplication.shared.endBackgroundTask(AppDelegate.backgroundTaskId)
+                            AppDelegate.backgroundTaskId = .invalid
+                        }
                         badgeService.clearAppIconBadge()
                         if authManager.isAuthenticated {
                             Task { await badgeService.refreshCounts() }
@@ -148,7 +172,8 @@ struct TarsyiOSApp: App {
                                 if !connectionManager.isConnected {
                                     await connectionManager.reconnectIfNeeded()
                                 }
-                                // Process any pending widget permission responses that arrived while in background
+                                // Wait for connection to stabilize before processing widget responses
+                                try? await Task.sleep(for: .milliseconds(500))
                                 LiveActivityManager.shared.processWidgetResponse()
                             }
                         }
