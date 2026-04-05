@@ -266,6 +266,16 @@ struct WorkspaceView: View {
         .task {
             await badgeService.clearBadge(for: workspace.id)
 
+            // Wait for agent detection before initializing tabs.
+            // The macOS app sends .agentsDetected after WebSocket connects,
+            // so we need to wait briefly for that packet to arrive.
+            if detectedAgents.isEmpty && connectionManager.isConnected {
+                for _ in 0..<20 {
+                    try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
+                    if !detectedAgents.isEmpty { break }
+                }
+            }
+
             // Initialize tabs
             if tabs.isEmpty {
                 // Show OpenClaw tab if installed (fixed tab, first position)
