@@ -133,6 +133,11 @@ struct QuickDispatchView: View {
             engineType: .claude,
             tabId: dispatchTabId
         )
+        LiveActivityManager.shared.updateUserPrompt(
+            workspaceId: ws.id.uuidString,
+            prompt: msg,
+            tabId: dispatchTabId
+        )
 
         // Send engineCreate with initial message — the macOS side will create the session
         connectionManager.send(WSPacket(

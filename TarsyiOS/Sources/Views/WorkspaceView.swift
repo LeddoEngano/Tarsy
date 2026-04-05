@@ -1435,6 +1435,11 @@ struct WorkspaceView: View {
                     engineType: engine,
                     tabId: currentTab.id
                 )
+                LiveActivityManager.shared.updateUserPrompt(
+                    workspaceId: workspace.id.uuidString,
+                    prompt: displayText,
+                    tabId: currentTab.id
+                )
             }
 
             // Build payload with optional images
@@ -1924,6 +1929,7 @@ struct WorkspaceView: View {
                 }
                 // Update Live Activity with current tool
                 if let tool = AgentToolType.parse(from: clean) {
+                    LiveActivityManager.shared.updateLastAgentMessage(workspaceId: workspace.id.uuidString, message: clean, tabId: targetTabId)
                     LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: targetTabId, contextPercent: contextPercent)
                 }
             } else if output == "📋CLEAR" {

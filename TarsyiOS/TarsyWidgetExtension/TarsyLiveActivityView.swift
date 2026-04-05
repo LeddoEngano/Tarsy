@@ -12,28 +12,11 @@ struct TarsyLiveActivityWidget: Widget {
             DynamicIsland {
                 // MARK: - Expanded Dynamic Island
                 DynamicIslandExpandedRegion(.leading) {
-                    TarsyEyesWidget(size: 24)
+                    tarsyEyes(size: 24)
+                        .padding(.leading, 2)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    Text("\(Int(context.state.contextPercent))%")
-                        .font(Self.tarsyFont(size: 12, weight: .medium))
-                        .foregroundColor(contextBarColor(context.state.contextPercent))
-                }
-                DynamicIslandExpandedRegion(.center) {
-                    HStack {
-                        statusDot(context.state.status)
-
-                        Text(context.attributes.engineType)
-                            .font(Self.tarsyFont(size: 13, weight: .semibold))
-                            .foregroundColor(textPrimary)
-
-                        Spacer()
-
-                        Text(Date(timeIntervalSince1970: context.state.startedAt), style: .timer)
-                            .font(Self.tarsyFont(size: 13, weight: .medium))
-                            .foregroundColor(accentWhite)
-                            .monospacedDigit()
-                    }
+                    EmptyView()
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     if context.isStale {
@@ -47,8 +30,7 @@ struct TarsyLiveActivityWidget: Widget {
                     .font(Self.tarsyFont(size: 14, weight: .bold))
                     .foregroundColor(context.state.status == "running" ? textPrimary : statusColor(context.state.status))
             } compactTrailing: {
-                TarsyEyesWidget(size: 18)
-                    .frame(width: 18, height: 18)
+                tarsyEyes(size: 18)
             } minimal: {
                 Image(systemName: toolIcon(context.state))
                     .font(Self.tarsyFont(size: 14, weight: .bold))
@@ -61,32 +43,72 @@ struct TarsyLiveActivityWidget: Widget {
 
     @ViewBuilder
     private func expandedBottomContent(context: ActivityViewContext<TarsyActivityAttributes>) -> some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 0) {
-                // Tool pill
-                HStack(spacing: 5) {
-                    Image(systemName: toolIcon(context.state))
-                        .font(Self.tarsyFont(size: 11, weight: .semibold))
-                        .foregroundColor(context.state.status == "running" ? textPrimary : statusColor(context.state.status))
+        VStack(alignment: .leading, spacing: 4) {
+            Spacer().frame(height: context.state.status == "waiting" ? 4 : 12)
+            // Title: user prompt + agent icon (top row)
+            HStack {
+                engineIconView(context.attributes)
+                    .frame(width: 16, height: 16)
 
-                    Text(context.state.message ?? context.state.currentTool)
-                        .font(Self.tarsyFont(size: 12, weight: .medium))
+                if let prompt = context.state.userPrompt, !prompt.isEmpty {
+                    Text(prompt)
+                        .font(Self.tarsyFont(size: 13, weight: .semibold))
                         .foregroundColor(textPrimary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
+                } else {
+                    Text(context.state.message ?? context.state.currentTool)
+                        .font(Self.tarsyFont(size: 13, weight: .semibold))
+                        .foregroundColor(textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    Capsule()
-                        .fill(statusColor(context.state.status).opacity(0.12))
-                )
 
                 Spacer()
 
-                Text(context.attributes.workspaceName)
-                    .font(Self.tarsyFont(size: 11, weight: .regular))
-                    .foregroundColor(textSecondary)
-                    .lineLimit(1)
+                Text("ctx:\(Int(context.state.contextPercent))%")
+                    .font(Self.tarsyFont(size: 10, weight: .medium))
+                    .foregroundColor(contextBarColor(context.state.contextPercent))
+            }
+
+            // Agent activity: what it's doing now
+            HStack(spacing: 5) {
+                Spacer().frame(width: 16)
+                Image(systemName: toolIcon(context.state))
+                    .font(Self.tarsyFont(size: 10, weight: .semibold))
+                    .foregroundColor(.white)
+
+                if let agentMsg = context.state.lastAgentMessage, !agentMsg.isEmpty {
+                    Text(agentMsg)
+                        .font(Self.tarsyFont(size: 11, weight: .medium))
+                        .foregroundColor(textPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else {
+                    Text(context.attributes.engineType)
+                        .font(Self.tarsyFont(size: 11, weight: .medium))
+                        .foregroundColor(textPrimary)
+                }
+
+                Spacer()
+
+                Text(Date(timeIntervalSince1970: context.state.startedAt), style: .timer)
+                    .font(Self.tarsyFont(size: 11, weight: .medium))
+                    .foregroundColor(accentWhite)
+                    .monospacedDigit()
+            }
+
+            // Other active agents indicator
+            if let agents = context.state.activeAgents, !agents.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "circle.fill")
+                        .font(.system(size: 4))
+                        .foregroundColor(accentMoss)
+                    Text("+\(agents.count) agent\(agents.count > 1 ? "s" : "") running")
+                        .font(Self.tarsyFont(size: 10, weight: .medium))
+                        .foregroundColor(textSecondary)
+                    Spacer()
+                }
             }
 
             // Permission action buttons (when waiting with options)
@@ -94,9 +116,17 @@ struct TarsyLiveActivityWidget: Widget {
                 permissionButtons(context: context)
             }
 
-            // Context usage bar
-            contextBar(percent: context.state.contextPercent)
+            Spacer()
+
+            HStack {
+                Spacer()
+                Text("be inspired. stay productive.")
+                    .font(Self.tarsyFont(size: 8, weight: .regular))
+                    .foregroundColor(textSecondary.opacity(0.5))
+                Spacer()
+            }
         }
+        .padding(.horizontal, 4)
     }
 
     // MARK: - Lock Screen View
@@ -146,7 +176,7 @@ struct TarsyLiveActivityWidget: Widget {
                             .frame(width: 32, height: 32)
                             .rotationEffect(.degrees(-90))
 
-                        TarsyEyesWidget(size: 22)
+                        tarsyEyes(size: 22)
                     }
 
                     // Tool + workspace + engine
@@ -302,6 +332,35 @@ struct TarsyLiveActivityWidget: Widget {
         }
     }
 
+    // MARK: - Engine Icon
+
+    @ViewBuilder
+    private func engineIconView(_ attrs: TarsyActivityAttributes) -> some View {
+        if let asset = attrs.engineIconAsset {
+            Image(asset)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        } else {
+            Image(systemName: attrs.engineIcon)
+                .font(Self.tarsyFont(size: 12, weight: .medium))
+                .foregroundColor(textSecondary)
+        }
+    }
+
+    // MARK: - Tarsy Eyes
+
+    private func tarsyEyes(size: CGFloat) -> some View {
+        HStack(spacing: size * 0.06) {
+            Circle()
+                .fill(.white)
+                .frame(width: size * 0.36, height: size * 0.36)
+            Circle()
+                .fill(.white)
+                .frame(width: size * 0.52, height: size * 0.52)
+        }
+        .frame(width: size, height: size)
+    }
+
     // MARK: - Helpers
 
     private func statusRingTrim(_ status: String) -> CGFloat {
@@ -362,7 +421,8 @@ private let previewAttrs = TarsyActivityAttributes(
     workspaceId: "p",
     workspaceName: "tarsy-frontend",
     engineType: "Claude Code",
-    engineIcon: "brain.head.profile"
+    engineIcon: "brain.head.profile",
+    engineIconAsset: "ClaudeIcon"
 )
 
 #Preview("Compact — Editing", as: .dynamicIsland(.compact), using: previewAttrs) {
@@ -392,25 +452,25 @@ private let previewAttrs = TarsyActivityAttributes(
 #Preview("Expanded — Running", as: .dynamicIsland(.expanded), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Writing tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 312, contextPercent: 45)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Writing tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 312, contextPercent: 45, userPrompt: "Fix the login bug and add unit tests for the auth flow", lastAgentMessage: "Editing AuthManager.swift")
 }
 
-#Preview("Expanded — High Context", as: .dynamicIsland(.expanded), using: previewAttrs) {
+#Preview("Expanded — Multi-Agent", as: .dynamicIsland(.expanded), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 600, contextPercent: 87)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 600, contextPercent: 87, userPrompt: "Refactor the networking layer", lastAgentMessage: "Reading ConnectionManager.swift", activeAgents: ["Gemini CLI||running||Running tests||terminal", "Aider||waiting||Approve changes?||questionmark.circle"])
 }
 
 #Preview("Expanded — Waiting", as: .dynamicIsland(.expanded), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 180, contextPercent: 42, message: "Write to hello.txt?", sessionId: "session-1", engineTypeRaw: "claude", questionKey: "Write to hello.txt?", questionOptions: ["Yes", "No", "Always allow"])
+    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 180, contextPercent: 42, message: "Write to hello.txt?", userPrompt: "Create a new hello world file", sessionId: "session-1", engineTypeRaw: "claude", questionKey: "Write to hello.txt?", questionOptions: ["Yes", "No", "Always allow"])
 }
 
 #Preview("Expanded — Error", as: .dynamicIsland(.expanded), using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Build failed", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 600)
+    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Build failed", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 600, userPrompt: "Add dark mode support")
 }
 
 #Preview("Minimal — Running", as: .dynamicIsland(.minimal), using: previewAttrs) {

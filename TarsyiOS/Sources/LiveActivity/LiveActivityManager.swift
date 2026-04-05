@@ -12,6 +12,10 @@ class LiveActivityManager: ObservableObject {
     private var startDates: [String: Double] = [:]
     /// Tracked context percent per activity
     private var contextPercents: [String: Double] = [:]
+    /// Tracked user prompts per activity
+    private var userPrompts: [String: String] = [:]
+    /// Tracked last agent messages per activity
+    private var lastAgentMessages: [String: String] = [:]
 
     /// Activities go stale after this interval without updates, triggering the "Updating…" fallback UI
     private let staleTTL: TimeInterval = 120
@@ -24,6 +28,17 @@ class LiveActivityManager: ObservableObject {
     private func key(workspaceId: String, tabId: String? = nil) -> String {
         if let tabId { return "\(workspaceId)-\(tabId)" }
         return workspaceId
+    }
+
+    /// Returns a summary of all active agents except the one with the given key.
+    /// Format: "engineName||status||toolName||toolIcon" per entry.
+    private func activeAgentsSummary(excluding activityKey: String) -> [String]? {
+        let others = activities.filter { $0.key != activityKey }.compactMap { (_, activity) -> String? in
+            let state = activity.content.state
+            guard state.status == "running" || state.status == "waiting" else { return nil }
+            return "\(activity.attributes.engineType)||\(state.status)||\(state.currentTool)||\(state.currentToolIcon)"
+        }
+        return others.isEmpty ? nil : others
     }
 
     // MARK: - Public API
@@ -47,7 +62,8 @@ class LiveActivityManager: ObservableObject {
             workspaceId: workspaceId,
             workspaceName: workspaceName,
             engineType: engineType.displayName,
-            engineIcon: engineType.iconName
+            engineIcon: engineType.iconName,
+            engineIconAsset: engineType.iconAsset
         )
 
         let state = TarsyActivityAttributes.ContentState(
@@ -94,7 +110,10 @@ class LiveActivityManager: ObservableObject {
             currentTool: tool.displayName,
             currentToolIcon: tool.iconName,
             startedAt: startDate,
-            contextPercent: cp
+            contextPercent: cp,
+            userPrompt: userPrompts[activityKey],
+            lastAgentMessage: lastAgentMessages[activityKey],
+            activeAgents: activeAgentsSummary(excluding: activityKey)
         )
 
         Task { await activity.update(.init(state: state, staleDate: .now.addingTimeInterval(staleTTL))) }
@@ -114,10 +133,23 @@ class LiveActivityManager: ObservableObject {
             currentToolIcon: currentState.currentToolIcon,
             startedAt: startDate,
             contextPercent: contextPercent,
-            message: currentState.message
+            message: currentState.message,
+            userPrompt: userPrompts[activityKey],
+            lastAgentMessage: lastAgentMessages[activityKey],
+            activeAgents: activeAgentsSummary(excluding: activityKey)
         )
 
         Task { await activity.update(.init(state: state, staleDate: .now.addingTimeInterval(staleTTL))) }
+    }
+
+    func updateUserPrompt(workspaceId: String, prompt: String, tabId: String? = nil) {
+        let activityKey = key(workspaceId: workspaceId, tabId: tabId)
+        userPrompts[activityKey] = prompt
+    }
+
+    func updateLastAgentMessage(workspaceId: String, message: String, tabId: String? = nil) {
+        let activityKey = key(workspaceId: workspaceId, tabId: tabId)
+        lastAgentMessages[activityKey] = message
     }
 
     func updateStatus(workspaceId: String, status: String, tabId: String? = nil, message: String? = nil, sessionId: String? = nil, engineType: String? = nil, questionKey: String? = nil, questionOptions: [String]? = nil, permissionRequestId: String? = nil) {
@@ -134,6 +166,9 @@ class LiveActivityManager: ObservableObject {
             startedAt: startDate,
             contextPercent: cp,
             message: status == "waiting" ? message : nil,
+            userPrompt: userPrompts[activityKey],
+            lastAgentMessage: lastAgentMessages[activityKey],
+            activeAgents: activeAgentsSummary(excluding: activityKey),
             sessionId: status == "waiting" ? sessionId : nil,
             engineTypeRaw: status == "waiting" ? engineType : nil,
             questionKey: status == "waiting" ? questionKey : nil,
@@ -184,6 +219,8 @@ class LiveActivityManager: ObservableObject {
             activities.removeValue(forKey: activityKey)
             startDates.removeValue(forKey: activityKey)
             contextPercents.removeValue(forKey: activityKey)
+            userPrompts.removeValue(forKey: activityKey)
+            lastAgentMessages.removeValue(forKey: activityKey)
 
             Task { await removeLiveActivityToken(workspaceId: workspaceId) }
             return
@@ -222,6 +259,8 @@ class LiveActivityManager: ObservableObject {
             activities.removeValue(forKey: k)
             startDates.removeValue(forKey: k)
             contextPercents.removeValue(forKey: k)
+            userPrompts.removeValue(forKey: k)
+            lastAgentMessages.removeValue(forKey: k)
         }
 
         for activity in Activity<TarsyActivityAttributes>.activities {
@@ -252,6 +291,8 @@ class LiveActivityManager: ObservableObject {
         activities.removeAll()
         startDates.removeAll()
         contextPercents.removeAll()
+        userPrompts.removeAll()
+        lastAgentMessages.removeAll()
 
         for activity in Activity<TarsyActivityAttributes>.activities {
             guard activity.activityState == .active || activity.activityState == .stale else { continue }

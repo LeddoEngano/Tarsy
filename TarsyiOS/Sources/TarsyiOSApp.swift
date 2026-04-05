@@ -144,8 +144,12 @@ struct TarsyiOSApp: App {
                         badgeService.clearAppIconBadge()
                         if authManager.isAuthenticated {
                             Task { await badgeService.refreshCounts() }
-                            if !connectionManager.isConnected {
-                                Task { await connectionManager.reconnectIfNeeded() }
+                            Task {
+                                if !connectionManager.isConnected {
+                                    await connectionManager.reconnectIfNeeded()
+                                }
+                                // Process any pending widget permission responses that arrived while in background
+                                LiveActivityManager.shared.processWidgetResponse()
                             }
                         }
                     default:
