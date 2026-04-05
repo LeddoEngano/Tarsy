@@ -61,7 +61,7 @@ struct WorkspaceView: View {
     @State private var contextPercent: Double = 0
     @State private var currentBranch = ""
     private var detectedAgents: [AIEngineType] {
-        connectionManager.detectedAgents.isEmpty ? [.claude] : connectionManager.detectedAgents
+        connectionManager.detectedAgents
     }
     @State private var autocompleteItems: [AutocompleteItem] = []
     @State private var cachedFileEntries: [AutocompleteItem] = []
@@ -271,10 +271,14 @@ struct WorkspaceView: View {
                 if connectionManager.openclawAvailable {
                     tabs.append(TerminalTab(id: "openclaw", title: "OpenClaw", isFixed: true, type: .openclaw))
                 }
-                let preferredEngine = detectedAgents.first ?? .claude
-                let tabType: TerminalTab.TabType = preferredEngine == .claude ? .claude : .engine
-                tabs.append(TerminalTab(id: "\(preferredEngine.rawValue)-1", title: preferredEngine.displayName, isFixed: false, type: tabType, sessionId: nil, engineType: preferredEngine))
-                // Default to engine tab
+                if let preferredEngine = detectedAgents.first {
+                    let tabType: TerminalTab.TabType = preferredEngine == .claude ? .claude : .engine
+                    tabs.append(TerminalTab(id: "\(preferredEngine.rawValue)-1", title: preferredEngine.displayName, isFixed: false, type: tabType, sessionId: nil, engineType: preferredEngine))
+                } else {
+                    // No agents detected — fall back to terminal
+                    tabs.append(TerminalTab(id: "terminal-1", title: "Terminal", isFixed: false, type: .terminal, sessionId: nil, engineType: nil))
+                }
+                // Default to last tab (engine or terminal)
                 if tabs.count > 1 {
                     selectedTabIndex = tabs.count - 1
                 }
@@ -372,24 +376,12 @@ struct WorkspaceView: View {
                     )
                 }
 
-                if detectedAgents.count <= 1 {
-                    Menu {
-                        Button(action: { addEngineTab(detectedAgents.first ?? .claude) }) {
+                Menu {
+                    if detectedAgents.count == 1 {
+                        Button(action: { addEngineTab(detectedAgents[0]) }) {
                             Label("New chat", systemImage: "plus.bubble")
                         }
-
-                        Button(action: { showSessionPicker = true }) {
-                            Label("Import session", systemImage: "clock.arrow.circlepath")
-                        }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.caption)
-                            .foregroundColor(TarsyTheme.textSecondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                    }
-                } else {
-                    Menu {
+                    } else if detectedAgents.count > 1 {
                         Section("New chat") {
                             ForEach(detectedAgents, id: \.self) { engine in
                                 Button(action: { addEngineTab(engine) }) {
@@ -409,17 +401,23 @@ struct WorkspaceView: View {
                                 }
                             }
                         }
+                    }
 
+                    Button(action: { addTerminalTab() }) {
+                        Label("Terminal", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+
+                    if !detectedAgents.isEmpty {
                         Button(action: { showSessionPicker = true }) {
                             Label("Import session", systemImage: "clock.arrow.circlepath")
                         }
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.caption)
-                            .foregroundColor(TarsyTheme.textSecondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
                     }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.caption)
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
                 }
             }
             .padding(.horizontal, 8)
@@ -507,6 +505,52 @@ struct WorkspaceView: View {
                 isAgentThinking = true
                 if let sessionId = notification.userInfo?["sessionId"] as? String {
                     todoManager.markResumed(sessionId: sessionId)
+                }
+            }
+        }
+    }
+
+    // MARK: - Terminal Area
+
+    private static let ansiRegex = try! NSRegularExpression(pattern: "\u{1B}\\[[0-9;]*[A-Za-z]")
+
+    private var terminalOutputText: String {
+        let raw = chatService.messages
+            .map { msg in
+                if msg.role == .user {
+                    return "$ \(msg.content)\n"
+                } else {
+                    return msg.content
+                }
+            }
+            .joined()
+        let range = NSRange(raw.startIndex..., in: raw)
+        return Self.ansiRegex.stringByReplacingMatches(in: raw, range: range, withTemplate: "")
+    }
+
+    private var terminalArea: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                Text(terminalOutputText)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .id("terminal-content")
+
+                Color.clear
+                    .frame(height: 1)
+                    .id("terminal-bottom")
+            }
+            .background(Color(hex: "0a0a0a"))
+            .onChange(of: chatService.updateCounter) { _, _ in
+                withAnimation(.easeOut(duration: 0.1)) {
+                    proxy.scrollTo("terminal-bottom", anchor: .bottom)
+                }
+            }
+            .onChange(of: chatService.messages.count) { _, _ in
+                withAnimation(.easeOut(duration: 0.1)) {
+                    proxy.scrollTo("terminal-bottom", anchor: .bottom)
                 }
             }
         }
@@ -734,7 +778,11 @@ struct WorkspaceView: View {
 
                     Divider().background(TarsyTheme.backgroundTertiary)
 
-                    chatArea
+                    if currentTab.type == .terminal {
+                        terminalArea
+                    } else {
+                        chatArea
+                    }
 
                     inputBar
                 }
@@ -826,14 +874,18 @@ struct WorkspaceView: View {
 
             ZStack {
                 VStack(spacing: 0) {
-                    chatArea
+                    if currentTab.type == .terminal {
+                        terminalArea
+                    } else {
+                        chatArea
 
-                    if !autocompleteItems.isEmpty {
-                        AutocompleteOverlay(items: autocompleteItems) { item in
-                            handleAutocompleteSelection(item)
+                        if !autocompleteItems.isEmpty {
+                            AutocompleteOverlay(items: autocompleteItems) { item in
+                                handleAutocompleteSelection(item)
+                            }
+                            .padding(.horizontal, 12)
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
-                        .padding(.horizontal, 12)
-                        .transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
 
                     inputBar
@@ -1002,8 +1054,8 @@ struct WorkspaceView: View {
                 // Text field
                 ZStack(alignment: .topLeading) {
                     if messageText.isEmpty {
-                        Text("send a command...")
-                            .font(TarsyTheme.font(size: 16))
+                        Text(currentTab.type == .terminal ? "$ run a command..." : "send a command...")
+                            .font(currentTab.type == .terminal ? .system(size: 16, design: .monospaced) : TarsyTheme.font(size: 16))
                             .foregroundColor(TarsyTheme.textSecondary.opacity(0.35))
                             .padding(.horizontal, 20)
                             .padding(.top, 22)
@@ -1329,7 +1381,10 @@ struct WorkspaceView: View {
         Task {
             await chatService.addMessage(msg)
 
-            isAgentThinking = true
+            // Terminal doesn't have a thinking/activity state
+            if currentTab.type != .terminal {
+                isAgentThinking = true
+            }
 
             // Start Live Activity when user sends a real task
             if currentTab.type == .claude || currentTab.type == .engine {
@@ -1434,6 +1489,16 @@ struct WorkspaceView: View {
             print("[Workspace] Sent engineCreate type=\(engineType.rawValue) for path=\(workspace.localPath)")
 #endif
         }
+
+        // Start terminal session if the initial tab is a terminal
+        if let tabIndex = tabs.firstIndex(where: { $0.type == .terminal && $0.sessionId == nil }) {
+            let createPacket = WSPacket(
+                action: .terminalCreate,
+                payload: ["path": workspace.localPath]
+            )
+            pendingCreateRequests[createPacket.id] = tabs[tabIndex].id
+            connectionManager.send(createPacket)
+        }
     }
 
     private func addEngineTab(_ engineType: AIEngineType) {
@@ -1457,6 +1522,24 @@ struct WorkspaceView: View {
                 "permissionMode": permConfig.mode(for: engineType).rawValue,
                 "workspaceId": workspace.id.uuidString
             ]
+        )
+        pendingCreateRequests[createPacket.id] = uniqueId
+        connectionManager.send(createPacket)
+    }
+
+    private func addTerminalTab() {
+        let count = tabs.filter { $0.type == .terminal }.count + 1
+        let title = count > 1 ? "Terminal \(count)" : "Terminal"
+        let uniqueId = "terminal-\(UUID().uuidString.prefix(8))"
+        let tab = TerminalTab(id: uniqueId, title: title, isFixed: false, type: .terminal, sessionId: nil, engineType: nil)
+        tabs.append(tab)
+        selectedTabIndex = tabs.count - 1
+        chatService.switchTab(tabId: uniqueId)
+
+        // Create terminal session on Mac
+        let createPacket = WSPacket(
+            action: .terminalCreate,
+            payload: ["path": workspace.localPath]
         )
         pendingCreateRequests[createPacket.id] = uniqueId
         connectionManager.send(createPacket)
@@ -1649,6 +1732,14 @@ struct WorkspaceView: View {
                     break
 
                 // Terminal
+                case .terminalCreate:
+                    if let sessionId = packet.payload?["sessionId"],
+                       let tabId = pendingCreateRequests.removeValue(forKey: packet.id) {
+                        if let idx = tabs.firstIndex(where: { $0.id == tabId }) {
+                            tabs[idx].sessionId = sessionId
+                        }
+                    }
+
                 case .terminalOutput:
                     if let output = packet.payload?["output"] {
                         let termSid = packet.payload?["sessionId"] ?? ""
