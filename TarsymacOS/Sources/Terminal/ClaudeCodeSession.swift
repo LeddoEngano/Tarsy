@@ -24,6 +24,7 @@ actor ClaudeCodeSession: AIEngine {
     private var lastModel: String = ""  // Last known model name
     private var lastContextWindow: Int = 0  // Context window from modelUsage
     private var lineBuffer: String = "" // Accumulates partial JSON lines between reads
+    private var currentTurnHadOutput = false // Tracks if current turn produced assistant output
     // Permission protocol state
     private var pendingPermissions: [String: [String: Any]] = [:]  // requestId -> tool input
     private var alwaysAllowedTools: Set<String> = []  // Session-level auto-approved tools
@@ -179,10 +180,13 @@ actor ClaudeCodeSession: AIEngine {
             content = message
         }
 
-        let msg: [String: Any] = [
+        var msg: [String: Any] = [
             "type": "user",
             "message": ["role": "user", "content": content]
         ]
+        if let sid = sessionId {
+            msg["session_id"] = sid
+        }
 
         if let data = try? JSONSerialization.data(withJSONObject: msg),
            var jsonStr = String(data: data, encoding: .utf8) {
@@ -201,10 +205,13 @@ actor ClaudeCodeSession: AIEngine {
         #endif
 
         // Send user response for AskUserQuestion
-        let msg: [String: Any] = [
+        var msg: [String: Any] = [
             "type": "user",
             "content": answer
         ]
+        if let sid = sessionId {
+            msg["session_id"] = sid
+        }
 
         if let data = try? JSONSerialization.data(withJSONObject: msg),
            var jsonStr = String(data: data, encoding: .utf8) {
@@ -256,13 +263,16 @@ actor ClaudeCodeSession: AIEngine {
         switch type {
         case "assistant":
             pendingAskUser = false // Reset at start of new turn
+            currentTurnHadOutput = false
             if let message = json["message"] as? [String: Any] {
-                // Extract model info and usage (including cache tokens)
+                // Extract model info and usage for context % calculation.
+                // cache_read tokens still occupy the context window (cache is a billing
+                // optimization, not a context one). cache_creation tokens also occupy the
+                // window on the turn they're written. Exclude neither.
                 if let model = message["model"] as? String {
                     lastModel = model
                     let usage = message["usage"] as? [String: Any]
                     let inputTokens = (usage?["input_tokens"] as? Int ?? 0)
-                        + (usage?["cache_creation_input_tokens"] as? Int ?? 0)
                         + (usage?["cache_read_input_tokens"] as? Int ?? 0)
                     let outputTokens = usage?["output_tokens"] as? Int ?? 0
                     // Replace (not accumulate) — each turn's input already includes full conversation history
@@ -275,6 +285,7 @@ actor ClaudeCodeSession: AIEngine {
                     for block in content {
                         guard let blockType = block["type"] as? String else { continue }
                         if blockType == "text", let text = block["text"] as? String {
+                            currentTurnHadOutput = true
                             onOutput?(text)
                         }
                         if blockType == "tool_use" {
@@ -297,7 +308,6 @@ actor ClaudeCodeSession: AIEngine {
                let data = firstEntry.value as? [String: Any] {
                 let inputTokens = (data["inputTokens"] as? Int ?? 0)
                     + (data["cacheReadInputTokens"] as? Int ?? 0)
-                    + (data["cacheCreationInputTokens"] as? Int ?? 0)
                 let outputTokens = data["outputTokens"] as? Int ?? 0
                 lastInputTokens = inputTokens
                 lastOutputTokens = outputTokens
@@ -309,7 +319,6 @@ actor ClaudeCodeSession: AIEngine {
             } else if let usage = json["usage"] as? [String: Any] {
                 // Fallback to top-level usage
                 let inputTokens = (usage["input_tokens"] as? Int ?? 0)
-                    + (usage["cache_creation_input_tokens"] as? Int ?? 0)
                     + (usage["cache_read_input_tokens"] as? Int ?? 0)
                 let outputTokens = usage["output_tokens"] as? Int ?? 0
                 lastInputTokens = inputTokens
@@ -320,8 +329,14 @@ actor ClaudeCodeSession: AIEngine {
             // But NOT if the turn ended with AskUserQuestion (agent is waiting for user input)
             if !pendingAskUser {
                 let resultText = json["result"] as? String ?? "Task completed"
+                // If this turn had no assistant output (e.g. slash commands like /compact, /help),
+                // emit the result text so the user sees the response in chat
+                if !currentTurnHadOutput && resultText != "Task completed" {
+                    onOutput?(resultText + "\n")
+                }
                 onComplete?(resultText)
             }
+            currentTurnHadOutput = false
 
         case "system":
             if let subtype = json["subtype"] as? String, subtype == "init" {

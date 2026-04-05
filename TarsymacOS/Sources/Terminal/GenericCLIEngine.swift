@@ -1,8 +1,8 @@
 import Foundation
 import TarsyShared
 
-/// Runs CLI coding agents. Uses headless mode (-p/--prompt) for TUI-based CLIs (Gemini, etc.)
-/// and PTY interactive mode for line-based CLIs (Aider, etc.).
+/// Runs CLI coding agents. Uses structured JSONL output for Codex and Gemini,
+/// and plain text headless mode for other CLIs (Aider, etc.).
 actor GenericCLIEngine: AIEngine {
     let id: String
     let engineType: AIEngineType
@@ -12,12 +12,22 @@ actor GenericCLIEngine: AIEngine {
     let permissionMode: AgentPermissionConfig.PermissionMode
     private var isRunning = false
 
-    // Headless mode state
     private var currentProcess: Process?
 
     private var onOutput: (@Sendable (String) -> Void)?
     private var onComplete: (@Sendable (String) -> Void)?
     private var onAskUser: (@Sendable (String, [String]) -> Void)?
+    private var onStatusUpdate: (@Sendable (String, Int, Int, Int) -> Void)?
+
+    // Line buffer for JSONL streaming (Codex/Gemini)
+    private var lineBuffer: String = ""
+    // Accumulated message text for Gemini delta streaming
+    private var geminiMessageBuffer: String = ""
+
+    /// Whether this engine uses structured JSONL output
+    private var usesStructuredOutput: Bool {
+        engineType == .gemini
+    }
 
     init(id: String, engineType: AIEngineType, workspacePath: String, command: String? = nil, apiKey: String? = nil, permissionMode: AgentPermissionConfig.PermissionMode = .dangerous) {
         self.id = id
@@ -40,6 +50,10 @@ actor GenericCLIEngine: AIEngine {
         self.onAskUser = handler
     }
 
+    func setStatusHandler(_ handler: @escaping @Sendable (String, Int, Int, Int) -> Void) {
+        self.onStatusUpdate = handler
+    }
+
     func start() throws {
         isRunning = true
         onOutput?("\(engineType.readyMessage)\n")
@@ -51,6 +65,8 @@ actor GenericCLIEngine: AIEngine {
         // Kill any previous in-flight request
         currentProcess?.terminate()
         currentProcess = nil
+        lineBuffer = ""
+        geminiMessageBuffer = ""
 
         let cliPath = findCLI()
         let expandedPath = (workspacePath as NSString).expandingTildeInPath
@@ -69,12 +85,22 @@ actor GenericCLIEngine: AIEngine {
 
         let onOutput = self.onOutput
 
-        stdout.fileHandleForReading.readabilityHandler = { handle in
-            let data = handle.availableData
-            guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            let cleaned = GenericCLIEngine.stripAnsi(text)
-            if !cleaned.isEmpty {
-                onOutput?(cleaned)
+        if usesStructuredOutput {
+            // JSONL mode: buffer lines and parse structured events
+            stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                let data = handle.availableData
+                guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+                Task { await self?.appendAndProcessLines(text) }
+            }
+        } else {
+            // Plain text mode for other engines
+            stdout.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
+                let cleaned = GenericCLIEngine.stripAnsi(text)
+                if !cleaned.isEmpty {
+                    onOutput?(cleaned)
+                }
             }
         }
 
@@ -94,9 +120,10 @@ actor GenericCLIEngine: AIEngine {
         }
 
         let onComplete = self.onComplete
-        proc.terminationHandler = { _ in
+        proc.terminationHandler = { [weak self] _ in
             stdout.fileHandleForReading.readabilityHandler = nil
             stderr.fileHandleForReading.readabilityHandler = nil
+            Task { await self?.flushLineBuffer() }
             onComplete?("")
         }
 
@@ -109,7 +136,7 @@ actor GenericCLIEngine: AIEngine {
     }
 
     func respondToQuestion(_ answer: String) {
-        // In headless mode, questions are handled by sending a new message
+        // Headless mode: questions are handled by sending a new message
         sendMessage(answer)
     }
 
@@ -118,6 +145,125 @@ actor GenericCLIEngine: AIEngine {
         currentProcess?.terminate()
         currentProcess = nil
         onComplete?("Session ended")
+    }
+
+    // MARK: - Line Buffering (JSONL)
+
+    private func appendAndProcessLines(_ text: String) {
+        lineBuffer += text
+        while let newlineIndex = lineBuffer.firstIndex(of: "\n") {
+            let line = String(lineBuffer[lineBuffer.startIndex..<newlineIndex])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            lineBuffer = String(lineBuffer[lineBuffer.index(after: newlineIndex)...])
+            guard !line.isEmpty else { continue }
+            handleJsonLine(line)
+        }
+    }
+
+    private func flushLineBuffer() {
+        let remaining = lineBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        lineBuffer = ""
+        guard !remaining.isEmpty else { return }
+        handleJsonLine(remaining)
+    }
+
+    // MARK: - JSONL Event Routing
+
+    private func handleJsonLine(_ jsonLine: String) {
+        guard let data = jsonLine.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let type = json["type"] as? String else {
+            // Not valid JSON — output as plain text
+            let cleaned = GenericCLIEngine.stripAnsi(jsonLine)
+            if !cleaned.isEmpty { onOutput?(cleaned) }
+            return
+        }
+
+        switch engineType {
+        case .gemini:
+            handleGeminiEvent(type: type, json: json)
+        default:
+            break
+        }
+    }
+
+    // MARK: - Gemini JSONL Events (--output-format stream-json)
+
+    private func handleGeminiEvent(type: String, json: [String: Any]) {
+        switch type {
+        case "init":
+            let model = json["model"] as? String ?? "gemini"
+            #if DEBUG
+            print("[Gemini] Session init: model=\(model)")
+            #endif
+
+        case "message":
+            let role = json["role"] as? String ?? ""
+            let content = json["content"] as? String ?? ""
+            let isDelta = json["delta"] as? Bool ?? false
+
+            if role == "assistant" && !content.isEmpty {
+                if isDelta {
+                    // Delta mode: accumulate and output chunk
+                    geminiMessageBuffer += content
+                    onOutput?(content)
+                } else {
+                    // Full message: output directly
+                    geminiMessageBuffer = content
+                    onOutput?(content)
+                }
+            }
+
+        case "tool_use":
+            let toolName = json["tool_name"] as? String ?? "tool"
+            let toolId = json["tool_id"] as? String ?? ""
+            if let params = json["parameters"] as? [String: Any] {
+                let desc = params["command"] as? String
+                    ?? params["file_path"] as? String
+                    ?? params["query"] as? String
+                    ?? params["pattern"] as? String
+                    ?? ""
+                onOutput?("🔧 \(toolName): \(desc)\n")
+            } else {
+                onOutput?("🔧 \(toolName)\n")
+            }
+            _ = toolId // suppress unused warning
+
+        case "tool_result":
+            let status = json["status"] as? String ?? ""
+            if status == "error", let error = json["error"] as? String {
+                onOutput?("⚠️ Tool error: \(error)\n")
+            }
+
+        case "result":
+            let status = json["status"] as? String ?? "unknown"
+            if let stats = json["stats"] as? [String: Any] {
+                let inputTokens = stats["input_tokens"] as? Int ?? stats["input"] as? Int ?? 0
+                let outputTokens = stats["output_tokens"] as? Int ?? stats["output"] as? Int ?? 0
+                // Gemini 2.5 Pro has 1M context window; pass it so iOS doesn't use 200K fallback
+                onStatusUpdate?("gemini", inputTokens, outputTokens, 1_000_000)
+            }
+            if status == "error" {
+                if let errorMsg = json["error"] as? String {
+                    onOutput?("❌ \(errorMsg)\n")
+                } else if let errorObj = json["error"] as? [String: Any],
+                          let msg = errorObj["message"] as? String {
+                    onOutput?("❌ \(msg)\n")
+                }
+            }
+
+        case "error":
+            let severity = json["severity"] as? String ?? "error"
+            let message = json["message"] as? String ?? "Unknown error"
+            if severity == "error" {
+                onOutput?("❌ \(message)\n")
+            } else {
+                onOutput?("⚠️ \(message)\n")
+            }
+
+        default:
+            break
+        }
     }
 
     // MARK: - Private
@@ -174,23 +320,21 @@ actor GenericCLIEngine: AIEngine {
         return env
     }
 
-    /// Build CLI arguments. For TUI-based CLIs, uses headless/prompt flags.
+    /// Build CLI arguments per engine.
     private func argsForEngine(message: String) -> [String] {
         switch engineType {
         case .gemini:
-            var args = ["-p", message]
+            // gemini -p "prompt" --output-format stream-json [--yolo | --approval-mode auto_edit]
+            var args = ["-p", message, "--output-format", "stream-json"]
             if permissionMode == .dangerous {
                 args.append("--yolo")
+            } else {
+                args.append(contentsOf: ["--approval-mode", "auto_edit"])
             }
             return args
         case .codex:
-            var args = ["-p", message]
-            if permissionMode == .dangerous {
-                args.append(contentsOf: ["--approval-mode", "full-auto"])
-            } else {
-                args.append(contentsOf: ["--approval-mode", "suggest"])
-            }
-            return args
+            // Codex is handled by CodexSession — this fallback should not be reached
+            return [message]
         case .aider:
             var args = ["--message", message]
             if permissionMode != .dangerous {

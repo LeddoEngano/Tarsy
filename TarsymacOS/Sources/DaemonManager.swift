@@ -44,6 +44,11 @@ class DaemonManager: ObservableObject {
     /// Last terminal-state packet per session (engineComplete, engineAskUser).
     /// Re-sent to clients on reconnect so they can sync missed state transitions.
     private var sessionLastEvent: [String: WSPacket] = [:]
+    /// Codex approval type cache: "sessionId:requestId" -> approvalType
+    private var codexApprovalTypeCache: [String: String] = [:]
+    /// Tracks last client activity (ping/packet) to detect dead connections and stop streaming
+    private var lastClientActivity: Date?
+    private var clientActivityTimer: Timer?
 
     // MARK: - Live Activity Push State
     private var lastLAPushTime: [String: Date] = [:]          // sessionId -> last push sent time
@@ -319,6 +324,11 @@ class DaemonManager: ObservableObject {
                     }
                 }
                 return extra
+            },
+            onActivity: { [weak self] in
+                Task { @MainActor in
+                    self?.lastClientActivity = Date()
+                }
             }
         )
 
@@ -485,6 +495,7 @@ class DaemonManager: ObservableObject {
 
     private func handlePacket(clientId: String, packet: WSPacket) async {
         lastActiveClientId = clientId
+        lastClientActivity = Date()
         switch packet.action {
         // E2E encrypted envelope — unwrap and re-dispatch
         case .e2eEncrypted:
@@ -685,6 +696,13 @@ class DaemonManager: ObservableObject {
             )
         case .securityRotateResult, .securityFingerprintUpdate:
             break // Handled on iOS side
+        case .relayNoClients:
+            log("Relay reports no clients connected — stopping stream")
+            await stopStreamCleanup()
+        case .ping:
+            await sendToClientOrRelay(WSPacket(action: .pong, id: packet.id), to: clientId)
+        case .pong:
+            break
         default:
             await sendToClientOrRelay(
                 WSPacket(action: .error, payload: ["message": "Unknown action: \(packet.action.rawValue)"]),
@@ -1253,7 +1271,7 @@ class DaemonManager: ObservableObject {
             // Wait for actual confirmation: either output-based or port-based
             // Give more time if sudo is involved (user might need to enter password via fallback)
             let targetPort = portFromUrl(streamUrl)
-            let timeout: Int = needsSudo ? 30 : 15
+            let timeout: Int = needsSudo ? 45 : 30
             let confirmed = await waitForDevServer(signal: serverReady, port: targetPort, timeout: timeout)
 
             if confirmed {
@@ -1332,11 +1350,39 @@ class DaemonManager: ObservableObject {
                     }
                 }
             } else {
-                log("devServerStart: could not confirm, assuming started")
-                await sendToClientOrRelay(
-                    WSPacket(action: .devServerStart, payload: ["status": "started_unconfirmed", "sessionId": sessionId], id: packet.id),
-                    to: clientId
-                )
+                // Timeout — scan common ports to see if the server is actually running
+                log("devServerStart: timeout, scanning common ports before giving up")
+                let commonPorts: [UInt16] = [3000, 3001, 3002, 4200, 5173, 5174, 8000, 8080, 8888]
+                var foundPort: Int? = nil
+                if let targetPort, isPortListening(port: targetPort) {
+                    foundPort = Int(targetPort)
+                } else {
+                    for p in commonPorts {
+                        if isPortListening(port: p) {
+                            foundPort = Int(p)
+                            break
+                        }
+                    }
+                }
+
+                if let port = foundPort {
+                    log("devServerStart: found server on port \(port) after timeout")
+                    await MainActor.run { devServerDetectedPorts[expandedPath] = port }
+                    await sendToClientOrRelay(
+                        WSPacket(action: .devServerStart, payload: [
+                            "status": "ready",
+                            "port": "\(port)",
+                            "sessionId": sessionId
+                        ], id: packet.id),
+                        to: clientId
+                    )
+                } else {
+                    log("devServerStart: could not confirm, assuming started")
+                    await sendToClientOrRelay(
+                        WSPacket(action: .devServerStart, payload: ["status": "started_unconfirmed", "sessionId": sessionId], id: packet.id),
+                        to: clientId
+                    )
+                }
             }
         } catch {
             await sendToClientOrRelay(
@@ -1998,6 +2044,7 @@ class DaemonManager: ObservableObject {
 
     /// Shared helper to wire H.264 encoder frame delivery to relay/LAN
     private func setupEncoderFrameRelay(encoder: H264Encoder, isRelay: Bool, clientId: String) {
+        startClientActivityMonitor()
         let relay = self.relayClient
         let wsServer = self.wsServer
         let e2eRef = isRelay ? self.relayE2E : self.e2e
@@ -2154,15 +2201,47 @@ class DaemonManager: ObservableObject {
     }
 
     private func handleStreamStop(clientId: String, packet: WSPacket) async {
-        await screenCapture.stopCapture()
-        screenCapture.onPixelBuffer = nil
-        h264Encoder?.stop()
-        h264Encoder = nil
+        await stopStreamCleanup()
 
         await sendToClientOrRelay(
             WSPacket(action: .streamStop, id: packet.id),
             to: clientId
         )
+    }
+
+    /// Stops screen capture and H.264 encoding. Safe to call even if no stream is active.
+    private func stopStreamCleanup() async {
+        guard h264Encoder != nil else { return }
+        await screenCapture.stopCapture()
+        screenCapture.onPixelBuffer = nil
+        h264Encoder?.stop()
+        h264Encoder = nil
+        clientActivityTimer?.invalidate()
+        clientActivityTimer = nil
+        lastClientActivity = nil
+        log("Stream stopped")
+    }
+
+    /// Starts monitoring client activity. If no packets are received for 30 seconds
+    /// while a stream is active, assumes the client disconnected and stops the stream.
+    /// Uses 30s to tolerate temporary network hiccups (iOS pings every 10s, so this
+    /// allows missing up to 2 consecutive pings before stopping).
+    private func startClientActivityMonitor() {
+        clientActivityTimer?.invalidate()
+        lastClientActivity = Date()
+        clientActivityTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] timer in
+            Task { @MainActor in
+                guard let self, self.h264Encoder != nil else {
+                    timer.invalidate() // No encoder — stop polling
+                    return
+                }
+                guard let lastActivity = self.lastClientActivity else { return }
+                if Date().timeIntervalSince(lastActivity) > 30 {
+                    self.log("No client activity for 30s — stopping stream")
+                    await self.stopStreamCleanup()
+                }
+            }
+        }
     }
 
     // MARK: - Machine Registration
@@ -2629,13 +2708,48 @@ class DaemonManager: ObservableObject {
                 onAskUser: { [weak self] questionsJson, _ in
                     Task { @MainActor in
                         guard let self else { return }
-                        let packet = WSPacket(action: .engineAskUser, payload: ["sessionId": sid, "questions": questionsJson, "engineType": engineTypeRaw])
+                        var payload = ["sessionId": sid, "questions": questionsJson, "engineType": engineTypeRaw]
+
+                        // Detect Codex approval metadata embedded in questions JSON
+                        if engineTypeRaw == "codex",
+                           let data = questionsJson.data(using: .utf8),
+                           let questions = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                           let first = questions.first,
+                           let approvalId = first["_approvalId"] {
+                            payload["isPermission"] = "true"
+                            payload["permissionRequestId"] = "\(approvalId)"
+                            // Cache approval type per requestId so concurrent approvals don't conflict
+                            if let approvalType = first["_approvalType"] as? String {
+                                self.codexApprovalTypeCache["\(sid):\(approvalId)"] = approvalType
+                            }
+                            if let questionId = first["_questionId"] as? String {
+                                payload["questionId"] = questionId
+                            }
+                        }
+
+                        let packet = WSPacket(action: .engineAskUser, payload: payload)
                         self.sessionLastEvent[sid] = packet
                         await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
                         self.sendLAPush(sessionId: sid, status: "waiting", toolName: "Needs input", toolIcon: "questionmark.circle", message: String(questionsJson.prefix(100)), alert: ["title": "Tarsy", "body": "Your agent needs input"])
                     }
                 }
             )
+
+            // Wire status handler for token tracking (Codex, Gemini)
+            await terminalManager.setEngineStatusHandler(sessionId: sid) { [weak self] model, inputTokens, outputTokens, contextWindow in
+                Task {
+                    guard let self else { return }
+                    var payload = [
+                        "sessionId": sid, "model": model,
+                        "inputTokens": "\(inputTokens)", "outputTokens": "\(outputTokens)"
+                    ]
+                    if contextWindow > 0 { payload["contextWindow"] = "\(contextWindow)" }
+                    await self.sendToClientOrRelay(
+                        WSPacket(action: .engineStatus, payload: payload),
+                        to: self.lastActiveClientId
+                    )
+                }
+            }
 
             await UltraContextSync.shared.engineStarted(sessionId: sid, engineType: engineTypeRaw, workspacePath: path, workspaceId: wsIdStr)
 
@@ -2692,6 +2806,25 @@ class DaemonManager: ObservableObject {
                 await terminalManager.respondToClaudePermission(requestId, answer: choice, sessionId: sessionId)
             } else {
                 await terminalManager.respondToClaudeQuestion(answer, sessionId: sessionId)
+            }
+        } else if engineType == "codex" {
+            if let requestId = packet.payload?["permissionRequestId"] {
+                // Build structured response with approval metadata
+                let cacheKey = "\(sessionId):\(requestId)"
+                let approvalType = codexApprovalTypeCache.removeValue(forKey: cacheKey) ?? "command"
+                let questionId = packet.payload?["questionId"]
+                var responseJson: [String: Any] = [
+                    "_approvalId": Int(requestId) ?? 0,
+                    "_approvalType": approvalType,
+                    "answer": answer
+                ]
+                if let qId = questionId { responseJson["_questionId"] = qId }
+                if let data = try? JSONSerialization.data(withJSONObject: responseJson),
+                   let jsonStr = String(data: data, encoding: .utf8) {
+                    await terminalManager.respondToCodexApproval(jsonStr, sessionId: sessionId)
+                }
+            } else {
+                await terminalManager.respondToEngineQuestion(answer, sessionId: sessionId)
             }
         } else {
             await terminalManager.respondToEngineQuestion(answer, sessionId: sessionId)
@@ -3033,6 +3166,22 @@ class DaemonManager: ObservableObject {
                         }
                     }
                 )
+
+                // Wire status handler for token tracking (Codex, Gemini)
+                await terminalManager.setEngineStatusHandler(sessionId: sid) { [weak self] model, inputTokens, outputTokens, contextWindow in
+                    Task {
+                        guard let self else { return }
+                        var payload = [
+                            "sessionId": sid, "model": model,
+                            "inputTokens": "\(inputTokens)", "outputTokens": "\(outputTokens)"
+                        ]
+                        if contextWindow > 0 { payload["contextWindow"] = "\(contextWindow)" }
+                        await self.sendToClientOrRelay(
+                            WSPacket(action: .engineStatus, payload: payload),
+                            to: self.lastActiveClientId
+                        )
+                    }
+                }
 
                 await terminalManager.sendEngineMessage(scaffoldPrompt, to: sid)
 

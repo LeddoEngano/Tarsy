@@ -13,6 +13,7 @@ actor WebSocketServer {
     private var onPacketReceived: (@Sendable (String, WSPacket) async -> Void)?
     private var onClientConnected: (@Sendable (String) -> Void)?
     private var onClientDisconnected: (@Sendable (String) -> Void)?
+    private var onClientActivity: (@Sendable () -> Void)?
 
     /// The machineId this server belongs to — used to validate auth packets
     var machineId: UUID?
@@ -39,12 +40,14 @@ actor WebSocketServer {
         onPacket: @escaping @Sendable (String, WSPacket) async -> Void,
         onConnect: @escaping @Sendable (String) -> Void,
         onDisconnect: @escaping @Sendable (String) -> Void,
-        onAuthSuccess: @escaping @Sendable (WSPacket) async -> [String: String] = { _ in [:] }
+        onAuthSuccess: @escaping @Sendable (WSPacket) async -> [String: String] = { _ in [:] },
+        onActivity: @escaping @Sendable () -> Void = {}
     ) {
         self.onPacketReceived = onPacket
         self.onClientConnected = onConnect
         self.onClientDisconnected = onDisconnect
         self.onAuthSuccess = onAuthSuccess
+        self.onClientActivity = onActivity
     }
 
     func start() async throws {
@@ -326,6 +329,7 @@ actor WebSocketServer {
                 }
 
                 if packet.action == .ping {
+                    self.onClientActivity?()
                     await self.send(WSPacket(action: .pong, id: packet.id), to: clientId)
                     await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true, clientIP: clientIP)
                     return

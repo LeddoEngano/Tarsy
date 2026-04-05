@@ -112,6 +112,9 @@ actor TerminalSessionManager {
             let session = ClaudeCodeSession(id: id, workspacePath: workspacePath, permissionMode: permissionMode)
             claudeSessions[id] = session
             engine = session
+        } else if engineType == .codex {
+            let session = CodexSession(id: id, workspacePath: workspacePath, permissionMode: permissionMode)
+            engine = session
         } else {
             let session = GenericCLIEngine(id: id, engineType: engineType, workspacePath: workspacePath, command: command, apiKey: apiKey, permissionMode: permissionMode)
             engine = session
@@ -126,8 +129,26 @@ actor TerminalSessionManager {
         return id
     }
 
+    func setEngineStatusHandler(sessionId: String, handler: @escaping @Sendable (String, Int, Int, Int) -> Void) async {
+        if let generic = engineSessions[sessionId] as? GenericCLIEngine {
+            await generic.setStatusHandler(handler)
+        } else if let codex = engineSessions[sessionId] as? CodexSession {
+            await codex.setStatusHandler(handler)
+        } else if let claude = engineSessions[sessionId] as? ClaudeCodeSession {
+            await claude.setStatusHandler(handler)
+        }
+    }
+
     func sendEngineMessage(_ message: String, to sessionId: String) async {
         await engineSessions[sessionId]?.sendMessage(message)
+    }
+
+    func respondToCodexApproval(_ answer: String, sessionId: String) async {
+        if let codex = engineSessions[sessionId] as? CodexSession {
+            await codex.handleApprovalAnswer(answer)
+        } else {
+            await engineSessions[sessionId]?.respondToQuestion(answer)
+        }
     }
 
     func respondToEngineQuestion(_ answer: String, sessionId: String) async {

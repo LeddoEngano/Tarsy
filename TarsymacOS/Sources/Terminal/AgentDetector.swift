@@ -333,6 +333,7 @@ struct AgentDetector {
 
         case .codex:
             var paths = [
+                "/Applications/Codex.app/Contents/Resources/codex",
                 "/opt/homebrew/bin/codex",
                 "\(home)/.local/bin/codex",
                 "/usr/local/bin/codex",

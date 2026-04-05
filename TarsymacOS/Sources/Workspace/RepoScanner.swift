@@ -32,15 +32,28 @@ class RepoScanner {
     /// Whether git is installed and usable on this machine
     private(set) lazy var gitAvailable: Bool = {
         // On macOS, /usr/bin/git exists as a stub even without CLT installed.
-        // Running it would trigger a GUI prompt — check for real git first.
+        // Running the stub without CLT triggers a GUI install dialog.
+        // Check for real git at known paths first to avoid that prompt.
+        let knownPaths = [
+            "/Library/Developer/CommandLineTools/usr/bin/git",
+            "/Applications/Xcode.app/Contents/Developer/usr/bin/git",
+            "/opt/homebrew/bin/git",
+            "/usr/local/bin/git",
+        ]
+
+        for path in knownPaths {
+            if FileManager.default.isExecutableFile(atPath: path) {
+                return true
+            }
+        }
+
+        // Fallback: check xcode-select to see if CLT/Xcode is installed
+        // (covers non-standard Xcode install locations)
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["--version"]
-        process.environment = ["GIT_TERMINAL_PROMPT": "0"]
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
+        process.arguments = ["-p"]
         process.standardOutput = Pipe()
         process.standardError = Pipe()
-        // Prevent the CLT install dialog
-        process.environment?["DEVELOPER_DIR"] = "/nonexistent"
 
         do {
             try process.run()
