@@ -81,7 +81,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     static weak var deepLinkRouter: DeepLinkRouter?
 
     /// Background task identifier for keeping WebSocket alive while agents are running
-    static var AppDelegate.backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
+    static var backgroundTaskId: UIBackgroundTaskIdentifier = .invalid
 }
 
 @main
