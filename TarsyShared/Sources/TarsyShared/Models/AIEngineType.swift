@@ -107,7 +107,7 @@ public enum AIEngineType: String, Codable, Sendable, CaseIterable {
 
     /// Whether this engine uses a dedicated session handler (vs GenericCLIEngine).
     public var usesDedicatedSession: Bool {
-        self == .claude
+        self == .claude || self == .gemini
     }
 
     /// Random fun ready message shown when the engine starts.

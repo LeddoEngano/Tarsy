@@ -37,6 +37,7 @@ class DaemonManager: ObservableObject {
     private var lastActiveClientId: String = "relay"
     private var cachedAuthToken: String?
     private var detectedAgents: [AIEngineType] = []
+    private var detectedSlashCommands: [[String: String]] = []
     private let e2e = E2ECrypto()       // LAN E2E
     private let relayE2E = E2ECrypto() // Relay E2E (separate key pair)
     private let agentTaskService = AgentTaskService()
@@ -143,6 +144,10 @@ class DaemonManager: ObservableObject {
         )
         await wsServer?.broadcast(agentsPacket)
         await relayClient.send(packet: agentsPacket)
+
+        // 7b. Scan slash commands (user-level, off main thread)
+        detectedSlashCommands = await Task.detached { self.scanSlashCommands(workspacePaths: []) }.value
+        await broadcastSlashCommands()
 
         // 8. UltraContext — watch Claude Code session files + sync via proxy
         Task { await SessionFileWatcher.shared.start() }
@@ -278,6 +283,8 @@ class DaemonManager: ObservableObject {
                         payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
                     )
                     await self?.sendToClientOrRelay(packet, to: clientId)
+                    // Send slash commands
+                    await self?.broadcastSlashCommands(to: clientId)
                     // Send OpenClaw availability
                     let openclawInstalled = await self?.openClaw.isInstalled() ?? false
                     await self?.sendToClientOrRelay(
@@ -379,6 +386,8 @@ class DaemonManager: ObservableObject {
                             payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
                         )
                         await self?.sendToClientOrRelay(agentPacket, to: "relay")
+                        // Send slash commands
+                        await self?.broadcastSlashCommands(to: "relay")
                         // Send OpenClaw availability
                         let openclawInstalled = await self?.openClaw.isInstalled() ?? false
                         await self?.sendToClientOrRelay(
@@ -2506,6 +2515,14 @@ class DaemonManager: ObservableObject {
         let expandedEnginePath = (path as NSString).expandingTildeInPath
         registeredWorkspacePaths.insert(URL(fileURLWithPath: expandedEnginePath).resolvingSymlinksInPath().path)
 
+        // Rescan slash commands with this workspace's project-level commands (off main thread)
+        let paths = Array(registeredWorkspacePaths)
+        let newCommands = await Task.detached { self.scanSlashCommands(workspacePaths: paths) }.value
+        if newCommands != detectedSlashCommands {
+            detectedSlashCommands = newCommands
+            await broadcastSlashCommands()
+        }
+
         log("engineCreate: type=\(engineType.displayName), path=\(path), sid=\(sid), permissionMode=\(permissionMode.rawValue)")
 
         // For Claude, use the existing rich session
@@ -2719,6 +2736,16 @@ class DaemonManager: ObservableObject {
                             }
                         }
 
+                        // Detect Gemini ACP permission metadata
+                        if engineTypeRaw == "gemini",
+                           let data = questionsJson.data(using: .utf8),
+                           let questions = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+                           let first = questions.first,
+                           let rpcId = first["_permissionRpcId"] as? Int {
+                            payload["isPermission"] = "true"
+                            payload["permissionRequestId"] = "\(rpcId)"
+                        }
+
                         let packet = WSPacket(action: .engineAskUser, payload: payload)
                         self.sessionLastEvent[sid] = packet
                         await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
@@ -2815,6 +2842,14 @@ class DaemonManager: ObservableObject {
                    let jsonStr = String(data: data, encoding: .utf8) {
                     await terminalManager.respondToCodexApproval(jsonStr, sessionId: sessionId)
                 }
+            } else {
+                await terminalManager.respondToEngineQuestion(answer, sessionId: sessionId)
+            }
+        } else if engineType == "gemini" {
+            if let requestId = packet.payload?["permissionRequestId"],
+               let rpcId = Int(requestId) {
+                // Route to GeminiSession with the RPC ID for permission response
+                await terminalManager.respondToGeminiPermission(answer, rpcId: rpcId, sessionId: sessionId)
             } else {
                 await terminalManager.respondToEngineQuestion(answer, sessionId: sessionId)
             }
@@ -4212,6 +4247,122 @@ class DaemonManager: ObservableObject {
         if let wakeObserver { center.removeObserver(wakeObserver) }
         sleepObserver = nil
         wakeObserver = nil
+    }
+
+    // MARK: - Slash Command Detection
+
+    /// Scans ~/.claude/commands/ and project-level .claude/commands/ for slash command definitions.
+    private nonisolated func scanSlashCommands(workspacePaths: [String]) -> [[String: String]] {
+        let fm = FileManager.default
+        let home = AgentDetector.realHome
+        var commands: [[String: String]] = []
+        var seen: Set<String> = []
+
+        var dirs: [String] = ["\(home)/.claude/commands"]
+        for path in workspacePaths {
+            dirs.append("\(path)/.claude/commands")
+        }
+
+        for dir in dirs {
+            guard let files = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            for file in files.sorted() {
+                let fullPath = "\(dir)/\(file)"
+                var isDir: ObjCBool = false
+                if fm.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue {
+                    guard let subfiles = try? fm.contentsOfDirectory(atPath: fullPath) else { continue }
+                    let namespace = file
+                    for subfile in subfiles.sorted() where subfile.hasSuffix(".md") {
+                        let subPath = "\(fullPath)/\(subfile)"
+                        let baseName = String(subfile.dropLast(3))
+                        let cmdName = "/\(namespace):\(baseName)"
+                        guard !seen.contains(cmdName) else { continue }
+                        seen.insert(cmdName)
+                        let (name, desc) = parseCommandFile(at: subPath, fallbackName: cmdName)
+                        commands.append(["name": name, "description": desc])
+                    }
+                    continue
+                }
+
+                guard file.hasSuffix(".md") else { continue }
+                let baseName = String(file.dropLast(3))
+                let cmdName = "/\(baseName)"
+                guard !seen.contains(cmdName) else { continue }
+                seen.insert(cmdName)
+                let (name, desc) = parseCommandFile(at: fullPath, fallbackName: cmdName)
+                commands.append(["name": name, "description": desc])
+            }
+        }
+
+        return commands
+    }
+
+    /// Parses a command .md file for YAML frontmatter (name, description).
+    private nonisolated func parseCommandFile(at path: String, fallbackName: String) -> (name: String, description: String) {
+        // Read only the first 2KB — enough for frontmatter + first content line
+        guard let handle = FileHandle(forReadingAtPath: path),
+              let data = try? handle.read(upToCount: 2048),
+              let content = String(data: data, encoding: .utf8) else {
+            return (fallbackName, "")
+        }
+
+        var name = fallbackName
+        var description = ""
+
+        if content.hasPrefix("---") {
+            let lines = content.components(separatedBy: "\n")
+            var closedFrontmatter = false
+            for i in 1..<lines.count {
+                let line = lines[i].trimmingCharacters(in: .whitespaces)
+                if line == "---" { closedFrontmatter = true; break }
+                if line.hasPrefix("name:") {
+                    let val = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                    if !val.isEmpty { name = "/\(val)" }
+                } else if line.hasPrefix("description:") {
+                    description = String(line.dropFirst(12).trimmingCharacters(in: .whitespaces).prefix(80))
+                }
+            }
+            // If frontmatter was never closed, discard parsed values as unreliable
+            if !closedFrontmatter {
+                name = fallbackName
+                description = ""
+            }
+        }
+
+        if description.isEmpty {
+            let lines = content.components(separatedBy: "\n")
+            var pastFrontmatter = !content.hasPrefix("---")
+            var closedFrontmatter = false
+            for line in lines {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if !pastFrontmatter {
+                    if trimmed == "---" {
+                        if closedFrontmatter { pastFrontmatter = true }
+                        else { closedFrontmatter = true }
+                    }
+                    continue
+                }
+                if trimmed.isEmpty { continue }
+                description = String(trimmed
+                    .replacingOccurrences(of: "^#+\\s*", with: "", options: .regularExpression)
+                    .prefix(80))
+                break
+            }
+        }
+
+        return (name, description)
+    }
+
+    /// Broadcasts detected slash commands to all clients or a specific client.
+    private func broadcastSlashCommands(to clientId: String? = nil) async {
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: detectedSlashCommands),
+              let jsonStr = String(data: jsonData, encoding: .utf8) else { return }
+        let packet = WSPacket(action: .slashCommandsDetected, payload: ["commands": jsonStr])
+        if let clientId {
+            await sendToClientOrRelay(packet, to: clientId)
+        } else {
+            await wsServer?.broadcast(packet)
+            await relayClient.send(packet: packet)
+        }
     }
 }
 

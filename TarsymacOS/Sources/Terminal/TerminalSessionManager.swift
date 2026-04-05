@@ -115,6 +115,9 @@ actor TerminalSessionManager {
         } else if engineType == .codex {
             let session = CodexSession(id: id, workspacePath: workspacePath, permissionMode: permissionMode)
             engine = session
+        } else if engineType == .gemini {
+            let session = GeminiSession(id: id, workspacePath: workspacePath, permissionMode: permissionMode)
+            engine = session
         } else {
             let session = GenericCLIEngine(id: id, engineType: engineType, workspacePath: workspacePath, command: command, apiKey: apiKey, permissionMode: permissionMode)
             engine = session
@@ -136,6 +139,8 @@ actor TerminalSessionManager {
             await codex.setStatusHandler(handler)
         } else if let claude = engineSessions[sessionId] as? ClaudeCodeSession {
             await claude.setStatusHandler(handler)
+        } else if let gemini = engineSessions[sessionId] as? GeminiSession {
+            await gemini.setStatusHandler(handler)
         }
     }
 
@@ -146,6 +151,14 @@ actor TerminalSessionManager {
     func respondToCodexApproval(_ answer: String, sessionId: String) async {
         if let codex = engineSessions[sessionId] as? CodexSession {
             await codex.handleApprovalAnswer(answer)
+        } else {
+            await engineSessions[sessionId]?.respondToQuestion(answer)
+        }
+    }
+
+    func respondToGeminiPermission(_ answer: String, rpcId: Int, sessionId: String) async {
+        if let gemini = engineSessions[sessionId] as? GeminiSession {
+            await gemini.respondToGeminiPermission(rpcId: rpcId, answer: answer)
         } else {
             await engineSessions[sessionId]?.respondToQuestion(answer)
         }
