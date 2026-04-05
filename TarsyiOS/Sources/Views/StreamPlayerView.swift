@@ -418,7 +418,7 @@ struct StreamPlayerView: View {
 
                 DispatchQueue.main.async {
                     isDevServerStarting = false
-                    isDevServerRunning = (status == "ready" || status == "running" || status == "already_running" || status == "started_unconfirmed")
+                    isDevServerRunning = (status == "ready" || status == "running" || status == "already_running")
 
                     if let portStr = packet.payload?["port"], let port = Int(portStr) {
                         UserDefaults.standard.set(port, forKey: "devport_\(workspace.id)")
@@ -444,14 +444,46 @@ struct StreamPlayerView: View {
         }
 
         Task {
-            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            try? await Task.sleep(nanoseconds: 35_000_000_000)
             if waitingForSudo {
-                try? await Task.sleep(nanoseconds: 40_000_000_000)
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
             }
             if isDevServerStarting {
+                // Timeout waiting for dev server — check actual status before giving up
                 isDevServerStarting = false
                 connectionManager.removeListener("devserver")
-                await MainActor.run { completion?() }
+
+                // Query actual dev server status from macOS before proceeding
+                var statusPayload: [String: String] = ["path": workspace.localPath]
+                if let url = workspace.streamUrl, !url.isEmpty {
+                    statusPayload["streamUrl"] = url
+                }
+                connectionManager.send(WSPacket(action: .devServerStatus, payload: statusPayload))
+
+                var statusCheckCompleted = false
+                connectionManager.addListener("devserver-timeout-check") { packet in
+                    if packet.action == .devServerStatus {
+                        statusCheckCompleted = true
+                        let running = packet.payload?["running"] == "true"
+                        DispatchQueue.main.async {
+                            isDevServerRunning = running
+                            if running, let portStr = packet.payload?["port"], let port = Int(portStr) {
+                                UserDefaults.standard.set(port, forKey: "devport_\(workspace.id)")
+                            }
+                            completion?()
+                        }
+                        connectionManager.removeListener("devserver-timeout-check")
+                    }
+                }
+
+                // Final fallback: if status check also times out (5s), proceed anyway
+                Task {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    if !statusCheckCompleted {
+                        connectionManager.removeListener("devserver-timeout-check")
+                        await MainActor.run { completion?() }
+                    }
+                }
             }
         }
     }
@@ -519,6 +551,18 @@ struct StreamPlayerView: View {
         let needsDevServer = isWebMode && !isDevServerRunning && workspace.devServerCommand != nil && !workspace.devServerCommand!.isEmpty
 
         let afterDevServer = {
+            // Only proceed with stream if dev server is confirmed running
+            if self.isWebMode && !self.isDevServerRunning {
+                // Dev server failed to start — retry once before giving up
+                self.startDevServer {
+                    if self.isWebMode {
+                        self.openBrowserOnMac()
+                    }
+                    self.startStream()
+                    self.isStartingStream = false
+                }
+                return
+            }
             // Open browser on Mac for web projects
             if self.isWebMode {
                 self.openBrowserOnMac()

@@ -44,6 +44,7 @@ struct WorkspaceView: View {
     @State private var isBrowserActive = false
     @State private var isAgentThinking = false
     @State private var agentActivity: String? = nil // Current tool use activity
+    @State private var activityLines: [String] = [] // Accumulated activity narration (📋)
     @StateObject private var chatService = ChatService()
     private let ultraContextClient = UltraContextClient()
     @State private var showGitSheet = false
@@ -62,6 +63,8 @@ struct WorkspaceView: View {
     private var detectedAgents: [AIEngineType] {
         connectionManager.detectedAgents.isEmpty ? [.claude] : connectionManager.detectedAgents
     }
+    @State private var autocompleteItems: [AutocompleteItem] = []
+    @State private var cachedFileEntries: [AutocompleteItem] = []
     @State private var viewMode: ViewMode = .stream
     @State private var showSessionPicker = false
     @State private var showCommitConfirmation = false
@@ -78,12 +81,15 @@ struct WorkspaceView: View {
     private struct TabState {
         var isThinking = false
         var activity: String? = nil
+        var activityLines: [String] = []
         var options: [InteractiveOption]? = nil
         var questions: [InteractiveQuestion]? = nil
         var engineModel = ""
         var contextPercent: Double = 0
     }
     @State private var tabStates: [String: TabState] = [:]
+    /// Maps WSPacket.id → tab.id for pending engineCreate requests
+    @State private var pendingCreateRequests: [String: String] = [:]
 
     /// Returns true if the packet's sessionId matches the currently active tab
     private func isActiveTabSession(_ packet: WSPacket) -> Bool {
@@ -278,6 +284,9 @@ struct WorkspaceView: View {
             setupOutputHandler()
             await waitForConnectionAndStartClaude()
 
+            // Preload file tree for @ autocomplete
+            connectionManager.send(WSPacket(action: .fileTree, payload: ["path": workspace.localPath]))
+
             // Auto-start stream since stream mode is default
             if viewMode == .stream {
                 isStreamActive = true
@@ -333,6 +342,7 @@ struct WorkspaceView: View {
                             tabStates[currentTab.id] = TabState(
                                 isThinking: isAgentThinking,
                                 activity: agentActivity,
+                                activityLines: activityLines,
                                 options: interactiveOptions,
                                 questions: interactiveQuestions,
                                 engineModel: engineModel,
@@ -349,6 +359,7 @@ struct WorkspaceView: View {
                             let restored = tabStates[tab.id] ?? TabState()
                             isAgentThinking = restored.isThinking
                             agentActivity = restored.activity
+                            activityLines = restored.activityLines
                             interactiveOptions = restored.options
                             interactiveQuestions = restored.questions
                             engineModel = restored.engineModel
@@ -422,6 +433,7 @@ struct WorkspaceView: View {
     @State private var interactiveOptions: [InteractiveOption]? = nil
     @State private var interactiveQuestions: [InteractiveQuestion]? = nil
     @State private var pendingPermissionRequestId: String? = nil
+    @State private var pendingQuestionId: String? = nil
 
     private var chatArea: some View {
         ScrollViewReader { proxy in
@@ -438,7 +450,10 @@ struct WorkspaceView: View {
                     }
 
                     // Agent activity / thinking indicator
-                    if let activity = agentActivity {
+                    if !activityLines.isEmpty {
+                        ActivityNarrationView(lines: activityLines)
+                            .id("activity-narration")
+                    } else if let activity = agentActivity {
                         AgentActivityView(text: activity)
                             .id("activity")
                     } else if isAgentThinking {
@@ -473,6 +488,12 @@ struct WorkspaceView: View {
             .onChange(of: agentActivity) { _, _ in
                 scrollToBottom(proxy)
             }
+            .onChange(of: activityLines.count) { _, _ in
+                scrollToBottom(proxy)
+            }
+            .onChange(of: messageText) { _, newValue in
+                updateAutocomplete(newValue)
+            }
             .onReceive(NotificationCenter.default.publisher(for: .widgetPermissionResponseProcessed)) { notification in
                 guard let wsId = notification.userInfo?["workspaceId"] as? String,
                       wsId == workspace.id.uuidString else { return }
@@ -481,6 +502,7 @@ struct WorkspaceView: View {
                     interactiveQuestions = nil
                     interactiveOptions = nil
                     pendingPermissionRequestId = nil
+                    pendingQuestionId = nil
                 }
                 isAgentThinking = true
                 if let sessionId = notification.userInfo?["sessionId"] as? String {
@@ -494,6 +516,8 @@ struct WorkspaceView: View {
         withAnimation(.easeOut(duration: 0.2)) {
             if interactiveOptions != nil {
                 proxy.scrollTo("interactive-options", anchor: .bottom)
+            } else if !activityLines.isEmpty {
+                proxy.scrollTo("activity-narration", anchor: .bottom)
             } else if agentActivity != nil {
                 proxy.scrollTo("activity", anchor: .bottom)
             } else if isAgentThinking {
@@ -590,6 +614,10 @@ struct WorkspaceView: View {
                 if let permId = pendingPermissionRequestId {
                     payload["permissionRequestId"] = permId
                     pendingPermissionRequestId = nil
+                }
+                if let qId = pendingQuestionId {
+                    payload["questionId"] = qId
+                    pendingQuestionId = nil
                 }
                 connectionManager.send(WSPacket(
                     action: .engineUserResponse,
@@ -799,6 +827,15 @@ struct WorkspaceView: View {
             ZStack {
                 VStack(spacing: 0) {
                     chatArea
+
+                    if !autocompleteItems.isEmpty {
+                        AutocompleteOverlay(items: autocompleteItems) { item in
+                            handleAutocompleteSelection(item)
+                        }
+                        .padding(.horizontal, 12)
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+
                     inputBar
                 }
 
@@ -1209,6 +1246,51 @@ struct WorkspaceView: View {
         }
     }
 
+    // MARK: - Autocomplete
+
+    private func updateAutocomplete(_ text: String) {
+        // Slash commands: only at start of message, only for Claude Code tabs
+        let isClaudeTab = (currentTab.engineType ?? .claude) == .claude
+        if text.hasPrefix("/") && isClaudeTab {
+            let filter = String(text.dropFirst()).lowercased()
+            withAnimation(.easeOut(duration: 0.15)) {
+                autocompleteItems = AutocompleteOverlay.slashCommands.filter {
+                    filter.isEmpty || $0.label.lowercased().contains(filter)
+                }
+            }
+            return
+        }
+
+        // @ file mentions: match @word at end of text (@ must be at start or after whitespace)
+        if let range = text.range(of: "@[^\\s]*$", options: .regularExpression),
+           (range.lowerBound == text.startIndex || text[text.index(before: range.lowerBound)].isWhitespace) {
+            let query = String(text[range].dropFirst()).lowercased()
+            withAnimation(.easeOut(duration: 0.15)) {
+                autocompleteItems = cachedFileEntries.filter {
+                    query.isEmpty || $0.label.lowercased().contains(query)
+                }
+            }
+            return
+        }
+
+        if !autocompleteItems.isEmpty {
+            withAnimation(.easeOut(duration: 0.15)) {
+                autocompleteItems = []
+            }
+        }
+    }
+
+    private func handleAutocompleteSelection(_ item: AutocompleteItem) {
+        if messageText.hasPrefix("/") {
+            messageText = item.insertText
+        } else if let range = messageText.range(of: "@[^\\s]*$", options: .regularExpression) {
+            messageText.replaceSubrange(range, with: item.insertText + " ")
+        }
+        withAnimation(.easeOut(duration: 0.15)) {
+            autocompleteItems = []
+        }
+    }
+
     private func sendMessage() {
         guard !messageText.isEmpty || !attachments.isEmpty else { return }
 
@@ -1294,7 +1376,9 @@ struct WorkspaceView: View {
                         "workspaceId": workspace.id.uuidString
                     ]
                     if let images = imagesPayload { payload["images"] = images }
-                    connectionManager.send(WSPacket(action: .engineCreate, payload: payload))
+                    let createPacket = WSPacket(action: .engineCreate, payload: payload)
+                    pendingCreateRequests[createPacket.id] = currentTab.id
+                    connectionManager.send(createPacket)
                 }
             } else if currentTab.type == .openclaw {
                 connectionManager.send(WSPacket(
@@ -1335,7 +1419,7 @@ struct WorkspaceView: View {
         if let tabIndex = tabs.firstIndex(where: { ($0.type == .claude || $0.type == .engine) && $0.sessionId == nil }) {
             selectedTabIndex = tabIndex
             let engineType = tabs[tabIndex].engineType ?? .claude
-            connectionManager.send(WSPacket(
+            let createPacket = WSPacket(
                 action: .engineCreate,
                 payload: [
                     "path": workspace.localPath,
@@ -1343,7 +1427,9 @@ struct WorkspaceView: View {
                     "aiContext": workspace.aiContext ?? "",
                     "workspaceId": workspace.id.uuidString
                 ]
-            ))
+            )
+            pendingCreateRequests[createPacket.id] = tabs[tabIndex].id
+            connectionManager.send(createPacket)
 #if DEBUG
             print("[Workspace] Sent engineCreate type=\(engineType.rawValue) for path=\(workspace.localPath)")
 #endif
@@ -1362,7 +1448,7 @@ struct WorkspaceView: View {
 
         // Connect to the agent immediately
         let permConfig = AgentPermissionConfig.load()
-        connectionManager.send(WSPacket(
+        let createPacket = WSPacket(
             action: .engineCreate,
             payload: [
                 "path": workspace.localPath,
@@ -1371,7 +1457,9 @@ struct WorkspaceView: View {
                 "permissionMode": permConfig.mode(for: engineType).rawValue,
                 "workspaceId": workspace.id.uuidString
             ]
-        ))
+        )
+        pendingCreateRequests[createPacket.id] = uniqueId
+        connectionManager.send(createPacket)
     }
 
     private func continueSessionInTab(_ session: UltraContextSession, engineType: AIEngineType? = nil) {
@@ -1412,7 +1500,7 @@ struct WorkspaceView: View {
             tabId: uniqueId
         )
 
-        connectionManager.send(WSPacket(
+        let createPacket = WSPacket(
             action: .engineCreate,
             payload: [
                 "workspacePath": workspace.localPath,
@@ -1421,7 +1509,9 @@ struct WorkspaceView: View {
                 "message": String(message.prefix(4000)),
                 "tabId": uniqueId
             ]
-        ))
+        )
+        pendingCreateRequests[createPacket.id] = uniqueId
+        connectionManager.send(createPacket)
     }
 
     private func closeTab(at index: Int) {
@@ -1442,11 +1532,15 @@ struct WorkspaceView: View {
         } else if index < selectedTabIndex {
             selectedTabIndex -= 1
         }
+        // Clean up any pending create requests for the closed tab
+        pendingCreateRequests = pendingCreateRequests.filter { $0.value != tab.id }
+        tabStates.removeValue(forKey: tab.id)
         if wasSelected, !tabs.isEmpty {
             let newTab = tabs[selectedTabIndex]
             let restored = tabStates[newTab.id] ?? TabState()
             isAgentThinking = restored.isThinking
             agentActivity = restored.activity
+            activityLines = restored.activityLines
             interactiveOptions = restored.options
             interactiveQuestions = restored.questions
             engineModel = restored.engineModel
@@ -1467,8 +1561,9 @@ struct WorkspaceView: View {
                     if isActiveTabSession(packet) {
                         isAgentThinking = false
                         agentActivity = nil
+                        activityLines = []
                     } else {
-                        updateBackgroundTabState(sessionId: sid) { $0.isThinking = false; $0.activity = nil }
+                        updateBackgroundTabState(sessionId: sid) { $0.isThinking = false; $0.activity = nil; $0.activityLines = [] }
                     }
                     todoManager.markCompleted(sessionId: sid)
                     // End Live Activity
@@ -1479,7 +1574,12 @@ struct WorkspaceView: View {
                     }
                 case .claudeCreate:
                     if let sessionId = packet.payload?["sessionId"], !tabs.isEmpty {
-                        tabs[safeTabIndex].sessionId = sessionId
+                        let targetTabId = pendingCreateRequests.removeValue(forKey: packet.id)
+                        if let targetTabId, let tabIndex = tabs.firstIndex(where: { $0.id == targetTabId }) {
+                            tabs[tabIndex].sessionId = sessionId
+                        } else {
+                            tabs[safeTabIndex].sessionId = sessionId
+                        }
                         for i in todoManager.items.indices where todoManager.items[i].sessionId == "pending" {
                             todoManager.items[i].sessionId = sessionId
                         }
@@ -1496,9 +1596,9 @@ struct WorkspaceView: View {
                     if isActiveTabSession(packet) {
                         isAgentThinking = false
                         agentActivity = nil
-
+                        activityLines = []
                     } else {
-                        updateBackgroundTabState(sessionId: eSid) { $0.isThinking = false; $0.activity = nil }
+                        updateBackgroundTabState(sessionId: eSid) { $0.isThinking = false; $0.activity = nil; $0.activityLines = [] }
                     }
                     // End Live Activity (scoped to tab)
                     if let tid = tabId(forSession: eSid) {
@@ -1512,8 +1612,9 @@ struct WorkspaceView: View {
                     if isActiveTabSession(packet) {
                         isAgentThinking = false
                         agentActivity = nil
+                        activityLines = []
                     } else {
-                        updateBackgroundTabState(sessionId: errSid) { $0.isThinking = false; $0.activity = nil }
+                        updateBackgroundTabState(sessionId: errSid) { $0.isThinking = false; $0.activity = nil; $0.activityLines = [] }
                     }
                     if let tid = tabId(forSession: errSid) {
                         LiveActivityManager.shared.endActivity(workspaceId: workspace.id.uuidString, status: "error", tabId: tid)
@@ -1522,7 +1623,12 @@ struct WorkspaceView: View {
                     }
                 case .engineCreate:
                     if let sessionId = packet.payload?["sessionId"], !tabs.isEmpty {
-                        tabs[safeTabIndex].sessionId = sessionId
+                        let targetTabId = pendingCreateRequests.removeValue(forKey: packet.id)
+                        if let targetTabId, let tabIndex = tabs.firstIndex(where: { $0.id == targetTabId }) {
+                            tabs[tabIndex].sessionId = sessionId
+                        } else {
+                            tabs[safeTabIndex].sessionId = sessionId
+                        }
                         // Update pending todo items with real sessionId
                         for i in todoManager.items.indices where todoManager.items[i].sessionId == "pending" {
                             todoManager.items[i].sessionId = sessionId
@@ -1545,7 +1651,9 @@ struct WorkspaceView: View {
                 // Terminal
                 case .terminalOutput:
                     if let output = packet.payload?["output"] {
-                        chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
+                        let termSid = packet.payload?["sessionId"] ?? ""
+                        let termTabId = tabId(forSession: termSid) ?? currentTab.id
+                        chatService.addAssistantChunk(workspaceId: workspace.id, tabId: termTabId, content: output)
                     }
 
                 // Engine status (model, tokens, context %)
@@ -1599,6 +1707,29 @@ struct WorkspaceView: View {
                         currentBranch = branch
                     }
 
+                // File tree for autocomplete
+                case .fileTreeResult:
+                    if cachedFileEntries.isEmpty,
+                       let json = packet.payload?["tree"],
+                       let data = json.data(using: .utf8),
+                       let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+                        let basePath = workspace.localPath.hasSuffix("/") ? workspace.localPath : workspace.localPath + "/"
+                        cachedFileEntries = parsed.compactMap { dict -> AutocompleteItem? in
+                            guard let name = dict["name"] as? String,
+                                  let path = dict["path"] as? String,
+                                  let type = dict["type"] as? String,
+                                  type == "file" else { return nil }
+                            let ext = (name as NSString).pathExtension
+                            let relativePath = path.hasPrefix(basePath) ? String(path.dropFirst(basePath.count)) : name
+                            return AutocompleteItem(
+                                icon: AutocompleteOverlay.iconForExtension(ext),
+                                label: relativePath,
+                                insertText: "@" + relativePath,
+                                description: ext
+                            )
+                        }
+                    }
+
                 default:
                     break
                 }
@@ -1607,7 +1738,6 @@ struct WorkspaceView: View {
     }
 
     private func handleEngineOutput(_ packet: WSPacket) {
-        isAgentThinking = false
         let sessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
         todoManager.markResumed(sessionId: sessionId)
         todoManager.confirmWorking(sessionId: sessionId)
@@ -1622,43 +1752,92 @@ struct WorkspaceView: View {
             importedSessionTabs.remove(resolvedTabId)
             return
         }
+
+        let isForActiveTab = resolvedTabId == nil || resolvedTabId == currentTab.id
+        let targetTabId = resolvedTabId ?? currentTab.id
+
+        if isForActiveTab {
+            isAgentThinking = false
+        } else {
+            updateBackgroundTabState(sessionId: sessionId) { $0.isThinking = false }
+        }
+
         if let output = packet.payload?["output"] {
             if output.hasPrefix("🔧") {
                 let clean = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                agentActivity = clean
+                if isForActiveTab {
+                    agentActivity = clean
+                } else {
+                    updateBackgroundTabState(sessionId: sessionId) { $0.activity = clean }
+                }
                 // Extract tool name (format: "🔧 ToolName: description")
                 let withoutEmoji = clean.dropFirst(2) // Remove "🔧 "
                 let toolName = String(withoutEmoji.prefix(while: { $0 != ":" })).trimmingCharacters(in: .whitespaces)
                 if !toolName.isEmpty {
                     todoManager.updateTool(sessionId: sessionId, tool: toolName)
                 }
-                // Update Live Activity with current tool (resolve correct tab for background tabs)
-                let activityTabId = resolvedTabId ?? currentTab.id
+                // Update Live Activity with current tool
                 if let tool = AgentToolType.parse(from: clean) {
-                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: activityTabId, contextPercent: contextPercent)
+                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: targetTabId, contextPercent: contextPercent)
+                }
+            } else if output == "📋CLEAR" {
+                // Clear activity narration (final message being promoted to chat)
+                if isForActiveTab {
+                    activityLines = []
+                    agentActivity = nil
+                } else {
+                    updateBackgroundTabState(sessionId: sessionId) { $0.activityLines = []; $0.activity = nil }
+                }
+            } else if output.hasPrefix("📋") {
+                // Activity narration from Codex — show as collapsible activity, not chat bubble
+                let text = String(output.dropFirst(2)).trimmingCharacters(in: .whitespacesAndNewlines) // 📋 (1 char) + space
+                if !text.isEmpty {
+                    if isForActiveTab {
+                        activityLines.append(text)
+                        agentActivity = text
+                    } else {
+                        updateBackgroundTabState(sessionId: sessionId) { state in
+                            state.activityLines.append(text)
+                            state.activity = text
+                        }
+                    }
                 }
             } else {
-                agentActivity = nil
-                chatService.addAssistantChunk(workspaceId: workspace.id, tabId: currentTab.id, content: output)
+                if isForActiveTab {
+                    agentActivity = nil
+                    activityLines = []
+                } else {
+                    updateBackgroundTabState(sessionId: sessionId) { $0.activity = nil; $0.activityLines = [] }
+                }
+                chatService.addAssistantChunk(workspaceId: workspace.id, tabId: targetTabId, content: output)
                 // Parse tool from raw output too
-                let activityTabId = resolvedTabId ?? currentTab.id
                 if let tool = AgentToolType.parse(from: output) {
-                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: activityTabId, contextPercent: contextPercent)
+                    LiveActivityManager.shared.updateTool(workspaceId: workspace.id.uuidString, tool: tool, tabId: targetTabId, contextPercent: contextPercent)
                 }
             }
         }
     }
 
     private func handleEngineAskUser(_ packet: WSPacket) {
-        isAgentThinking = false
         let sessionId = packet.payload?["sessionId"] ?? currentTab.sessionId ?? ""
+        let isForActiveTab = isActiveTabSession(packet)
         todoManager.markQuestion(sessionId: sessionId)
 
-        // Track permission request ID if this is a permission prompt
-        if packet.payload?["isPermission"] == "true" {
-            pendingPermissionRequestId = packet.payload?["permissionRequestId"]
+        if isForActiveTab {
+            isAgentThinking = false
         } else {
-            pendingPermissionRequestId = nil
+            updateBackgroundTabState(sessionId: sessionId) { $0.isThinking = false }
+        }
+
+        // Track permission request ID if this is a permission prompt (only for active tab)
+        if isForActiveTab {
+            if packet.payload?["isPermission"] == "true" {
+                pendingPermissionRequestId = packet.payload?["permissionRequestId"]
+                pendingQuestionId = packet.payload?["questionId"]
+            } else {
+                pendingPermissionRequestId = nil
+                pendingQuestionId = nil
+            }
         }
 
         // Update Live Activity to waiting (scoped to tab) with question text for the alert
@@ -1675,9 +1854,16 @@ struct WorkspaceView: View {
                 questionOptions = questions[0].options
             }
             if !questions.isEmpty {
-                withAnimation {
-                    interactiveOptions = nil
-                    interactiveQuestions = questions
+                if isForActiveTab {
+                    withAnimation {
+                        interactiveOptions = nil
+                        interactiveQuestions = questions
+                    }
+                } else {
+                    updateBackgroundTabState(sessionId: sessionId) { state in
+                        state.options = nil
+                        state.questions = questions
+                    }
                 }
             }
         }

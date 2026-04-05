@@ -18,6 +18,7 @@ struct DashboardView: View {
     // MARK: - Hidden for App Store review (re-enable after approval)
 //    @State private var showQuickDispatch = false
 //    @State private var showAIWizard = false
+    @State private var showFeedback = false
     @State private var deepLinkWorkspace: Workspace?
     @State private var isDeepLinkActive = false
     @State private var hasFetchedMachines = false
@@ -151,6 +152,21 @@ struct DashboardView: View {
                     }
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                Button {
+                    showFeedback = true
+                } label: {
+                    Image(systemName: "bubble.left.and.exclamationmark.bubble.right")
+                        .font(TarsyTheme.font(size: 18))
+                        .foregroundColor(TarsyTheme.backgroundPrimary)
+                        .frame(width: 50, height: 50)
+                        .background(TarsyTheme.textPrimary)
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                }
+                .padding(.trailing, 20)
+                .padding(.bottom, 20)
+            }
             .navigationBarHidden(true)
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             .navigationDestination(isPresented: $isDeepLinkActive) {
@@ -172,6 +188,9 @@ struct DashboardView: View {
 //        .sheet(isPresented: $showQuickDispatch) {
 //            QuickDispatchView(workspaces: workspaceService.workspaces)
 //        }
+        .sheet(isPresented: $showFeedback) {
+            FeedbackView()
+        }
         .sheet(isPresented: $showActiveSessions) {
             ActiveSessionsView()
         }
