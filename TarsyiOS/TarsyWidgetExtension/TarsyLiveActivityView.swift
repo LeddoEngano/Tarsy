@@ -66,17 +66,25 @@ struct TarsyLiveActivityWidget: Widget {
 
                 Spacer()
 
-                Text("ctx:\(Int(context.state.contextPercent))%")
-                    .font(Self.tarsyFont(size: 10, weight: .medium))
-                    .foregroundColor(contextBarColor(context.state.contextPercent))
+                if context.state.contextPercent > 0 {
+                    Text("ctx:\(Int(context.state.contextPercent))%")
+                        .font(Self.tarsyFont(size: 10, weight: .medium))
+                        .foregroundColor(contextBarColor(context.state.contextPercent))
+                }
             }
 
             // Agent activity: what it's doing now
             HStack(spacing: 5) {
                 Spacer().frame(width: 16)
-                Image(systemName: toolIcon(context.state))
-                    .font(Self.tarsyFont(size: 10, weight: .semibold))
-                    .foregroundColor(.white)
+                if context.state.status == "error" {
+                    Text("ERROR")
+                        .font(Self.tarsyFont(size: 10, weight: .bold))
+                        .foregroundColor(accentTerracotta)
+                } else {
+                    Image(systemName: toolIcon(context.state))
+                        .font(Self.tarsyFont(size: 10, weight: .semibold))
+                        .foregroundColor(.white)
+                }
 
                 if let agentMsg = context.state.lastAgentMessage, !agentMsg.isEmpty {
                     Text(agentMsg)

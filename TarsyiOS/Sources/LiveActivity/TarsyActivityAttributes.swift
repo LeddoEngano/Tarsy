@@ -26,7 +26,7 @@ struct TarsyActivityAttributes: ActivityAttributes {
         let message: String?         // Optional detail (e.g., waiting question text)
         let userPrompt: String?      // The user's last prompt message
         let lastAgentMessage: String? // Last message from the agent
-        let activeAgents: [String]?  // Other active agents (e.g., "Claude Code · Writing tests")
+        let activeAgents: [String]?  // Other active agents (format: "engineName||status||toolName||toolIcon")
         // Interactive permission response fields (populated when status == "waiting")
         let sessionId: String?       // Session to respond to
         let engineTypeRaw: String?   // Engine type raw value for response packet
