@@ -29,6 +29,7 @@ struct OnboardingWindow: View {
     enum OnboardingStep: CaseIterable {
         case login
         case permissions
+        case agents
         case ready
     }
 
@@ -67,6 +68,8 @@ struct OnboardingWindow: View {
                         loginStep
                     case .permissions:
                         permissionsStep
+                    case .agents:
+                        agentsStep
                     case .ready:
                         readyStep
                     }
@@ -137,13 +140,17 @@ struct OnboardingWindow: View {
         HStack(spacing: 0) {
             stepPill(index: 0, label: "login", thisStep: .login)
 
-            stepConnector(done: step != .login)
+            stepConnector(done: stepIndex(step) > 0)
 
             stepPill(index: 1, label: "permissions", thisStep: .permissions)
 
-            stepConnector(done: step == .ready)
+            stepConnector(done: stepIndex(step) > 1)
 
-            stepPill(index: 2, label: "ready", thisStep: .ready)
+            stepPill(index: 2, label: "agents", thisStep: .agents)
+
+            stepConnector(done: stepIndex(step) > 2)
+
+            stepPill(index: 3, label: "ready", thisStep: .ready)
         }
         .padding(.horizontal, 40)
     }
@@ -190,7 +197,8 @@ struct OnboardingWindow: View {
         switch s {
         case .login: return 0
         case .permissions: return 1
-        case .ready: return 2
+        case .agents: return 2
+        case .ready: return 3
         }
     }
 
@@ -441,7 +449,7 @@ struct OnboardingWindow: View {
             }
         }
         withAnimation(.easeInOut(duration: 0.2)) {
-            step = .ready
+            step = .agents
         }
     }
 
@@ -585,7 +593,7 @@ struct OnboardingWindow: View {
                 guard !Task.isCancelled else { break }
                 await checkPermissionsAsync()
                 if allPermissionsGranted {
-                    withAnimation(.easeInOut(duration: 0.2)) { step = .ready }
+                    withAnimation(.easeInOut(duration: 0.2)) { step = .agents }
                 } else if permissionInfo(for: permissionSubStep).isGranted {
                     // Only auto-advance when the current step becomes granted,
                     // not on arbitrary changes — avoids jarring jumps while user is in System Preferences
@@ -714,6 +722,180 @@ struct OnboardingWindow: View {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?\(key)") {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    // MARK: - Agents Step
+
+    @State private var agentScanResults: [(type: AIEngineType, version: String?, path: String?)] = []
+    @State private var isScanning = false
+
+    private var agentsStep: some View {
+        VStack(spacing: 0) {
+            Spacer()
+
+            // Icon
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Theme.amber.opacity(0.1))
+                    .frame(width: 56, height: 56)
+                Image(systemName: "terminal")
+                    .font(TarsyTheme.font(size: 22))
+                    .foregroundColor(Theme.amber)
+            }
+            .padding(.bottom, 14)
+
+            Text("ai agents")
+                .font(TarsyTheme.font(size: 18, weight: .bold))
+                .foregroundColor(Theme.textPrimary)
+                .padding(.bottom, 4)
+
+            Text("coding agents detected on this mac")
+                .font(TarsyTheme.font(size: 12))
+                .foregroundColor(Theme.textSecondary)
+                .padding(.bottom, 16)
+
+            // Agent list or empty state
+            Group {
+                if isScanning {
+                    ProgressView()
+                        .controlSize(.small)
+                        .frame(height: 80)
+                } else if agentScanResults.isEmpty {
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(TarsyTheme.font(size: 12))
+                            .foregroundColor(Theme.terracotta)
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("no ai agents found")
+                                .font(TarsyTheme.font(size: 11, weight: .medium))
+                                .foregroundColor(Theme.textPrimary)
+                            Text("install an agent like claude code, gemini cli, or codex to use ai features")
+                                .font(TarsyTheme.font(size: 10))
+                                .foregroundColor(Theme.textMuted)
+                                .lineLimit(2)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Theme.terracotta.opacity(0.08))
+                    )
+                } else {
+                    ScrollView {
+                        VStack(spacing: 4) {
+                            ForEach(agentScanResults, id: \.type) { result in
+                                agentRow(result.type, version: result.version, path: result.path)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 4 * 52) // ~4 rows visible
+                }
+            }
+            .padding(.horizontal, 48)
+            .padding(.bottom, 20)
+
+            // Buttons
+            HStack(spacing: 12) {
+                Button(action: { scanAgents() }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(TarsyTheme.font(size: 11))
+                        Text("re-scan")
+                            .font(TarsyTheme.font(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(Theme.textSecondary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Theme.border, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .pointerOnHover()
+
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.2)) { step = .ready }
+                }) {
+                    HStack(spacing: 6) {
+                        Text(agentScanResults.isEmpty ? "skip" : "continue")
+                            .font(TarsyTheme.font(size: 13, weight: .medium))
+                        Image(systemName: "arrow.right")
+                            .font(TarsyTheme.font(size: 11))
+                    }
+                    .foregroundColor(Theme.bg)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 11)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8).fill(Theme.amber)
+                    )
+                }
+                .buttonStyle(.plain)
+                .pointerOnHover()
+            }
+
+            Spacer()
+        }
+        .task {
+            scanAgents()
+        }
+    }
+
+    private func scanAgents() {
+        isScanning = true
+        Task.detached {
+            let agents = AgentDetector.detectInstalledAgents()
+            let results = agents.map { agent in
+                (type: agent, version: AgentDetector.agentVersion(for: agent), path: AgentDetector.agentPath(for: agent))
+            }
+            await MainActor.run {
+                agentScanResults = results
+                isScanning = false
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func agentRow(_ agent: AIEngineType, version: String?, path: String?) -> some View {
+        let iconName = agent.iconAsset ?? "WhiteTarsyLogo"
+
+        HStack(spacing: 10) {
+            Image(iconName)
+                .resizable()
+                .interpolation(.high)
+                .antialiased(true)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 24, height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 5))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(agent.displayName)
+                    .font(TarsyTheme.font(size: 11, weight: .medium))
+                    .foregroundColor(Theme.textPrimary)
+                if let version = version {
+                    Text(path != nil ? "\(version) — \(path!)" : version)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(Theme.textMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            Spacer()
+
+            Image(systemName: "checkmark.circle.fill")
+                .font(TarsyTheme.font(size: 14))
+                .foregroundColor(Theme.moss)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Theme.bgCard)
+        )
     }
 
     // MARK: - Ready Step

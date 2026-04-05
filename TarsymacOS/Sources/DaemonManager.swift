@@ -137,14 +137,12 @@ class DaemonManager: ObservableObject {
         log("Detected agents: \(detectedAgents.map(\.rawValue))")
 
         // Broadcast to any clients that connected before detection finished
-        if !detectedAgents.isEmpty {
-            let agentsPacket = WSPacket(
-                action: .agentsDetected,
-                payload: ["agents": detectedAgents.map(\.rawValue).joined(separator: ",")]
-            )
-            await wsServer?.broadcast(agentsPacket)
-            await relayClient.send(packet: agentsPacket)
-        }
+        let agentsPacket = WSPacket(
+            action: .agentsDetected,
+            payload: ["agents": detectedAgents.map(\.rawValue).joined(separator: ",")]
+        )
+        await wsServer?.broadcast(agentsPacket)
+        await relayClient.send(packet: agentsPacket)
 
         // 8. UltraContext — watch Claude Code session files + sync via proxy
         Task { await SessionFileWatcher.shared.start() }
@@ -275,13 +273,11 @@ class DaemonManager: ObservableObject {
                     self?.lastActiveClientId = clientId
                     // Send detected agents to the newly connected client
                     let agents = self?.detectedAgents ?? []
-                    if !agents.isEmpty {
-                        let packet = WSPacket(
-                            action: .agentsDetected,
-                            payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
-                        )
-                        await self?.sendToClientOrRelay(packet, to: clientId)
-                    }
+                    let packet = WSPacket(
+                        action: .agentsDetected,
+                        payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
+                    )
+                    await self?.sendToClientOrRelay(packet, to: clientId)
                     // Send OpenClaw availability
                     let openclawInstalled = await self?.openClaw.isInstalled() ?? false
                     await self?.sendToClientOrRelay(
@@ -378,13 +374,11 @@ class DaemonManager: ObservableObject {
                         self?.log("Relay connected")
                         // Send detected agents to relay clients (mirrors LAN onConnect behavior)
                         let agents = self?.detectedAgents ?? []
-                        if !agents.isEmpty {
-                            let packet = WSPacket(
-                                action: .agentsDetected,
-                                payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
-                            )
-                            await self?.sendToClientOrRelay(packet, to: "relay")
-                        }
+                        let agentPacket = WSPacket(
+                            action: .agentsDetected,
+                            payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
+                        )
+                        await self?.sendToClientOrRelay(agentPacket, to: "relay")
                         // Send OpenClaw availability
                         let openclawInstalled = await self?.openClaw.isInstalled() ?? false
                         await self?.sendToClientOrRelay(
@@ -533,12 +527,10 @@ class DaemonManager: ObservableObject {
                     // Now that E2E is ready, send initial state that the iOS client needs.
                     // These were sent on relay connect but got lost (no client yet / no E2E).
                     let agents = detectedAgents
-                    if !agents.isEmpty {
-                        await sendToClientOrRelay(
-                            WSPacket(action: .agentsDetected, payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]),
-                            to: "relay"
-                        )
-                    }
+                    await sendToClientOrRelay(
+                        WSPacket(action: .agentsDetected, payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]),
+                        to: "relay"
+                    )
                     let openclawInstalled = await openClaw.isInstalled()
                     await sendToClientOrRelay(
                         WSPacket(action: .openclawStatus, payload: [
