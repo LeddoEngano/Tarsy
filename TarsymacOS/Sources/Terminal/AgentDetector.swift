@@ -18,7 +18,7 @@ struct AgentDetector {
         return raw
     }
 
-    private static var realHome: String { computeRealHome() }
+    static var realHome: String { computeRealHome() }
 
     /// Enriched PATH for subprocess execution, computed once.
     /// Menu bar apps launched at login inherit a minimal launchd PATH,

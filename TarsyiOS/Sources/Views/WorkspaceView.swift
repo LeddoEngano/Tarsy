@@ -65,6 +65,7 @@ struct WorkspaceView: View {
     }
     @State private var autocompleteItems: [AutocompleteItem] = []
     @State private var cachedFileEntries: [AutocompleteItem] = []
+    @State private var detectedSlashCommands: [AutocompleteItem] = []
     @State private var viewMode: ViewMode = .stream
     @State private var showSessionPicker = false
     @State private var showCommitConfirmation = false
@@ -442,6 +443,29 @@ struct WorkspaceView: View {
                             .transition(.opacity)
                     }
 
+                    // Load older messages button
+                    if chatService.hasOlderMessages {
+                        Button {
+                            Task { await chatService.loadOlderMessages(client: ultraContextClient) }
+                        } label: {
+                            HStack(spacing: 6) {
+                                if chatService.isLoadingOlder {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                        .tint(TarsyTheme.textSecondary)
+                                } else {
+                                    Image(systemName: "arrow.up.circle")
+                                }
+                                Text(chatService.isLoadingOlder ? "Loading..." : "Load older messages")
+                            }
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                        }
+                        .disabled(chatService.isLoadingOlder)
+                    }
+
                     ForEach(chatService.messages) { message in
                         MessageBubble(message: message)
                             .id(message.id)
@@ -515,6 +539,7 @@ struct WorkspaceView: View {
     private static let ansiRegex = try! NSRegularExpression(pattern: "\u{1B}\\[[0-9;]*[A-Za-z]")
 
     private var terminalOutputText: String {
+        let header = "\(workspace.localPath)\n\n"
         let raw = chatService.messages
             .map { msg in
                 if msg.role == .user {
@@ -525,7 +550,8 @@ struct WorkspaceView: View {
             }
             .joined()
         let range = NSRange(raw.startIndex..., in: raw)
-        return Self.ansiRegex.stringByReplacingMatches(in: raw, range: range, withTemplate: "")
+        let cleaned = Self.ansiRegex.stringByReplacingMatches(in: raw, range: range, withTemplate: "")
+        return header + cleaned
     }
 
     private var terminalArea: some View {
@@ -1010,28 +1036,30 @@ struct WorkspaceView: View {
                     .foregroundColor(TarsyTheme.textSecondary)
                 }
 
-                Text("  |  ")
-                    .font(TarsyTheme.font(size: 11))
-                    .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
-
-                // Engine + model
-                HStack(spacing: 3) {
-                    AgentIcon(engineType: currentTab.engineType ?? .claude, size: 14)
-                    Text(engineDisplayName)
-                        .lineLimit(1)
-                }
-                .font(TarsyTheme.font(size: 11))
-                .foregroundColor(TarsyTheme.textSecondary)
-
-                if contextPercent > 0 {
+                if currentTab.type != .terminal {
                     Text("  |  ")
                         .font(TarsyTheme.font(size: 11))
                         .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
 
-                    // Context %
-                    Text("\(Int(contextPercent))% ctx")
-                        .font(TarsyTheme.font(size: 11))
-                        .foregroundColor(contextPercent > 80 ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
+                    // Engine + model
+                    HStack(spacing: 3) {
+                        AgentIcon(engineType: currentTab.engineType ?? .claude, size: 14)
+                        Text(engineDisplayName)
+                            .lineLimit(1)
+                    }
+                    .font(TarsyTheme.font(size: 11))
+                    .foregroundColor(TarsyTheme.textSecondary)
+
+                    if contextPercent > 0 {
+                        Text("  |  ")
+                            .font(TarsyTheme.font(size: 11))
+                            .foregroundColor(TarsyTheme.textSecondary.opacity(0.3))
+
+                        // Context %
+                        Text("\(Int(contextPercent))% ctx")
+                            .font(TarsyTheme.font(size: 11))
+                            .foregroundColor(contextPercent > 80 ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
+                    }
                 }
 
                 Spacer()
@@ -1074,13 +1102,15 @@ struct WorkspaceView: View {
 
                 // Action buttons row
                 HStack(spacing: 4) {
-                    Button(action: { showAttachmentPicker.toggle() }) {
-                        Image(systemName: "plus")
-                            .font(TarsyTheme.font(size: 18, weight: .medium))
-                            .foregroundColor(TarsyTheme.textSecondary)
-                            .frame(width: 36, height: 36)
+                    if currentTab.type != .terminal {
+                        Button(action: { showAttachmentPicker.toggle() }) {
+                            Image(systemName: "plus")
+                                .font(TarsyTheme.font(size: 18, weight: .medium))
+                                .foregroundColor(TarsyTheme.textSecondary)
+                                .frame(width: 36, height: 36)
+                        }
+                        .accessibilityLabel("Add attachment")
                     }
-                    .accessibilityLabel("Add attachment")
 
                     Spacer()
 
@@ -1090,69 +1120,71 @@ struct WorkspaceView: View {
 
                     Spacer()
 
-                    // Voice tasks button (left of mic)
-                    if todoManager.hasActiveItems {
-                        Button { todoManager.isMinimized ? todoManager.expand() : todoManager.minimize() } label: {
-                            ZStack {
-                                if todoManager.hasQuestionItems {
-                                    Image(systemName: "questionmark")
-                                        .font(TarsyTheme.font(size: 14, weight: .bold))
-                                        .foregroundColor(TarsyTheme.accentAmber)
-                                } else if let tool = todoManager.items.last(where: { $0.status == .working })?.currentTool {
-                                    Image(systemName: VoiceTodoManager.iconForTool(tool))
-                                        .font(TarsyTheme.font(size: 14))
-                                        .foregroundColor(TarsyTheme.accentAmber)
-                                } else {
-                                    ProgressView()
-                                        .scaleEffect(0.6)
-                                        .tint(TarsyTheme.accentAmber)
-                                }
-                            }
-                            .frame(width: 32, height: 32)
-                            .background(TarsyTheme.accentAmber.opacity(0.15))
-                            .cornerRadius(16)
-                            .overlay(
-                                Group {
-                                    if todoManager.activeCount > 1 {
-                                        Text("\(todoManager.activeCount)")
-                                            .font(TarsyTheme.font(size: 9, weight: .bold))
-                                            .foregroundColor(.white)
-                                            .frame(width: 16, height: 16)
-                                            .background(TarsyTheme.accentAmber)
-                                            .clipShape(Circle())
-                                            .offset(x: 10, y: -10)
+                    if currentTab.type != .terminal {
+                        // Voice tasks button (left of mic)
+                        if todoManager.hasActiveItems {
+                            Button { todoManager.isMinimized ? todoManager.expand() : todoManager.minimize() } label: {
+                                ZStack {
+                                    if todoManager.hasQuestionItems {
+                                        Image(systemName: "questionmark")
+                                            .font(TarsyTheme.font(size: 14, weight: .bold))
+                                            .foregroundColor(TarsyTheme.accentAmber)
+                                    } else if let tool = todoManager.items.last(where: { $0.status == .working })?.currentTool {
+                                        Image(systemName: VoiceTodoManager.iconForTool(tool))
+                                            .font(TarsyTheme.font(size: 14))
+                                            .foregroundColor(TarsyTheme.accentAmber)
+                                    } else {
+                                        ProgressView()
+                                            .scaleEffect(0.6)
+                                            .tint(TarsyTheme.accentAmber)
                                     }
                                 }
-                            )
-                        }
-                        .transition(.scale(scale: 0.5).combined(with: .opacity))
-                        .accessibilityLabel("Agent tasks")
-                    }
-
-                    HStack(spacing: 3) {
-                        if isRecording {
-                            Circle()
-                                .fill(TarsyTheme.accentTerracotta)
-                                .frame(width: 5, height: 5)
-                                .opacity(recDotVisible ? 1 : 0.15)
-                            Text(recordingTimerText)
-                                .font(TarsyTheme.font(size: 10))
-                                .foregroundColor(TarsyTheme.accentTerracotta)
-                                .monospacedDigit()
-                        }
-                        Image(systemName: isRecording ? "mic.fill" : "mic")
-                            .font(TarsyTheme.font(size: 16))
-                            .foregroundColor(isRecording ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
-                            .frame(width: 36, height: 36)
-                    }
-                        .gesture(
-                            LongPressGesture(minimumDuration: 0.15)
-                                .onEnded { _ in startVoiceInput() }
-                                .sequenced(before: DragGesture(minimumDistance: 0)
-                                    .onEnded { _ in stopVoiceInput() }
+                                .frame(width: 32, height: 32)
+                                .background(TarsyTheme.accentAmber.opacity(0.15))
+                                .cornerRadius(16)
+                                .overlay(
+                                    Group {
+                                        if todoManager.activeCount > 1 {
+                                            Text("\(todoManager.activeCount)")
+                                                .font(TarsyTheme.font(size: 9, weight: .bold))
+                                                .foregroundColor(.white)
+                                                .frame(width: 16, height: 16)
+                                                .background(TarsyTheme.accentAmber)
+                                                .clipShape(Circle())
+                                                .offset(x: 10, y: -10)
+                                        }
+                                    }
                                 )
-                        )
-                        .accessibilityLabel(isRecording ? "Stop recording" : "Hold to record voice")
+                            }
+                            .transition(.scale(scale: 0.5).combined(with: .opacity))
+                            .accessibilityLabel("Agent tasks")
+                        }
+
+                        HStack(spacing: 3) {
+                            if isRecording {
+                                Circle()
+                                    .fill(TarsyTheme.accentTerracotta)
+                                    .frame(width: 5, height: 5)
+                                    .opacity(recDotVisible ? 1 : 0.15)
+                                Text(recordingTimerText)
+                                    .font(TarsyTheme.font(size: 10))
+                                    .foregroundColor(TarsyTheme.accentTerracotta)
+                                    .monospacedDigit()
+                            }
+                            Image(systemName: isRecording ? "mic.fill" : "mic")
+                                .font(TarsyTheme.font(size: 16))
+                                .foregroundColor(isRecording ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
+                                .frame(width: 36, height: 36)
+                        }
+                            .gesture(
+                                LongPressGesture(minimumDuration: 0.15)
+                                    .onEnded { _ in startVoiceInput() }
+                                    .sequenced(before: DragGesture(minimumDistance: 0)
+                                        .onEnded { _ in stopVoiceInput() }
+                                    )
+                            )
+                            .accessibilityLabel(isRecording ? "Stop recording" : "Hold to record voice")
+                    }
 
                     Button(action: { sendMessage() }) {
                         Image(systemName: "arrow.up")
@@ -1170,9 +1202,11 @@ struct WorkspaceView: View {
                 .animation(.easeInOut(duration: 0.2), value: isRecording)
                 .animation(.easeInOut(duration: 0.25), value: todoManager.hasActiveItems)
             }
+            .background(currentTab.type == .terminal ? TarsyTheme.backgroundPrimary : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
             .overlay(
                 RoundedRectangle(cornerRadius: 20)
-                    .stroke(isRecording ? TarsyTheme.accentAmber : Color.clear, lineWidth: 1.5)
+                    .stroke(currentTab.type == .terminal ? TarsyTheme.textSecondary.opacity(0.15) : (isRecording ? TarsyTheme.accentAmber : Color.clear), lineWidth: 1.5)
             )
             .if_iOS26GlassEffect()
             .padding(.horizontal, 12)
@@ -1180,7 +1214,7 @@ struct WorkspaceView: View {
         }
         .background(TarsyTheme.backgroundPrimary)
         .overlay(alignment: .topLeading) {
-            if !attachments.isEmpty {
+            if !attachments.isEmpty && currentTab.type != .terminal {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(attachments) { attachment in
@@ -1305,8 +1339,14 @@ struct WorkspaceView: View {
         let isClaudeTab = (currentTab.engineType ?? .claude) == .claude
         if text.hasPrefix("/") && isClaudeTab {
             let filter = String(text.dropFirst()).lowercased()
+            // Merge detected commands from macOS with builtin defaults
+            let allCommands = detectedSlashCommands.isEmpty
+                ? AutocompleteOverlay.slashCommands
+                : detectedSlashCommands + AutocompleteOverlay.slashCommands.filter { builtin in
+                    !detectedSlashCommands.contains(where: { $0.label == builtin.label })
+                }
             withAnimation(.easeOut(duration: 0.15)) {
-                autocompleteItems = AutocompleteOverlay.slashCommands.filter {
+                autocompleteItems = allCommands.filter {
                     filter.isEmpty || $0.label.lowercased().contains(filter)
                 }
             }
@@ -1790,6 +1830,21 @@ struct WorkspaceView: View {
                        let idx = tabs.firstIndex(where: { ($0.type == .claude || $0.type == .engine) && $0.sessionId == nil && $0.engineType != preferred }) {
                         let tabType: TerminalTab.TabType = preferred == .claude ? .claude : .engine
                         tabs[idx] = TerminalTab(id: "\(preferred.rawValue)-1", title: preferred.displayName, isFixed: false, type: tabType, sessionId: nil, engineType: preferred)
+                    }
+
+                // Slash commands from macOS
+                case .slashCommandsDetected:
+                    if let json = packet.payload?["commands"],
+                       let data = json.data(using: .utf8),
+                       let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+                        detectedSlashCommands = parsed.map { cmd in
+                            AutocompleteItem(
+                                icon: "terminal",
+                                label: cmd["name"] ?? "",
+                                insertText: cmd["name"] ?? "",
+                                description: cmd["description"] ?? ""
+                            )
+                        }
                     }
 
                 // Branch update

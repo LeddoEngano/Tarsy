@@ -156,16 +156,20 @@ struct DashboardView: View {
                 Button {
                     showFeedback = true
                 } label: {
-                    Image(systemName: "bubble.left.and.exclamationmark.bubble.right")
-                        .font(TarsyTheme.font(size: 18))
-                        .foregroundColor(TarsyTheme.backgroundPrimary)
-                        .frame(width: 50, height: 50)
-                        .background(TarsyTheme.textPrimary)
+                    Image(systemName: "megaphone")
+                        .font(TarsyTheme.font(size: 16))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .frame(width: 42, height: 42)
+                        .background(TarsyTheme.backgroundSecondary)
                         .clipShape(Circle())
-                        .shadow(color: .black.opacity(0.3), radius: 8, y: 4)
+                        .overlay(
+                            Circle()
+                                .stroke(TarsyTheme.backgroundTertiary, lineWidth: 1)
+                        )
                 }
-                .padding(.trailing, 20)
-                .padding(.bottom, 20)
+                .accessibilityLabel("Send feedback")
+                .padding(.trailing, 16)
+                .padding(.bottom, 16)
             }
             .navigationBarHidden(true)
             .dynamicTypeSize(...DynamicTypeSize.xxxLarge)

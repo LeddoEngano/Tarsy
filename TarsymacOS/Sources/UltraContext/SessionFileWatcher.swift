@@ -213,8 +213,11 @@ actor SessionFileWatcher {
 
         guard let ctxId = sessionContextMap[sessionId] else { return }
 
+        let body: String = trimmed.count > 8000
+            ? String(trimmed.prefix(7988)) + "\n[truncated]"
+            : trimmed
         do {
-            try await appendMessage(contextId: ctxId, role: role, content: String(trimmed.prefix(8000)))
+            try await appendMessage(contextId: ctxId, role: role, content: body)
         } catch {
             #if DEBUG
             print("[SessionWatcher] Append error: \(error)")

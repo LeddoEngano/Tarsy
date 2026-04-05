@@ -133,6 +133,7 @@ public enum WSAction: String, Codable, Sendable {
 
     // Agent Detection
     case agentsDetected = "agents:detected"
+    case slashCommandsDetected = "agents:slash_commands"
 
     // Agent Settings
     case agentSettings = "agent:settings"

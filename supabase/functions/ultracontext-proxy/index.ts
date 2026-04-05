@@ -177,7 +177,8 @@ serve(async (req) => {
       });
     }
 
-    // GET
+    // GET — supports optional pagination via `limit` and `offset` params.
+    // Returns `total` count so clients can implement lazy loading.
     if (action === "get" && payload.id) {
       if (!isValidId(payload.id)) {
         return new Response(JSON.stringify({ error: "Invalid context ID" }), { status: 400, headers: { "Content-Type": "application/json" } });
@@ -189,14 +190,27 @@ serve(async (req) => {
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${ULTRACONTEXT_API_KEY}` },
       });
       const raw = await res.json();
-      const messages = (raw?.data ?? []).map((msg: any) => ({
+      const allMessages = (raw?.data ?? []).map((msg: any) => ({
         role: msg.role,
         content: extractText(msg.content),
         index: msg.index,
       }));
+
+      const total = allMessages.length;
+      const limit = typeof payload.limit === "number" ? Math.max(1, Math.min(payload.limit, 500)) : null;
+      const offset = typeof payload.offset === "number" ? Math.max(0, payload.offset) : null;
+
+      // If limit is provided, return a slice (from the end by default for most-recent-first loading)
+      let messages = allMessages;
+      if (limit !== null) {
+        const start = offset !== null ? offset : Math.max(0, total - limit);
+        messages = allMessages.slice(start, start + limit);
+      }
+
       return new Response(JSON.stringify({
         id: payload.id,
         messages,
+        total,
         version: raw?.version ?? 0,
       }), { status: res.status, headers: { "Content-Type": "application/json" } });
     }

@@ -5,7 +5,7 @@ struct FeedbackView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var feedbackType: FeedbackType = .feature
     @State private var title = ""
-    @State private var description = ""
+    @State private var details = ""
     @State private var isSubmitting = false
     @State private var showSuccess = false
     @State private var errorMessage: String?
@@ -73,25 +73,29 @@ struct FeedbackView: View {
 
                     HStack(spacing: 8) {
                         ForEach(FeedbackType.allCases, id: \.self) { type in
+                            let selected = feedbackType == type
                             Button {
                                 withAnimation(.easeInOut(duration: 0.15)) {
                                     feedbackType = type
                                 }
                             } label: {
-                                HStack(spacing: 6) {
+                                VStack(spacing: 6) {
                                     Image(systemName: type.icon)
-                                        .font(TarsyTheme.font(size: 12))
+                                        .font(TarsyTheme.font(size: 16))
                                     Text(type.label)
-                                        .font(TarsyTheme.font(size: 11))
+                                        .font(TarsyTheme.font(size: 10))
+                                        .multilineTextAlignment(.center)
+                                        .lineLimit(1)
+                                        .minimumScaleFactor(0.8)
                                 }
-                                .foregroundColor(feedbackType == type ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 8)
-                                .background(feedbackType == type ? TarsyTheme.textPrimary : TarsyTheme.backgroundSecondary)
+                                .foregroundColor(selected ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 56)
+                                .background(selected ? TarsyTheme.backgroundTertiary : TarsyTheme.backgroundSecondary)
                                 .cornerRadius(8)
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 8)
-                                        .stroke(feedbackType == type ? Color.clear : TarsyTheme.backgroundTertiary, lineWidth: 1)
+                                        .stroke(selected ? TarsyTheme.textSecondary.opacity(0.4) : TarsyTheme.backgroundTertiary, lineWidth: 1)
                                 )
                             }
                         }
@@ -124,7 +128,7 @@ struct FeedbackView: View {
                         .foregroundColor(TarsyTheme.textSecondary)
                         .textCase(.uppercase)
 
-                    TextEditor(text: $description)
+                    TextEditor(text: $details)
                         .font(TarsyTheme.font(size: 14))
                         .foregroundColor(TarsyTheme.textPrimary)
                         .scrollContentBackground(.hidden)
@@ -137,7 +141,7 @@ struct FeedbackView: View {
                                 .stroke(TarsyTheme.backgroundTertiary, lineWidth: 1)
                         )
                         .overlay(alignment: .topLeading) {
-                            if description.isEmpty {
+                            if details.isEmpty {
                                 Text("provide as much detail as possible...")
                                     .font(TarsyTheme.font(size: 14))
                                     .foregroundColor(TarsyTheme.statusIdle)
@@ -216,17 +220,17 @@ struct FeedbackView: View {
 
     private var canSubmit: Bool {
         !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private func submit() async {
         isSubmitting = true
         errorMessage = nil
+        defer { isSubmitting = false }
 
         do {
             guard supabase.auth.currentUser != nil else {
                 errorMessage = "not authenticated"
-                isSubmitting = false
                 return
             }
 
@@ -234,7 +238,7 @@ struct FeedbackView: View {
                 "email_type": "feedback",
                 "feedback_type": feedbackType.rawValue,
                 "feedback_title": title.trimmingCharacters(in: .whitespacesAndNewlines),
-                "feedback_description": description.trimmingCharacters(in: .whitespacesAndNewlines),
+                "feedback_description": details.trimmingCharacters(in: .whitespacesAndNewlines),
                 "feedback_platform": "ios",
                 "feedback_app_version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
             ]
@@ -250,7 +254,5 @@ struct FeedbackView: View {
         } catch {
             errorMessage = "failed to submit: \(error.localizedDescription)"
         }
-
-        isSubmitting = false
     }
 }

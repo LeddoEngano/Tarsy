@@ -4,16 +4,27 @@ import Foundation
 public class ChatService: ObservableObject {
     @Published public var messages: [ChatMessage] = []
     @Published public var isLoading = false
+    @Published public var isLoadingOlder = false
+    @Published public var hasOlderMessages = false
     @Published public var updateCounter: Int = 0
 
     private var currentTabId: String?
     private var tabMessages: [String: [ChatMessage]] = [:]
+
+    /// Tracks the current UltraContext session for pagination
+    private var currentSessionId: String?
+    private var currentSessionTotal: Int = 0
+    private var loadedOffset: Int = 0
+
+    /// Number of messages to load per page
+    private let pageSize = 50
 
     public init() {}
 
     // MARK: - Load from UltraContext
 
     /// Loads the most recent UltraContext session for this workspace path into the chat.
+    /// Loads only the last `pageSize` messages. Use `loadOlderMessages` to fetch earlier history.
     /// Returns the session if found, nil otherwise.
     @discardableResult
     public func loadFromUltraContext(workspacePath: String, client: UltraContextClient) async -> UltraContextSession? {
@@ -30,8 +41,16 @@ public class ChatService: ObservableObject {
                 return nil
             }
 
-            // Fetch full session with messages
-            let full = try await client.getContext(id: session.id)
+            // Fetch last page of messages
+            let full = try await client.getContext(id: session.id, limit: pageSize)
+            let total = full.total ?? full.messages.count
+
+            currentSessionId = session.id
+            currentSessionTotal = total
+            // The server returns the last `pageSize` messages by default when no offset is given
+            loadedOffset = max(0, total - full.messages.count)
+            hasOlderMessages = loadedOffset > 0
+
             messages = full.messages.map { msg in
                 ChatMessage(
                     workspaceId: UUID(),
@@ -49,6 +68,40 @@ public class ChatService: ObservableObject {
         }
     }
 
+    /// Loads an older page of messages from the current UltraContext session.
+    /// Prepends them to the existing messages array.
+    public func loadOlderMessages(client: UltraContextClient) async {
+        guard let sessionId = currentSessionId,
+              loadedOffset > 0,
+              !isLoadingOlder else { return }
+
+        isLoadingOlder = true
+        defer { isLoadingOlder = false }
+
+        let fetchCount = min(pageSize, loadedOffset)
+        let fetchOffset = loadedOffset - fetchCount
+
+        do {
+            let older = try await client.getContext(id: sessionId, limit: fetchCount, offset: fetchOffset)
+            let olderMessages = older.messages.map { msg in
+                ChatMessage(
+                    workspaceId: UUID(),
+                    tabId: currentTabId ?? "default",
+                    role: msg.role == "user" ? .user : .assistant,
+                    content: msg.content
+                )
+            }
+
+            loadedOffset = fetchOffset
+            hasOlderMessages = loadedOffset > 0
+            messages.insert(contentsOf: olderMessages, at: 0)
+        } catch {
+            #if DEBUG
+            print("[ChatService] Load older messages error: \(error)")
+            #endif
+        }
+    }
+
     // MARK: - Tab management
 
     public func switchTab(tabId: String) {
@@ -59,6 +112,11 @@ public class ChatService: ObservableObject {
         currentTabId = tabId
         // Restore target tab's messages
         messages = tabMessages[tabId] ?? []
+        // Reset pagination state (each tab has its own session context)
+        currentSessionId = nil
+        currentSessionTotal = 0
+        loadedOffset = 0
+        hasOlderMessages = false
     }
 
     // MARK: - Add

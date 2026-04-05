@@ -24,9 +24,11 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
     public let engineType: String?
     public let workspaceId: String?
     public let messageCount: Int?
+    /// Total number of messages in the session (for pagination). Only set when fetched with getContext.
+    public let total: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, messages, version, title
+        case id, messages, version, title, total
         case hasImage = "has_image"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
@@ -39,7 +41,7 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
     public init(id: String, messages: [UltraContextMessage] = [], version: Int? = nil,
                 createdAt: String? = nil, updatedAt: String? = nil, title: String? = nil,
                 hasImage: Bool = false, projectPath: String? = nil, engineType: String? = nil,
-                workspaceId: String? = nil, messageCount: Int? = nil) {
+                workspaceId: String? = nil, messageCount: Int? = nil, total: Int? = nil) {
         self.id = id
         self.messages = messages
         self.version = version
@@ -51,6 +53,7 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
         self.engineType = engineType
         self.workspaceId = workspaceId
         self.messageCount = messageCount
+        self.total = total
     }
 
     public init(from decoder: Decoder) throws {
@@ -66,6 +69,7 @@ public struct UltraContextSession: Codable, Identifiable, Sendable {
         engineType = try? container.decode(String.self, forKey: .engineType)
         workspaceId = try? container.decode(String.self, forKey: .workspaceId)
         messageCount = try? container.decode(Int.self, forKey: .messageCount)
+        total = try? container.decode(Int.self, forKey: .total)
     }
 
     /// Display title: use title field, or fallback to project name, or session ID prefix
@@ -104,7 +108,7 @@ public class UltraContextClient: ObservableObject {
         try? await supabase.auth.session.accessToken
     }
 
-    private func post(_ payload: [String: String]) async throws -> Data {
+    private func post(_ payload: [String: Any]) async throws -> Data {
         guard let url = URL(string: proxyURL) else { throw URLError(.badURL) }
         guard let token = await authToken() else { throw URLError(.userAuthenticationRequired) }
         var req = URLRequest(url: url)
@@ -122,7 +126,7 @@ public class UltraContextClient: ObservableObject {
     private struct CreateContextResponse: Decodable { let id: String }
 
     public func createContext(projectPath: String? = nil, engineType: String? = nil) async throws -> UltraContextSession {
-        var payload = ["action": "create"]
+        var payload: [String: Any] = ["action": "create"]
         if let p = projectPath { payload["project_path"] = p }
         if let e = engineType { payload["engine_type"] = e }
         let data = try await post(payload)
@@ -130,17 +134,20 @@ public class UltraContextClient: ObservableObject {
         return UltraContextSession(id: created.id, projectPath: projectPath, engineType: engineType)
     }
 
-    public func getContext(id: String) async throws -> UltraContextSession {
-        let data = try await post(["action": "get", "id": id])
+    public func getContext(id: String, limit: Int? = nil, offset: Int? = nil) async throws -> UltraContextSession {
+        var payload: [String: Any] = ["action": "get", "id": id]
+        if let limit { payload["limit"] = limit }
+        if let offset { payload["offset"] = offset }
+        let data = try await post(payload)
         return try JSONDecoder().decode(UltraContextSession.self, from: data)
     }
 
     public func appendMessage(contextId: String, role: String, content: String) async throws {
-        _ = try await post(["action": "message", "id": contextId, "role": role, "content": content])
+        _ = try await post(["action": "message", "id": contextId, "role": role, "content": content] as [String: Any])
     }
 
     public func listContexts() async throws -> [UltraContextSession] {
-        let data = try await post(["action": "list"])
+        let data = try await post(["action": "list"] as [String: Any])
         if let wrapper = try? JSONDecoder().decode([String: [UltraContextSession]].self, from: data),
            let contexts = wrapper["data"] {
             return contexts

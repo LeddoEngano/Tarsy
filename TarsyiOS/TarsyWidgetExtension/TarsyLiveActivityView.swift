@@ -25,13 +25,13 @@ struct TarsyLiveActivityWidget: Widget {
 
                         Text(context.attributes.engineType)
                             .font(Self.tarsyFont(size: 13, weight: .semibold))
-                            .foregroundColor(warmBeige)
+                            .foregroundColor(textPrimary)
 
                         Spacer()
 
                         Text(Date(timeIntervalSince1970: context.state.startedAt), style: .timer)
                             .font(Self.tarsyFont(size: 13, weight: .medium))
-                            .foregroundColor(amberColor)
+                            .foregroundColor(accentWhite)
                             .monospacedDigit()
                     }
                 }
@@ -45,7 +45,7 @@ struct TarsyLiveActivityWidget: Widget {
             } compactLeading: {
                 Image(systemName: toolIcon(context.state))
                     .font(Self.tarsyFont(size: 14, weight: .bold))
-                    .foregroundColor(context.state.status == "running" ? warmBeige : statusColor(context.state.status))
+                    .foregroundColor(context.state.status == "running" ? textPrimary : statusColor(context.state.status))
             } compactTrailing: {
                 TarsyEyesWidget(size: 18)
                     .frame(width: 18, height: 18)
@@ -67,11 +67,11 @@ struct TarsyLiveActivityWidget: Widget {
                 HStack(spacing: 5) {
                     Image(systemName: toolIcon(context.state))
                         .font(Self.tarsyFont(size: 11, weight: .semibold))
-                        .foregroundColor(context.state.status == "running" ? warmBeige : statusColor(context.state.status))
+                        .foregroundColor(context.state.status == "running" ? textPrimary : statusColor(context.state.status))
 
                     Text(context.state.message ?? context.state.currentTool)
                         .font(Self.tarsyFont(size: 12, weight: .medium))
-                        .foregroundColor(warmBeige)
+                        .foregroundColor(textPrimary)
                         .lineLimit(1)
                 }
                 .padding(.horizontal, 8)
@@ -85,7 +85,7 @@ struct TarsyLiveActivityWidget: Widget {
 
                 Text(context.attributes.workspaceName)
                     .font(Self.tarsyFont(size: 11, weight: .regular))
-                    .foregroundColor(secondaryText)
+                    .foregroundColor(textSecondary)
                     .lineLimit(1)
             }
 
@@ -108,25 +108,25 @@ struct TarsyLiveActivityWidget: Widget {
             HStack(spacing: 10) {
                 ZStack {
                     Circle()
-                        .stroke(Color.secondary.opacity(0.4), lineWidth: 2)
+                        .stroke(textSecondary.opacity(0.4), lineWidth: 2)
                         .frame(width: 32, height: 32)
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(Self.tarsyFont(size: 13, weight: .semibold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(textSecondary)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Updating…")
                         .font(Self.tarsyFont(size: 12, weight: .medium))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(textSecondary)
                     Text(context.attributes.workspaceName)
                         .font(Self.tarsyFont(size: 10, weight: .regular))
-                        .foregroundColor(.secondary.opacity(0.7))
+                        .foregroundColor(textSecondary.opacity(0.7))
                         .lineLimit(1)
                 }
                 Spacer()
                 Text(Date(timeIntervalSince1970: context.state.startedAt), style: .timer)
                     .font(Self.tarsyFont(size: 15, weight: .semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(textSecondary)
                     .monospacedDigit()
             }
             .padding(.horizontal, 16)
@@ -158,22 +158,22 @@ struct TarsyLiveActivityWidget: Widget {
 
                             Text(context.state.message ?? context.state.currentTool)
                                 .font(Self.tarsyFont(size: 12, weight: .semibold))
-                                .foregroundColor(.primary)
+                                .foregroundColor(textPrimary)
                                 .lineLimit(1)
                         }
 
                         HStack(spacing: 4) {
                             Text(context.attributes.workspaceName)
                                 .font(Self.tarsyFont(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(textSecondary)
                                 .lineLimit(1)
 
                             Text("·")
-                                .foregroundColor(.secondary.opacity(0.5))
+                                .foregroundColor(textSecondary.opacity(0.5))
 
                             Text(context.attributes.engineType)
                                 .font(Self.tarsyFont(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(textSecondary)
                                 .lineLimit(1)
                         }
                     }
@@ -183,7 +183,7 @@ struct TarsyLiveActivityWidget: Widget {
                     // Timer
                     Text(Date(timeIntervalSince1970: context.state.startedAt), style: .timer)
                         .font(Self.tarsyFont(size: 15, weight: .bold))
-                        .foregroundColor(.primary)
+                        .foregroundColor(textPrimary)
                         .monospacedDigit()
                 }
 
@@ -250,15 +250,15 @@ struct TarsyLiveActivityWidget: Widget {
     }
 
     private func permissionButtonColor(_ option: String) -> Color {
-        if isNegativeOption(option) { return terracottaColor.opacity(0.25) }
-        if isBroadAllowOption(option) { return mossColor.opacity(0.3) }
-        return amberColor.opacity(0.25)
+        if isNegativeOption(option) { return accentTerracotta.opacity(0.25) }
+        if isBroadAllowOption(option) { return accentMoss.opacity(0.3) }
+        return accentWhite.opacity(0.25)
     }
 
     private func permissionButtonTextColor(_ option: String) -> Color {
-        if isNegativeOption(option) { return terracottaColor }
-        if isBroadAllowOption(option) { return mossColor }
-        return amberColor
+        if isNegativeOption(option) { return accentTerracotta }
+        if isBroadAllowOption(option) { return accentMoss }
+        return accentWhite
     }
 
     // MARK: - Context Bar
@@ -285,8 +285,8 @@ struct TarsyLiveActivityWidget: Widget {
     }
 
     private func contextBarColor(_ percent: Double) -> Color {
-        if percent > 80 { return terracottaColor }
-        return amberColor
+        if percent > 80 { return accentTerracotta }
+        return accentWhite
     }
 
     // MARK: - Stale View
@@ -295,10 +295,10 @@ struct TarsyLiveActivityWidget: Widget {
         HStack(spacing: 5) {
             Image(systemName: "arrow.triangle.2.circlepath")
                 .font(Self.tarsyFont(size: 11, weight: .semibold))
-                .foregroundColor(secondaryText)
+                .foregroundColor(textSecondary)
             Text("Updating…")
                 .font(Self.tarsyFont(size: 12, weight: .medium))
-                .foregroundColor(secondaryText)
+                .foregroundColor(textSecondary)
         }
     }
 
@@ -332,26 +332,26 @@ struct TarsyLiveActivityWidget: Widget {
     // MARK: - TarsyTheme Fonts
 
     private static func tarsyFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font.custom("Inter", size: size).weight(weight)
+        Font.system(size: size, weight: weight, design: .monospaced)
     }
 
     // MARK: - TarsyTheme Colors
 
-    private var bgPrimary: Color { Color(red: 26/255, green: 26/255, blue: 26/255) }
-    private var warmBeige: Color { Color(red: 232/255, green: 224/255, blue: 212/255) }
-    private var secondaryText: Color { Color(red: 168/255, green: 158/255, blue: 145/255) }
-    private var amberColor: Color { Color(red: 212/255, green: 165/255, blue: 116/255) }
-    private var warmGoldColor: Color { Color(red: 240/255, green: 200/255, blue: 140/255) }
-    private var mossColor: Color { Color(red: 122/255, green: 139/255, blue: 111/255) }
-    private var terracottaColor: Color { Color(red: 196/255, green: 112/255, blue: 75/255) }
+    private var bgPrimary: Color { Color(red: 0x13/255, green: 0x13/255, blue: 0x16/255) }
+    private var textPrimary: Color { Color(red: 0xe4/255, green: 0xe4/255, blue: 0xe7/255) }
+    private var textSecondary: Color { Color(red: 0x71/255, green: 0x71/255, blue: 0x7a/255) }
+    private var accentWhite: Color { Color.white }
+    private var statusStarting: Color { Color(red: 0xe0/255, green: 0xa8/255, blue: 0x6a/255) }
+    private var accentMoss: Color { Color(red: 0x6b/255, green: 0xc7/255, blue: 0x7b/255) }
+    private var accentTerracotta: Color { Color(red: 0xe5/255, green: 0x71/255, blue: 0x6a/255) }
 
     private func statusColor(_ status: String) -> Color {
         switch status {
-        case "running": return amberColor
-        case "waiting": return warmGoldColor
-        case "completed": return mossColor
-        case "error": return terracottaColor
-        default: return secondaryText
+        case "running": return accentMoss
+        case "waiting": return statusStarting
+        case "completed": return accentMoss
+        case "error": return accentTerracotta
+        default: return textSecondary
         }
     }
 }
