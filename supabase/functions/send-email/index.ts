@@ -191,6 +191,76 @@ function subscriptionRenewedEmail(displayName: string): EmailContent {
   };
 }
 
+function feedbackEmail(
+  userEmail: string,
+  displayName: string,
+  feedbackType: string,
+  title: string,
+  description: string,
+  platform: string,
+  appVersion?: string
+): EmailContent {
+  const typeLabels: Record<string, string> = {
+    bug: "Bug Report",
+    feature: "Feature Request",
+    general: "General Feedback",
+  };
+  const typeColors: Record<string, string> = {
+    bug: "#c4704b",
+    feature: "#7a8b6f",
+    general: "#d4a574",
+  };
+  const label = escapeHtml(typeLabels[feedbackType] || feedbackType);
+  const color = typeColors[feedbackType] || "#d4a574";
+  const safeName = escapeHtml(displayName || "Unknown");
+  const safeTitle = escapeHtml(title);
+  const safeDesc = escapeHtml(description).replace(/\n/g, "<br>");
+  const safeEmail = escapeHtml(userEmail);
+  const safePlatform = escapeHtml(platform);
+  const safeVersion = appVersion ? escapeHtml(appVersion) : "n/a";
+
+  return {
+    subject: `[${label}] ${title}`,
+    html: `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body { margin: 0; padding: 0; background-color: #1a1a1a; font-family: 'Courier New', monospace; color: #e8e0d4; }
+    .container { max-width: 560px; margin: 0 auto; padding: 40px 24px; }
+    .logo { font-size: 28px; font-weight: bold; color: #d4a574; margin-bottom: 32px; }
+    h1 { font-size: 22px; color: #e8e0d4; margin-bottom: 16px; }
+    p { font-size: 15px; line-height: 1.6; color: #a89e91; margin-bottom: 16px; }
+    .badge { display: inline-block; background-color: ${color}; color: #e8e0d4; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; margin-bottom: 16px; }
+    .content-box { background-color: #2a2a2a; border-radius: 8px; padding: 20px 24px; margin: 24px 0; }
+    .meta { font-size: 12px; color: #6b6358; margin-bottom: 4px; }
+    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #3a3a3a; font-size: 12px; color: #6b6358; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">tarsy</div>
+    <div class="badge">${label}</div>
+    <h1>${safeTitle}</h1>
+
+    <div class="content-box">
+      <p style="margin: 0;">${safeDesc}</p>
+    </div>
+
+    <div class="meta">From: ${safeName} (${safeEmail})</div>
+    <div class="meta">Platform: ${safePlatform} | App version: ${safeVersion}</div>
+
+    <div class="footer">
+      <p>Reply to this email to respond directly to the user.</p>
+    </div>
+  </div>
+</body>
+</html>`,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Resend API
 // ---------------------------------------------------------------------------
@@ -223,7 +293,7 @@ async function sendEmail(to: string, content: EmailContent): Promise<{ success: 
 // Request types
 // ---------------------------------------------------------------------------
 
-type EmailType = "welcome" | "subscription_active" | "subscription_cancelled" | "subscription_renewed";
+type EmailType = "welcome" | "subscription_active" | "subscription_cancelled" | "subscription_renewed" | "feedback";
 
 interface WebhookPayload {
   type: "INSERT";
@@ -239,6 +309,11 @@ interface DirectPayload {
   email: string;
   display_name?: string;
   subscription_end_date?: string;
+  feedback_type?: string;
+  feedback_title?: string;
+  feedback_description?: string;
+  feedback_platform?: string;
+  feedback_app_version?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,15 +351,39 @@ serve(async (req) => {
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
     }
 
-    const { email_type, email, display_name, subscription_end_date } = body as DirectPayload;
+    const { email_type, email, display_name, subscription_end_date,
+            feedback_type, feedback_title, feedback_description,
+            feedback_platform, feedback_app_version } = body as DirectPayload;
 
-    // Users can only send billing emails to their own address
-    if (email !== user.email) {
-      return new Response(JSON.stringify({ error: "Email mismatch" }), { status: 403 });
+    if (!email_type) {
+      return new Response(JSON.stringify({ error: "email_type is required" }), { status: 400 });
     }
 
-    if (!email_type || !email) {
-      return new Response(JSON.stringify({ error: "email_type and email are required" }), { status: 400 });
+    // Feedback emails go to support, not the user — skip email mismatch check
+    if (email_type === "feedback") {
+      if (!feedback_type || !feedback_title || !feedback_description) {
+        return new Response(JSON.stringify({ error: "feedback_type, feedback_title, and feedback_description are required" }), { status: 400 });
+      }
+      const content = feedbackEmail(
+        user.email || email || "unknown",
+        display_name || user.user_metadata?.display_name || "",
+        feedback_type,
+        feedback_title,
+        feedback_description,
+        feedback_platform || "ios",
+        feedback_app_version
+      );
+      const result = await sendEmail("support@tarsy.dev", content);
+      console.log(`Feedback email (${feedback_type}): ${result.success ? "sent" : result.error}`);
+      return new Response(JSON.stringify(result), { status: result.success ? 200 : 500 });
+    }
+
+    // Billing emails — users can only send to their own address
+    if (!email) {
+      return new Response(JSON.stringify({ error: "email is required" }), { status: 400 });
+    }
+    if (email !== user.email) {
+      return new Response(JSON.stringify({ error: "Email mismatch" }), { status: 403 });
     }
 
     let content: EmailContent;
