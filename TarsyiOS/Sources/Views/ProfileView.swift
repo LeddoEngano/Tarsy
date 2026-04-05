@@ -293,7 +293,7 @@ struct ProfileView: View {
             sectionHeader("Agent Permissions")
 
             VStack(spacing: 1) {
-                ForEach(connectionManager.detectedAgents.isEmpty ? [AIEngineType.claude] : connectionManager.detectedAgents, id: \.self) { engine in
+                ForEach(connectionManager.detectedAgents, id: \.self) { engine in
                     HStack(spacing: 12) {
                         AgentIcon(engineType: engine, size: 18)
                             .frame(width: 28)

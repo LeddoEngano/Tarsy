@@ -23,7 +23,7 @@ struct MCPStoreView: View {
 
     /// Detected agents that support MCP but have none configured
     private var enginesWithoutMCPs: [AIEngineType] {
-        let detected = connectionManager.detectedAgents.isEmpty ? [AIEngineType.claude] : connectionManager.detectedAgents
+        let detected = connectionManager.detectedAgents
         let withMCPs = Set(enginesWithMCPs)
         return detected
             .filter { $0.supportsMCP && !withMCPs.contains($0) }
@@ -32,7 +32,7 @@ struct MCPStoreView: View {
 
     /// Detected agents that don't support MCP
     private var enginesNoSupport: [AIEngineType] {
-        let detected = connectionManager.detectedAgents.isEmpty ? [AIEngineType.claude] : connectionManager.detectedAgents
+        let detected = connectionManager.detectedAgents
         return detected.filter { !$0.supportsMCP }
     }
 
