@@ -23,9 +23,9 @@ function HeroDevices() {
             <div className="w-1.5 h-1.5 rounded-full bg-[#0a0a0a]/80" />
           </div>
           {/* Screen area */}
-          <div className="mx-1.5 mb-1.5 rounded-lg overflow-hidden bg-surface aspect-[16/10] relative">
+          <div className="mx-1.5 mb-1.5 rounded-lg overflow-hidden bg-surface aspect-[16/11] relative">
             <video
-              src="/demo-mac.mp4"
+              src="https://xtblbghhlkroskzljqcl.supabase.co/storage/v1/object/public/website-media/mac.mp4"
               autoPlay
               loop
               muted
@@ -74,19 +74,20 @@ function HeroDevices() {
         }}
       >
         <div className="bg-[#111] border border-surface-overlay/70 rounded-[1.4rem] p-[3px] shadow-2xl shadow-black/50">
-          {/* Dynamic Island */}
-          <div className="flex justify-center mt-1.5 mb-0.5">
-            <div className="w-12 h-3 bg-[#000] rounded-full" />
-          </div>
-          {/* Screen area */}
-          <div className="rounded-[1.1rem] overflow-hidden bg-surface aspect-[9/19] relative">
+          {/* Screen area — full bleed, Dynamic Island floats on top */}
+          <div className="rounded-[1.1rem] overflow-hidden bg-surface aspect-[9/20] relative">
+            {/* Dynamic Island */}
+            {/* Dynamic Island */}
+            <div className="absolute top-0.5 left-0 right-0 flex justify-center z-10">
+              <div className="w-12 h-3 bg-[#000] rounded-full" />
+            </div>
             <video
-              src="/demo-iphone.mp4"
+              src="https://xtblbghhlkroskzljqcl.supabase.co/storage/v1/object/public/website-media/iphone.mp4"
               autoPlay
               loop
               muted
               playsInline
-              className="w-full h-full object-cover relative z-[1]"
+              className="w-full h-full object-cover object-bottom relative z-[1]"
             />
             {/* Placeholder when no video */}
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
@@ -108,10 +109,6 @@ function HeroDevices() {
                 demo-iphone.mp4
               </span>
             </div>
-          </div>
-          {/* Home indicator */}
-          <div className="flex justify-center my-1">
-            <div className="w-7 h-[3px] bg-[#333] rounded-full" />
           </div>
         </div>
         <p className="text-center mt-2 text-[10px] text-taupe/30 uppercase tracking-[0.15em] select-none">

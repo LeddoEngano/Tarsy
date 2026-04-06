@@ -231,7 +231,7 @@ function feedbackEmail(
       <p style="margin: 0; color: #e4e4e7;">${safeDesc}</p>
     </div>
 
-    ${imageBase64 ? `<div style="margin: 16px 0;"><img src="cid:feedback-screenshot" style="max-width: 100%; border-radius: 8px; border: 1px solid #2a2a30;" alt="Screenshot"></div>` : ""}
+    ${imageBase64 ? `<div style="margin: 16px 0;"><img src="data:image/jpeg;base64,${imageBase64}" style="max-width: 100%; border-radius: 8px; border: 1px solid #2a2a30;" alt="Screenshot"></div>` : ""}
 
     <div class="meta">From: ${safeName} (${safeEmail})</div>
     <div class="meta">Platform: ${safePlatform} | App version: ${safeVersion}</div>
