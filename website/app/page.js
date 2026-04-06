@@ -78,7 +78,7 @@ export default function Home() {
                   </a>
                 </div>
                 <p className="text-[11px] text-taupe/50 mt-4 tracking-wide">
-                  Beta — vagas limitadas no TestFlight
+                  Beta — limited TestFlight spots available
                 </p>
                 <p className="text-[11px] text-taupe/40 mt-2 tracking-wide">
                   macOS 14+ &middot; Apple Silicon &amp; Intel
