@@ -2542,13 +2542,12 @@ class DaemonManager: ObservableObject {
         let expandedEnginePath = (path as NSString).expandingTildeInPath
         registeredWorkspacePaths.insert(URL(fileURLWithPath: expandedEnginePath).resolvingSymlinksInPath().path)
 
-        // Rescan slash commands with this workspace's project-level commands (off main thread)
+        // Rescan slash commands with this workspace's project-level commands
         let paths = Array(registeredWorkspacePaths)
         let newCommands = await Task.detached { self.scanSlashCommands(workspacePaths: paths) }.value
-        if newCommands != detectedSlashCommands {
-            detectedSlashCommands = newCommands
-            await broadcastSlashCommands()
-        }
+        detectedSlashCommands = newCommands
+        // Always send to ensure client has the full list (including project-level commands)
+        await broadcastSlashCommands(to: clientId)
 
         log("engineCreate: type=\(engineType.displayName), path=\(path), sid=\(sid), permissionMode=\(permissionMode.rawValue)")
 

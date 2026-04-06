@@ -170,69 +170,88 @@ struct TarsyLiveActivityWidget: Widget {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         } else {
-            // Active state
-            VStack(spacing: 8) {
-                HStack(spacing: 10) {
-                    // Status ring + animated Tarsy eyes
-                    ZStack {
-                        Circle()
-                            .trim(from: 0, to: statusRingTrim(context.state.status))
-                            .stroke(
-                                statusColor(context.state.status),
-                                style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
-                            )
-                            .frame(width: 32, height: 32)
-                            .rotationEffect(.degrees(-90))
+            // Active state — same layout as expanded
+            VStack(alignment: .leading, spacing: 5) {
+                // Title: user prompt + agent icon
+                HStack {
+                    tarsyEyes(size: 22)
 
-                        tarsyEyes(size: 22)
-                    }
+                    engineIconView(context.attributes)
+                        .frame(width: 16, height: 16)
 
-                    // Tool + workspace + engine
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 5) {
-                            Image(systemName: toolIcon(context.state))
-                                .font(Self.tarsyFont(size: 10, weight: .semibold))
-                                .foregroundColor(statusColor(context.state.status))
-
-                            Text(context.state.message ?? context.state.currentTool)
-                                .font(Self.tarsyFont(size: 12, weight: .semibold))
-                                .foregroundColor(textPrimary)
-                                .lineLimit(1)
-                        }
-
-                        HStack(spacing: 4) {
-                            Text(context.attributes.workspaceName)
-                                .font(Self.tarsyFont(size: 10, weight: .medium))
-                                .foregroundColor(textSecondary)
-                                .lineLimit(1)
-
-                            Text("·")
-                                .foregroundColor(textSecondary.opacity(0.5))
-
-                            Text(context.attributes.engineType)
-                                .font(Self.tarsyFont(size: 10, weight: .medium))
-                                .foregroundColor(textSecondary)
-                                .lineLimit(1)
-                        }
+                    if let prompt = context.state.userPrompt, !prompt.isEmpty {
+                        Text(prompt)
+                            .font(Self.tarsyFont(size: 13, weight: .semibold))
+                            .foregroundColor(textPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    } else {
+                        Text(context.state.message ?? context.state.currentTool)
+                            .font(Self.tarsyFont(size: 13, weight: .semibold))
+                            .foregroundColor(textPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     }
 
                     Spacer()
 
-                    // Timer
+                    if context.state.contextPercent > 0 {
+                        Text("ctx:\(Int(context.state.contextPercent))%")
+                            .font(Self.tarsyFont(size: 10, weight: .medium))
+                            .foregroundColor(contextBarColor(context.state.contextPercent))
+                    }
+                }
+
+                // Agent activity
+                HStack(spacing: 5) {
+                    Spacer().frame(width: 46)
+
+                    if context.state.status == "error" {
+                        Text("ERROR")
+                            .font(Self.tarsyFont(size: 10, weight: .bold))
+                            .foregroundColor(accentTerracotta)
+                    } else {
+                        Image(systemName: toolIcon(context.state))
+                            .font(Self.tarsyFont(size: 10, weight: .semibold))
+                            .foregroundColor(.white)
+                    }
+
+                    if let agentMsg = context.state.lastAgentMessage, !agentMsg.isEmpty {
+                        Text(agentMsg)
+                            .font(Self.tarsyFont(size: 11, weight: .medium))
+                            .foregroundColor(textPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    } else {
+                        Text(context.attributes.engineType)
+                            .font(Self.tarsyFont(size: 11, weight: .medium))
+                            .foregroundColor(textPrimary)
+                    }
+
+                    Spacer()
+
                     Text(Date(timeIntervalSince1970: context.state.startedAt), style: .timer)
-                        .font(Self.tarsyFont(size: 15, weight: .bold))
-                        .foregroundColor(textPrimary)
+                        .font(Self.tarsyFont(size: 11, weight: .medium))
+                        .foregroundColor(accentWhite)
                         .monospacedDigit()
+                }
+
+                // Other active agents indicator
+                if let agents = context.state.activeAgents, !agents.isEmpty {
+                    HStack(spacing: 4) {
+                        Image(systemName: "circle.fill")
+                            .font(.system(size: 4))
+                            .foregroundColor(accentMoss)
+                        Text("+\(agents.count) agent\(agents.count > 1 ? "s" : "") running")
+                            .font(Self.tarsyFont(size: 10, weight: .medium))
+                            .foregroundColor(textSecondary)
+                        Spacer()
+                    }
                 }
 
                 // Permission action buttons (when waiting with options)
                 if context.state.status == "waiting" {
                     permissionButtons(context: context)
-                }
-
-                // Context bar (only when we have data)
-                if context.state.contextPercent > 0 {
-                    contextBar(percent: context.state.contextPercent)
                 }
             }
             .padding(.horizontal, 16)
@@ -496,29 +515,29 @@ private let previewAttrs = TarsyActivityAttributes(
 #Preview("Lock Screen — Running", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing ContentView.swift", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 185, contextPercent: 42)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Editing ContentView.swift", currentToolIcon: "pencil.line", startedAt: Date().timeIntervalSince1970 - 185, contextPercent: 42, userPrompt: "Fix the login bug and add unit tests", lastAgentMessage: "Editing ContentView.swift")
 }
 
 #Preview("Lock Screen — High Context", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Running tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 500, contextPercent: 91)
+    TarsyActivityAttributes.ContentState(status: "running", currentTool: "Running tests", currentToolIcon: "terminal", startedAt: Date().timeIntervalSince1970 - 500, contextPercent: 91, userPrompt: "Refactor the networking layer", lastAgentMessage: "Running tests")
 }
 
 #Preview("Lock Screen — Waiting (Buttons)", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 92, contextPercent: 31, message: "Write to hello.txt?", sessionId: "session-1", engineTypeRaw: "claude", questionKey: "Write to hello.txt?", questionOptions: ["Yes", "No", "Always allow"])
+    TarsyActivityAttributes.ContentState(status: "waiting", currentTool: "Needs input", currentToolIcon: "questionmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 92, contextPercent: 31, message: "Write to hello.txt?", userPrompt: "Create a new hello world file", sessionId: "session-1", engineTypeRaw: "claude", questionKey: "Write to hello.txt?", questionOptions: ["Yes", "No", "Always allow"])
 }
 
 #Preview("Lock Screen — Error", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Connection lost", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 60)
+    TarsyActivityAttributes.ContentState(status: "error", currentTool: "Connection lost", currentToolIcon: "xmark.circle.fill", startedAt: Date().timeIntervalSince1970 - 60, userPrompt: "Add dark mode support")
 }
 
 #Preview("Lock Screen — Completed", as: .content, using: previewAttrs) {
     TarsyLiveActivityWidget()
 } contentStates: {
-    TarsyActivityAttributes.ContentState(status: "completed", currentTool: "Done", currentToolIcon: "checkmark.circle", startedAt: Date().timeIntervalSince1970 - 900, contextPercent: 67)
+    TarsyActivityAttributes.ContentState(status: "completed", currentTool: "Done", currentToolIcon: "checkmark.circle", startedAt: Date().timeIntervalSince1970 - 900, contextPercent: 67, userPrompt: "Implement search feature", lastAgentMessage: "All tests passing")
 }

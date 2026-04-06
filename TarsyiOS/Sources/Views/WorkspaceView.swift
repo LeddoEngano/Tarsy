@@ -579,18 +579,27 @@ struct WorkspaceView: View {
     private var terminalArea: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                Text(terminalOutputText)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(TarsyTheme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .id("terminal-content")
+                HStack(spacing: 0) {
+                    Text(terminalOutputText)
+                    Text("▎")
+                        .opacity(terminalCursorVisible ? 1 : 0)
+                }
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(TarsyTheme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(10)
+                .id("terminal-content")
 
                 Color.clear
                     .frame(height: 1)
                     .id("terminal-bottom")
             }
             .background(Color(hex: "0a0a0a"))
+            .onAppear {
+                Timer.scheduledTimer(withTimeInterval: 0.55, repeats: true) { _ in
+                    Task { @MainActor in terminalCursorVisible.toggle() }
+                }
+            }
             .onChange(of: chatService.updateCounter) { _, _ in
                 withAnimation(.easeOut(duration: 0.1)) {
                     proxy.scrollTo("terminal-bottom", anchor: .bottom)
@@ -1357,6 +1366,14 @@ struct WorkspaceView: View {
     // MARK: - Autocomplete
 
     private func updateAutocomplete(_ text: String) {
+        // Terminal tabs never get context injection
+        if currentTab.type == .terminal {
+            if !autocompleteItems.isEmpty {
+                withAnimation(.easeOut(duration: 0.15)) { autocompleteItems = [] }
+            }
+            return
+        }
+
         // Slash commands: only at start of message, only for Claude Code tabs
         let isClaudeTab = (currentTab.engineType ?? .claude) == .claude
         if text.hasPrefix("/") && isClaudeTab {
@@ -2082,6 +2099,7 @@ struct WorkspaceView: View {
     @State private var recordingSeconds = 0
     @State private var recordingTimer: Timer?
     @State private var recDotVisible = true
+    @State private var terminalCursorVisible = true
 
     private var recordingTimerText: String {
         let m = recordingSeconds / 60
