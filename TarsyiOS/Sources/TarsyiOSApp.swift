@@ -112,8 +112,11 @@ struct TarsyiOSApp: App {
                     AppDelegate.deepLinkRouter = deepLinkRouter
                     subscriptionManager.profileService = profileService
                     subscriptionManager.start()
+                    // Share auth token with widget extension for direct relay HTTP calls
+                    Task { await Self.syncAuthTokenToAppGroup() }
                     // Wire Live Activity widget permission buttons → WebSocket
                     LiveActivityManager.shared.onPermissionResponse = { [weak connectionManager] sessionId, answer, engineType, _, permissionRequestId in
+                        guard let cm = connectionManager, cm.isConnected else { return false }
                         var payload: [String: String] = [
                             "sessionId": sessionId,
                             "answer": answer,
@@ -122,10 +125,11 @@ struct TarsyiOSApp: App {
                         if let permId = permissionRequestId, !permId.isEmpty {
                             payload["permissionRequestId"] = permId
                         }
-                        connectionManager?.send(WSPacket(
+                        cm.send(WSPacket(
                             action: .engineUserResponse,
                             payload: payload
                         ))
+                        return true
                     }
                     LiveActivityManager.shared.startWidgetResponseObserver()
                 }
@@ -168,6 +172,7 @@ struct TarsyiOSApp: App {
                         badgeService.clearAppIconBadge()
                         if authManager.isAuthenticated {
                             Task { await badgeService.refreshCounts() }
+                            Task { await Self.syncAuthTokenToAppGroup() }
                             Task {
                                 if !connectionManager.isConnected {
                                     await connectionManager.reconnectIfNeeded()
@@ -181,6 +186,21 @@ struct TarsyiOSApp: App {
                         break
                     }
                 }
+        }
+    }
+
+    /// Sync the current Supabase access token to App Group so the widget extension can use it
+    /// for direct HTTP calls to the relay server (permission responses).
+    private static func syncAuthTokenToAppGroup() async {
+        guard let defaults = UserDefaults(suiteName: TarsyLiveActivityConstants.appGroup) else { return }
+        do {
+            let session = try await supabase.auth.session
+            defaults.set(session.accessToken, forKey: "widgetAuthToken")
+            defaults.synchronize()
+        } catch {
+#if DEBUG
+            print("[App] Failed to sync auth token to App Group: \(error)")
+#endif
         }
     }
 }

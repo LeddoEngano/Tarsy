@@ -368,7 +368,8 @@ class LiveActivityManager: ObservableObject {
     /// Callback invoked when a permission response arrives from the Live Activity widget buttons.
     /// Set this from the app root to forward responses via WebSocket.
     /// Parameters: (sessionId, answer, engineType, workspaceId, permissionRequestId?)
-    var onPermissionResponse: ((String, String, String, String, String?) -> Void)?
+    /// Returns true if the response was successfully sent (connection alive).
+    var onPermissionResponse: ((String, String, String, String, String?) -> Bool)?
 
     private var darwinObserverRegistered = false
 
@@ -406,6 +407,7 @@ class LiveActivityManager: ObservableObject {
 
     /// Read a pending permission response from App Group UserDefaults,
     /// update the Live Activity, and forward via the `onPermissionResponse` callback.
+    /// Only clears the pending response if it was successfully sent via WebSocket.
     func processWidgetResponse() {
         guard let defaults = UserDefaults(suiteName: appGroupId),
               let data = defaults.data(forKey: pendingResponseKey),
@@ -418,14 +420,24 @@ class LiveActivityManager: ObservableObject {
         // Deduplicate: skip if we already processed this exact response
         let responseId = response["responseId"] ?? ""
         if !responseId.isEmpty && responseId == lastProcessedResponseId { return }
-        lastProcessedResponseId = responseId
 
-        // Clear the pending response immediately to prevent double-processing
+        // Forward the response to the WebSocket connection
+        let permissionRequestId = response["permissionRequestId"]
+        let sent = onPermissionResponse?(sessionId, answer, engineType, workspaceId, permissionRequestId) ?? false
+
+        if !sent {
+#if DEBUG
+            print("[LiveActivity] Permission response NOT sent (no connection) — will retry on foreground")
+#endif
+            return  // Keep response in UserDefaults for retry
+        }
+
+        // Successfully sent — now clear and update UI
+        lastProcessedResponseId = responseId
         defaults.removeObject(forKey: pendingResponseKey)
         defaults.synchronize()
 
-        // Update Live Activity back to "running" — find by workspaceId prefix
-        // since we don't have the tabId in the widget response
+        // Update Live Activity back to "running"
         for activityKey in activities.keys where activityKey.hasPrefix(workspaceId) {
             guard let activity = activities[activityKey],
                   let startDate = startDates[activityKey] else { continue }
@@ -439,10 +451,6 @@ class LiveActivityManager: ObservableObject {
             )
             Task { await activity.update(.init(state: state, staleDate: .now.addingTimeInterval(staleTTL))) }
         }
-
-        // Forward the response to the WebSocket connection
-        let permissionRequestId = response["permissionRequestId"]
-        onPermissionResponse?(sessionId, answer, engineType, workspaceId, permissionRequestId)
 
         // Notify in-app UI (WorkspaceView) to clear the question overlay
         NotificationCenter.default.post(

@@ -257,6 +257,58 @@ const server = Bun.serve({
       });
     }
 
+    // Permission response from iOS widget (HTTP POST — widget can't maintain WebSocket)
+    if (url.pathname === "/api/permission-response" && req.method === "POST") {
+      try {
+        const authHeader = req.headers.get("authorization");
+        if (!authHeader?.startsWith("Bearer ")) {
+          return new Response(JSON.stringify({ error: "Missing authorization" }), { status: 401 });
+        }
+        const token = authHeader.slice(7);
+        const { userId, error } = await validateToken(token);
+        if (!userId) {
+          return new Response(JSON.stringify({ error: error || "Invalid token" }), { status: 401 });
+        }
+
+        const body = await req.json() as {
+          sessionId?: string; answer?: string; engineType?: string;
+          workspaceId?: string; permissionRequestId?: string;
+        };
+        if (!body.sessionId || !body.answer || !body.engineType) {
+          return new Response(JSON.stringify({ error: "Missing required fields" }), { status: 400 });
+        }
+
+        // Build the same WSPacket the iOS app would send via WebSocket
+        const packet = JSON.stringify({
+          id: crypto.randomUUID(),
+          action: "engine:user_response",
+          payload: {
+            sessionId: body.sessionId,
+            answer: body.answer,
+            engineType: body.engineType,
+            ...(body.permissionRequestId ? { permissionRequestId: body.permissionRequestId } : {}),
+          },
+          timestamp: new Date().toISOString(),
+        });
+
+        // Forward directly to the user's machine
+        const machine = machines.get(userId);
+        if (machine && machine.readyState === WebSocket.OPEN) {
+          machine.send(packet);
+          console.log(`[Relay] HTTP permission response forwarded to machine (${shortId(userId)})`);
+          return new Response(JSON.stringify({ status: "sent" }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        } else {
+          console.log(`[Relay] HTTP permission response: no machine online (${shortId(userId)})`);
+          return new Response(JSON.stringify({ error: "Machine not connected" }), { status: 503 });
+        }
+      } catch (e: any) {
+        console.log(`[Relay] HTTP permission response error: ${e?.message}`);
+        return new Response(JSON.stringify({ error: "Internal error" }), { status: 500 });
+      }
+    }
+
     // WebSocket upgrade — validate token via first message (query param auth removed for security)
     if (url.pathname === "/ws") {
       // Origin header validation: native apps won't send Origin, but browsers always do.
