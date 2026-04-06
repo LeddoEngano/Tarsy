@@ -24,7 +24,7 @@ final class ContextInjector {
             fullSession = session
         }
 
-        let formatted = formatContext(fullSession)
+        let formatted = formatContext(session: fullSession)
         guard !formatted.isEmpty else { return }
 
         pasteIntoTerminal(formatted)

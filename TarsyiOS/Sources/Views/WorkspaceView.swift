@@ -299,6 +299,18 @@ struct WorkspaceView: View {
             setupOutputHandler()
             await waitForConnectionAndStartClaude()
 
+            // Initialize slash commands from ConnectionManager (received before workspace opened)
+            if detectedSlashCommands.isEmpty && !connectionManager.detectedSlashCommands.isEmpty {
+                detectedSlashCommands = connectionManager.detectedSlashCommands.map { cmd in
+                    AutocompleteItem(
+                        icon: "terminal",
+                        label: cmd["name"] ?? "",
+                        insertText: cmd["name"] ?? "",
+                        description: cmd["description"] ?? ""
+                    )
+                }
+            }
+
             // Preload file tree for @ autocomplete
             connectionManager.send(WSPacket(action: .fileTree, payload: ["path": workspace.localPath]))
 

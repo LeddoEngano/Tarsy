@@ -17,6 +17,7 @@ public class ConnectionManager: ObservableObject {
     @Published public var errorMessage: String?
     @Published public var connectionMode: ConnectionMode = .disconnected
     @Published public var detectedAgents: [AIEngineType] = []
+    @Published public var detectedSlashCommands: [[String: String]] = []
     @Published public var openclawAvailable = false
     @Published public var gitMissingOnMac = false
 
@@ -638,6 +639,13 @@ public class ConnectionManager: ObservableObject {
         case .agentsDetected:
             if let csv = packet.payload?["agents"] {
                 detectedAgents = csv.split(separator: ",").compactMap { AIEngineType(rawValue: String($0)) }
+            }
+            notifyListeners(packet)
+        case .slashCommandsDetected:
+            if let json = packet.payload?["commands"],
+               let data = json.data(using: .utf8),
+               let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+                detectedSlashCommands = parsed
             }
             notifyListeners(packet)
         case .openclawStatus:
