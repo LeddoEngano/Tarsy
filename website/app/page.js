@@ -37,7 +37,7 @@ export default function Home() {
         <div className="absolute top-0 inset-x-0 h-[500px] bg-amber/[0.02] blur-[100px] pointer-events-none" />
 
         <div className="relative max-w-6xl mx-auto px-6 w-full">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.3fr] gap-12 lg:gap-20 items-center">
             <div>
               <ScrollReveal>
                 <span className="inline-block text-[11px] uppercase tracking-[0.2em] text-amber border border-amber/20 rounded-full px-4 py-1.5">
@@ -66,13 +66,13 @@ export default function Home() {
                     href="https://testflight.apple.com/join/vDUvPDPe"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-block bg-amber/10 text-amber text-sm font-semibold px-8 py-3.5 rounded-xl no-underline border border-amber/30 transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
+                    className="inline-block w-[260px] text-center bg-amber/10 text-amber text-sm font-semibold py-3.5 rounded-xl no-underline border border-amber/30 transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
                   >
                     iPhone — TestFlight Beta
                   </a>
                   <a
                     href="/download/macos"
-                    className="inline-block border border-amber/30 text-amber text-sm font-semibold px-8 py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
+                    className="inline-block w-[260px] text-center border border-amber/30 text-amber text-sm font-semibold py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
                   >
                     Download for Mac
                   </a>
@@ -86,7 +86,7 @@ export default function Home() {
               </ScrollReveal>
             </div>
 
-            <div className="hidden lg:block">
+            <div className="flex justify-center lg:justify-end scale-[0.65] -my-16 lg:scale-100 lg:my-0 order-first lg:order-last">
               <HeroDevices />
             </div>
           </div>
@@ -243,13 +243,13 @@ export default function Home() {
                 href="https://testflight.apple.com/join/vDUvPDPe"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-block bg-amber/10 text-amber text-sm font-semibold px-8 py-3.5 rounded-xl no-underline border border-amber/30 transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
+                className="inline-block w-[260px] text-center bg-amber/10 text-amber text-sm font-semibold py-3.5 rounded-xl no-underline border border-amber/30 transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
               >
                 iPhone — TestFlight Beta
               </a>
               <a
                 href="/download/macos"
-                className="inline-block border border-amber/30 text-amber text-sm font-semibold px-8 py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
+                className="inline-block w-[260px] text-center border border-amber/30 text-amber text-sm font-semibold py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
               >
                 Download for Mac
               </a>

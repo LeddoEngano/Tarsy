@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 
 function HeroDevices() {
   return (
-    <div className="relative w-full max-w-[520px] ml-auto pl-12 pb-20">
+    <div className="relative w-[550px] pl-12 pb-20">
       {/* Ambient glow */}
       <div className="absolute -inset-6 bg-amber/[0.02] rounded-3xl blur-2xl" />
 
@@ -23,7 +23,7 @@ function HeroDevices() {
             <div className="w-1.5 h-1.5 rounded-full bg-[#0a0a0a]/80" />
           </div>
           {/* Screen area */}
-          <div className="mx-1.5 mb-1.5 rounded-lg overflow-hidden bg-surface aspect-[16/11] relative">
+          <div className="mx-1.5 mb-1.5 rounded-lg overflow-hidden bg-surface aspect-[16/10.5] relative">
             <video
               src="https://xtblbghhlkroskzljqcl.supabase.co/storage/v1/object/public/website-media/mac.mp4"
               autoPlay
