@@ -15,7 +15,7 @@ struct AutocompleteOverlay: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                ForEach(Array(items.prefix(6).enumerated()), id: \.element.id) { index, item in
+                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                     Button(action: { onSelect(item) }) {
                         HStack(spacing: 10) {
                             Image(systemName: item.icon)
@@ -37,13 +37,13 @@ struct AutocompleteOverlay: View {
                     }
                     .buttonStyle(.plain)
 
-                    if index < min(items.count, 6) - 1 {
+                    if index < items.count - 1 {
                         Divider().background(TarsyTheme.textSecondary.opacity(0.15))
                     }
                 }
             }
         }
-        .frame(maxHeight: 264)
+        .frame(maxHeight: 300)
         .background(TarsyTheme.backgroundSecondary)
         .cornerRadius(12)
         .overlay(

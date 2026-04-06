@@ -156,9 +156,9 @@ class DaemonManager: ObservableObject {
         await wsServer?.broadcast(agentsPacket)
         await relayClient.send(packet: agentsPacket)
 
-        // 7b. Scan slash commands (user-level, off main thread)
-        detectedSlashCommands = await Task.detached { self.scanSlashCommands(workspacePaths: []) }.value
-        log("Detected \(detectedSlashCommands.count) slash commands: \(detectedSlashCommands.map { $0["name"] ?? "?" })")
+        // 7b. Scan slash commands (user-level + known workspace paths)
+        detectedSlashCommands = await Task.detached { self.scanSlashCommands(workspacePaths: Array(self.registeredWorkspacePaths)) }.value
+        log("Detected \(detectedSlashCommands.count) slash commands")
         await broadcastSlashCommands()
 
         // 8. UltraContext — watch Claude Code session files + sync via proxy
@@ -2544,8 +2544,10 @@ class DaemonManager: ObservableObject {
 
         // Rescan slash commands with this workspace's project-level commands
         let paths = Array(registeredWorkspacePaths)
+        log("slashCommands: scanning paths \(paths)")
         let newCommands = await Task.detached { self.scanSlashCommands(workspacePaths: paths) }.value
         detectedSlashCommands = newCommands
+        log("slashCommands: found \(newCommands.count) commands, sending to \(clientId)")
         // Always send to ensure client has the full list (including project-level commands)
         await broadcastSlashCommands(to: clientId)
 
@@ -4277,19 +4279,20 @@ class DaemonManager: ObservableObject {
 
     // MARK: - Slash Command Detection
 
-    /// Scans ~/.claude/commands/ and project-level .claude/commands/ for slash command definitions.
+    /// Scans ~/.claude/commands/, ~/.claude/skills/, and project-level equivalents.
     private nonisolated func scanSlashCommands(workspacePaths: [String]) -> [[String: String]] {
         let fm = FileManager.default
         let home = AgentDetector.realHome
         var commands: [[String: String]] = []
         var seen: Set<String> = []
 
-        var dirs: [String] = ["\(home)/.claude/commands"]
+        // 1. Scan commands (.md files)
+        var commandDirs: [String] = ["\(home)/.claude/commands"]
         for path in workspacePaths {
-            dirs.append("\(path)/.claude/commands")
+            commandDirs.append("\(path)/.claude/commands")
         }
 
-        for dir in dirs {
+        for dir in commandDirs {
             guard let files = try? fm.contentsOfDirectory(atPath: dir) else { continue }
             for file in files.sorted() {
                 let fullPath = "\(dir)/\(file)"
@@ -4315,6 +4318,28 @@ class DaemonManager: ObservableObject {
                 guard !seen.contains(cmdName) else { continue }
                 seen.insert(cmdName)
                 let (name, desc) = parseCommandFile(at: fullPath, fallbackName: cmdName)
+                commands.append(["name": name, "description": desc])
+            }
+        }
+
+        // 2. Scan skills (directories with SKILL.md)
+        var skillDirs: [String] = ["\(home)/.claude/skills"]
+        for path in workspacePaths {
+            skillDirs.append("\(path)/.claude/skills")
+        }
+
+        for dir in skillDirs {
+            guard let entries = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            for entry in entries.sorted() {
+                let entryPath = "\(dir)/\(entry)"
+                // Resolve symlinks (skills are often symlinked)
+                let resolved = URL(fileURLWithPath: entryPath).resolvingSymlinksInPath().path
+                let skillFile = "\(resolved)/SKILL.md"
+                guard fm.fileExists(atPath: skillFile) else { continue }
+                let cmdName = "/\(entry)"
+                guard !seen.contains(cmdName) else { continue }
+                seen.insert(cmdName)
+                let (name, desc) = parseCommandFile(at: skillFile, fallbackName: cmdName)
                 commands.append(["name": name, "description": desc])
             }
         }

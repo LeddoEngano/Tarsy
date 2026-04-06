@@ -267,12 +267,21 @@ struct WorkspaceView: View {
             await badgeService.clearBadge(for: workspace.id)
 
             // Wait for agent detection before initializing tabs.
-            // The macOS app sends .agentsDetected after WebSocket connects,
-            // so we need to wait briefly for that packet to arrive.
+            // The macOS app sends .agentsDetected after WebSocket connects.
+            // Use reactive wait: listen for the @Published change with a timeout.
             if detectedAgents.isEmpty && connectionManager.isConnected {
-                for _ in 0..<20 {
-                    try? await Task.sleep(nanoseconds: 150_000_000) // 150ms
-                    if !detectedAgents.isEmpty { break }
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask {
+                        for await agents in connectionManager.$detectedAgents.values {
+                            if !agents.isEmpty { return }
+                        }
+                    }
+                    group.addTask {
+                        try? await Task.sleep(nanoseconds: 5_000_000_000) // 5s timeout
+                    }
+                    // Return as soon as either completes
+                    await group.next()
+                    group.cancelAll()
                 }
             }
 
@@ -579,27 +588,18 @@ struct WorkspaceView: View {
     private var terminalArea: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                HStack(spacing: 0) {
-                    Text(terminalOutputText)
-                    Text("▎")
-                        .opacity(terminalCursorVisible ? 1 : 0)
-                }
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundColor(TarsyTheme.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(10)
-                .id("terminal-content")
+                Text(terminalOutputText)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .id("terminal-content")
 
                 Color.clear
                     .frame(height: 1)
                     .id("terminal-bottom")
             }
             .background(Color(hex: "0a0a0a"))
-            .onAppear {
-                Timer.scheduledTimer(withTimeInterval: 0.55, repeats: true) { _ in
-                    Task { @MainActor in terminalCursorVisible.toggle() }
-                }
-            }
             .onChange(of: chatService.updateCounter) { _, _ in
                 withAnimation(.easeOut(duration: 0.1)) {
                     proxy.scrollTo("terminal-bottom", anchor: .bottom)
@@ -1378,12 +1378,32 @@ struct WorkspaceView: View {
         let isClaudeTab = (currentTab.engineType ?? .claude) == .claude
         if text.hasPrefix("/") && isClaudeTab {
             let filter = String(text.dropFirst()).lowercased()
+
+            // Sync from ConnectionManager (always has latest from macOS)
+            if !connectionManager.detectedSlashCommands.isEmpty {
+                detectedSlashCommands = connectionManager.detectedSlashCommands.map { cmd in
+                    AutocompleteItem(
+                        icon: "terminal",
+                        label: cmd["name"] ?? "",
+                        insertText: cmd["name"] ?? "",
+                        description: cmd["description"] ?? ""
+                    )
+                }
+            }
+
             // Merge detected commands from macOS with builtin defaults
-            let allCommands = detectedSlashCommands.isEmpty
-                ? AutocompleteOverlay.slashCommands
-                : detectedSlashCommands + AutocompleteOverlay.slashCommands.filter { builtin in
+            // Order: simple commands first, then builtins, then namespaced
+            let allCommands: [AutocompleteItem]
+            if detectedSlashCommands.isEmpty {
+                allCommands = AutocompleteOverlay.slashCommands
+            } else {
+                let simple = detectedSlashCommands.filter { !$0.label.contains(":") }
+                let namespaced = detectedSlashCommands.filter { $0.label.contains(":") }
+                let builtins = AutocompleteOverlay.slashCommands.filter { builtin in
                     !detectedSlashCommands.contains(where: { $0.label == builtin.label })
                 }
+                allCommands = simple + builtins + namespaced
+            }
             withAnimation(.easeOut(duration: 0.15)) {
                 autocompleteItems = allCommands.filter {
                     filter.isEmpty || $0.label.lowercased().contains(filter)
@@ -1881,6 +1901,9 @@ struct WorkspaceView: View {
                     if let json = packet.payload?["commands"],
                        let data = json.data(using: .utf8),
                        let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+                        #if DEBUG
+                        print("[Autocomplete] Received \(parsed.count) slash commands from macOS: \(parsed.compactMap { $0["name"] }.prefix(10))")
+                        #endif
                         detectedSlashCommands = parsed.map { cmd in
                             AutocompleteItem(
                                 icon: "terminal",
@@ -2099,7 +2122,6 @@ struct WorkspaceView: View {
     @State private var recordingSeconds = 0
     @State private var recordingTimer: Timer?
     @State private var recDotVisible = true
-    @State private var terminalCursorVisible = true
 
     private var recordingTimerText: String {
         let m = recordingSeconds / 60
