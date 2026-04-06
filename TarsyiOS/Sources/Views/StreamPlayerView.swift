@@ -322,6 +322,8 @@ struct StreamPlayerView: View {
             }
         }
         .onDisappear {
+            // Tell macOS to stop streaming
+            connectionManager.send(WSPacket(action: .streamStop))
             // Clean up when workspace is dismissed
             connectionManager.onStreamFrameReceived = nil
             connectionManager.removeListener("devserver")
@@ -607,12 +609,13 @@ struct StreamPlayerView: View {
             payload["ip"] = ip
         }
 
-        connectionManager.send(WSPacket(action: .streamStart, payload: payload))
-
-        // H.264 frames arrive via authenticated WebSocket (both LAN and relay)
+        // Register frame callback BEFORE sending start request to avoid
+        // race condition where first keyframe (with SPS/PPS) arrives before callback is set
         connectionManager.onStreamFrameReceived = { [weak viewModel] data in
             viewModel?.receiveFrame(data)
         }
+
+        connectionManager.send(WSPacket(action: .streamStart, payload: payload))
     }
 
     private func saveScreenshot() {
