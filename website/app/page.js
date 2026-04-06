@@ -62,11 +62,14 @@ export default function Home() {
               </ScrollReveal>
               <ScrollReveal delay={0.3}>
                 <div className="flex flex-wrap gap-3 mt-10">
-                  <span
-                    className="inline-block bg-amber/10 text-taupe text-sm font-semibold px-8 py-3.5 rounded-xl cursor-not-allowed select-none border border-amber/10"
+                  <a
+                    href="https://testflight.apple.com/join/vDUvPDPe"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block bg-amber/10 text-amber text-sm font-semibold px-8 py-3.5 rounded-xl no-underline border border-amber/30 transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
                   >
-                    iPhone — Coming Soon
-                  </span>
+                    iPhone — TestFlight Beta
+                  </a>
                   <a
                     href="/download/macos"
                     className="inline-block border border-amber/30 text-amber text-sm font-semibold px-8 py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
@@ -74,7 +77,10 @@ export default function Home() {
                     Download for Mac
                   </a>
                 </div>
-                <p className="text-[11px] text-taupe/40 mt-5 tracking-wide">
+                <p className="text-[11px] text-taupe/50 mt-4 tracking-wide">
+                  Beta — vagas limitadas no TestFlight
+                </p>
+                <p className="text-[11px] text-taupe/40 mt-2 tracking-wide">
                   macOS 14+ &middot; Apple Silicon &amp; Intel
                 </p>
               </ScrollReveal>
@@ -233,11 +239,14 @@ export default function Home() {
               Download Tarsy and start shipping code from your pocket today.
             </p>
             <div className="flex flex-wrap justify-center gap-3 mt-8">
-              <span
-                className="inline-block bg-amber/10 text-taupe text-sm font-semibold px-8 py-3.5 rounded-xl cursor-not-allowed select-none border border-amber/10"
+              <a
+                href="https://testflight.apple.com/join/vDUvPDPe"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block bg-amber/10 text-amber text-sm font-semibold px-8 py-3.5 rounded-xl no-underline border border-amber/30 transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
               >
-                iPhone — Coming Soon
-              </span>
+                iPhone — TestFlight Beta
+              </a>
               <a
                 href="/download/macos"
                 className="inline-block border border-amber/30 text-amber text-sm font-semibold px-8 py-3.5 rounded-xl no-underline transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
@@ -245,6 +254,9 @@ export default function Home() {
                 Download for Mac
               </a>
             </div>
+            <p className="text-[11px] text-taupe/50 mt-4 tracking-wide">
+              Beta — vagas limitadas no TestFlight
+            </p>
           </ScrollReveal>
         </div>
       </section>
