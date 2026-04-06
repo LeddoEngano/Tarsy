@@ -103,7 +103,13 @@ class DaemonManager: ObservableObject {
         SecItemAdd(addQuery as CFDictionary, nil)
     }
 
+    private var isStarting = false
+
     func start() async {
+        guard !isStarting && !isRunning else { return }
+        isStarting = true
+        defer { isStarting = false }
+
         // 0. Init orchestrator
         orchestrator = WorkspaceOrchestrator(terminalManager: terminalManager)
 
@@ -152,6 +158,7 @@ class DaemonManager: ObservableObject {
 
         // 7b. Scan slash commands (user-level, off main thread)
         detectedSlashCommands = await Task.detached { self.scanSlashCommands(workspacePaths: []) }.value
+        log("Detected \(detectedSlashCommands.count) slash commands: \(detectedSlashCommands.map { $0["name"] ?? "?" })")
         await broadcastSlashCommands()
 
         // 8. UltraContext — watch Claude Code session files + sync via proxy
@@ -315,6 +322,11 @@ class DaemonManager: ObservableObject {
                     self?.connectedClients = max(0, (self?.connectedClients ?? 1) - 1)
                     if self?.lastActiveClientId == clientId {
                         self?.lastActiveClientId = "relay"
+                    }
+                    // Stop stream when last LAN client disconnects
+                    if (self?.connectedClients ?? 0) == 0 && self?.h264Encoder != nil {
+                        self?.log("Last LAN client disconnected — stopping stream")
+                        await self?.stopStreamCleanup()
                     }
                 }
             },
@@ -2237,22 +2249,23 @@ class DaemonManager: ObservableObject {
         log("Stream stopped")
     }
 
-    /// Starts monitoring client activity. If no packets are received for 30 seconds
+    /// Starts monitoring client activity. If no packets are received for the timeout
     /// while a stream is active, assumes the client disconnected and stops the stream.
-    /// Uses 30s to tolerate temporary network hiccups (iOS pings every 10s, so this
-    /// allows missing up to 2 consecutive pings before stopping).
+    /// Uses 120s to tolerate network hiccups, brief backgrounding, and reconnections.
+    /// The stream should primarily be stopped via explicit signals (streamStop, relayNoClients,
+    /// LAN disconnect) — this monitor is a last-resort safety net for truly dead connections.
     private func startClientActivityMonitor() {
         clientActivityTimer?.invalidate()
         lastClientActivity = Date()
-        clientActivityTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] timer in
+        clientActivityTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] timer in
             Task { @MainActor in
                 guard let self, self.h264Encoder != nil else {
                     timer.invalidate() // No encoder — stop polling
                     return
                 }
                 guard let lastActivity = self.lastClientActivity else { return }
-                if Date().timeIntervalSince(lastActivity) > 30 {
-                    self.log("No client activity for 30s — stopping stream")
+                if Date().timeIntervalSince(lastActivity) > 120 {
+                    self.log("No client activity for 120s — stopping stream")
                     await self.stopStreamCleanup()
                 }
             }

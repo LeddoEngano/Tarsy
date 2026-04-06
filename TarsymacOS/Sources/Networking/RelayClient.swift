@@ -49,6 +49,10 @@ actor RelayClient {
 
         guard let url = URL(string: baseURL) else { return }
 
+        // Bump generation so any in-flight receive callbacks from the old socket are ignored
+        reconnectGeneration += 1
+        let currentGen = reconnectGeneration
+
         // Cancel any existing connection and ping task
         stopPing()
         webSocket?.cancel(with: .goingAway, reason: nil)
@@ -69,7 +73,7 @@ actor RelayClient {
             ws.send(.string(str)) { _ in }
         }
 
-        receiveLoop()
+        receiveLoop(generation: currentGen)
     }
 
     func disconnect() {
@@ -154,15 +158,18 @@ actor RelayClient {
 
     // MARK: - Receive Loop
 
-    private func receiveLoop() {
-        guard let ws = webSocket else { return }
+    private func receiveLoop(generation: Int) {
+        guard let ws = webSocket, generation == reconnectGeneration else { return }
 
         ws.receive { [weak self] result in
-            Task { await self?.handleReceive(result) }
+            Task { await self?.handleReceive(result, generation: generation) }
         }
     }
 
-    private func handleReceive(_ result: Result<URLSessionWebSocketTask.Message, Error>) {
+    private func handleReceive(_ result: Result<URLSessionWebSocketTask.Message, Error>, generation: Int) {
+        // Ignore callbacks from superseded connections
+        guard generation == reconnectGeneration else { return }
+
         switch result {
         case .success(let message):
             if !isConnected {
@@ -182,7 +189,7 @@ actor RelayClient {
             @unknown default:
                 break
             }
-            receiveLoop() // Continue listening
+            receiveLoop(generation: generation) // Continue listening
 
         case .failure(let error):
             #if DEBUG
