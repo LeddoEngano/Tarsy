@@ -34,6 +34,28 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+// Shared email styles matching TarsyTheme
+const EMAIL_STYLES = `
+    body { margin: 0; padding: 0; background-color: #131316; font-family: 'Courier New', Courier, monospace; color: #e4e4e7; }
+    .container { max-width: 560px; margin: 0 auto; padding: 40px 24px; }
+    .logo-row { display: flex; align-items: center; gap: 10px; margin-bottom: 32px; }
+    .logo-text { font-size: 24px; font-weight: bold; color: #e4e4e7; }
+    h1 { font-size: 20px; color: #e4e4e7; margin-bottom: 16px; font-weight: 600; }
+    p { font-size: 14px; line-height: 1.7; color: #71717a; margin-bottom: 16px; }
+    .highlight { color: #e4e4e7; font-weight: 600; }
+    .card { background-color: #1c1c21; border: 1px solid #2a2a30; border-radius: 8px; padding: 20px 24px; margin: 24px 0; }
+    .card li { color: #71717a; margin-bottom: 8px; font-size: 13px; }
+    .card li span { color: #6bc77b; }
+    .badge { display: inline-block; color: #e4e4e7; padding: 4px 12px; border-radius: 4px; font-size: 11px; font-weight: bold; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .meta { font-size: 11px; color: #52525b; margin-bottom: 4px; }
+    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #2a2a30; font-size: 11px; color: #52525b; }
+`;
+
+const LOGO_HTML = `<div class="logo-row">
+      <img src="https://tarsy.dev/eyes.png" alt="tarsy" width="28" height="28" style="display: block;" />
+      <span class="logo-text">tarsy</span>
+    </div>`;
+
 function welcomeEmail(displayName: string): EmailContent {
   const name = escapeHtml(displayName || "there");
   return {
@@ -44,28 +66,16 @@ function welcomeEmail(displayName: string): EmailContent {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { margin: 0; padding: 0; background-color: #1a1a1a; font-family: 'Courier New', monospace; color: #e8e0d4; }
-    .container { max-width: 560px; margin: 0 auto; padding: 40px 24px; }
-    .logo { font-size: 28px; font-weight: bold; color: #d4a574; margin-bottom: 32px; }
-    h1 { font-size: 22px; color: #e8e0d4; margin-bottom: 16px; }
-    p { font-size: 15px; line-height: 1.6; color: #a89e91; margin-bottom: 16px; }
-    .highlight { color: #d4a574; }
-    .cta { display: inline-block; background-color: #c4704b; color: #e8e0d4; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; margin: 24px 0; font-family: 'Courier New', monospace; }
-    .features { background-color: #2a2a2a; border-radius: 8px; padding: 20px 24px; margin: 24px 0; }
-    .features li { color: #a89e91; margin-bottom: 8px; font-size: 14px; }
-    .features li span { color: #7a8b6f; }
-    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #3a3a3a; font-size: 12px; color: #6b6358; }
-  </style>
+  <style>${EMAIL_STYLES}</style>
 </head>
 <body>
   <div class="container">
-    <div class="logo">tarsy</div>
+    ${LOGO_HTML}
     <h1>Hey ${name}, welcome aboard.</h1>
     <p>You now have a remote command center for your Mac — right from your iPhone.</p>
     <p>Tarsy lets you run <span class="highlight">Claude Code</span>, <span class="highlight">Gemini CLI</span>, <span class="highlight">Codex</span>, and <span class="highlight">Aider</span> remotely, so your AI agents keep working even when you step away.</p>
 
-    <div class="features">
+    <div class="card">
       <ul style="list-style: none; padding: 0; margin: 0;">
         <li><span>→</span> Stream your Mac screen to your phone</li>
         <li><span>→</span> Chat with AI agents in real time</li>
@@ -95,21 +105,12 @@ function subscriptionActiveEmail(displayName: string): EmailContent {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { margin: 0; padding: 0; background-color: #1a1a1a; font-family: 'Courier New', monospace; color: #e8e0d4; }
-    .container { max-width: 560px; margin: 0 auto; padding: 40px 24px; }
-    .logo { font-size: 28px; font-weight: bold; color: #d4a574; margin-bottom: 32px; }
-    h1 { font-size: 22px; color: #e8e0d4; margin-bottom: 16px; }
-    p { font-size: 15px; line-height: 1.6; color: #a89e91; margin-bottom: 16px; }
-    .highlight { color: #d4a574; }
-    .badge { display: inline-block; background-color: #7a8b6f; color: #e8e0d4; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; margin-bottom: 16px; }
-    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #3a3a3a; font-size: 12px; color: #6b6358; }
-  </style>
+  <style>${EMAIL_STYLES}</style>
 </head>
 <body>
   <div class="container">
-    <div class="logo">tarsy</div>
-    <div class="badge">PRO</div>
+    ${LOGO_HTML}
+    <div class="badge" style="background-color: #6bc77b; color: #131316;">PRO</div>
     <h1>Welcome to Pro, ${name}.</h1>
     <p>Your subscription is now active. You have access to <span class="highlight">unlimited workspaces</span> and all Pro features.</p>
     <p>Your plan renews monthly. You can manage your subscription anytime from the app settings.</p>
@@ -133,19 +134,11 @@ function subscriptionCancelledEmail(displayName: string, endDate?: string): Emai
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { margin: 0; padding: 0; background-color: #1a1a1a; font-family: 'Courier New', monospace; color: #e8e0d4; }
-    .container { max-width: 560px; margin: 0 auto; padding: 40px 24px; }
-    .logo { font-size: 28px; font-weight: bold; color: #d4a574; margin-bottom: 32px; }
-    h1 { font-size: 22px; color: #e8e0d4; margin-bottom: 16px; }
-    p { font-size: 15px; line-height: 1.6; color: #a89e91; margin-bottom: 16px; }
-    .highlight { color: #d4a574; }
-    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #3a3a3a; font-size: 12px; color: #6b6358; }
-  </style>
+  <style>${EMAIL_STYLES}</style>
 </head>
 <body>
   <div class="container">
-    <div class="logo">tarsy</div>
+    ${LOGO_HTML}
     <h1>We're sorry to see you go, ${name}.</h1>
     <p>Your Pro subscription has been cancelled. You'll still have access to Pro features until <span class="highlight">${dateStr}</span>.</p>
     <p>After that, your account will revert to the free plan (1 workspace). Your data and workspaces won't be deleted — you can resubscribe anytime to unlock them again.</p>
@@ -168,19 +161,11 @@ function subscriptionRenewedEmail(displayName: string): EmailContent {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { margin: 0; padding: 0; background-color: #1a1a1a; font-family: 'Courier New', monospace; color: #e8e0d4; }
-    .container { max-width: 560px; margin: 0 auto; padding: 40px 24px; }
-    .logo { font-size: 28px; font-weight: bold; color: #d4a574; margin-bottom: 32px; }
-    h1 { font-size: 22px; color: #e8e0d4; margin-bottom: 16px; }
-    p { font-size: 15px; line-height: 1.6; color: #a89e91; margin-bottom: 16px; }
-    .highlight { color: #d4a574; }
-    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #3a3a3a; font-size: 12px; color: #6b6358; }
-  </style>
+  <style>${EMAIL_STYLES}</style>
 </head>
 <body>
   <div class="container">
-    <div class="logo">tarsy</div>
+    ${LOGO_HTML}
     <h1>Renewed! You're all set, ${name}.</h1>
     <p>Your <span class="highlight">Tarsy Pro</span> subscription has been renewed for another month. Unlimited workspaces and all Pro features remain active.</p>
     <div class="footer">
@@ -208,12 +193,12 @@ function feedbackEmail(
     general: "General Feedback",
   };
   const typeColors: Record<string, string> = {
-    bug: "#c4704b",
-    feature: "#7a8b6f",
-    general: "#d4a574",
+    bug: "#e5716a",
+    feature: "#6bc77b",
+    general: "#71717a",
   };
   const label = escapeHtml(typeLabels[feedbackType] || feedbackType);
-  const color = typeColors[feedbackType] || "#d4a574";
+  const color = typeColors[feedbackType] || "#71717a";
   const safeName = escapeHtml(displayName || "Unknown");
   const safeTitle = escapeHtml(title);
   const safeDesc = escapeHtml(description).replace(/\n/g, "<br>");
@@ -234,29 +219,19 @@ function feedbackEmail(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    body { margin: 0; padding: 0; background-color: #1a1a1a; font-family: 'Courier New', monospace; color: #e8e0d4; }
-    .container { max-width: 560px; margin: 0 auto; padding: 40px 24px; }
-    .logo { font-size: 28px; font-weight: bold; color: #d4a574; margin-bottom: 32px; }
-    h1 { font-size: 22px; color: #e8e0d4; margin-bottom: 16px; }
-    p { font-size: 15px; line-height: 1.6; color: #a89e91; margin-bottom: 16px; }
-    .badge { display: inline-block; background-color: ${color}; color: #e8e0d4; padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; margin-bottom: 16px; }
-    .content-box { background-color: #2a2a2a; border-radius: 8px; padding: 20px 24px; margin: 24px 0; }
-    .meta { font-size: 12px; color: #6b6358; margin-bottom: 4px; }
-    .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #3a3a3a; font-size: 12px; color: #6b6358; }
-  </style>
+  <style>${EMAIL_STYLES}</style>
 </head>
 <body>
   <div class="container">
-    <div class="logo">tarsy</div>
-    <div class="badge">${label}</div>
+    ${LOGO_HTML}
+    <div class="badge" style="background-color: ${color}; color: #131316;">${label}</div>
     <h1>${safeTitle}</h1>
 
-    <div class="content-box">
-      <p style="margin: 0;">${safeDesc}</p>
+    <div class="card">
+      <p style="margin: 0; color: #e4e4e7;">${safeDesc}</p>
     </div>
 
-    ${imageBase64 ? `<div style="margin: 16px 0;"><img src="cid:feedback-screenshot" style="max-width: 100%; border-radius: 8px; border: 1px solid #3a3a3a;" alt="Screenshot"></div>` : ""}
+    ${imageBase64 ? `<div style="margin: 16px 0;"><img src="cid:feedback-screenshot" style="max-width: 100%; border-radius: 8px; border: 1px solid #2a2a30;" alt="Screenshot"></div>` : ""}
 
     <div class="meta">From: ${safeName} (${safeEmail})</div>
     <div class="meta">Platform: ${safePlatform} | App version: ${safeVersion}</div>
@@ -355,10 +330,11 @@ serve(async (req) => {
       return new Response(JSON.stringify(result), { status: result.success ? 200 : 500 });
     }
 
-    // Direct invocation (billing emails) — validate user JWT
+    // Direct invocation (billing/feedback emails) — validate user JWT
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     const { data: { user }, error: authError } = await supabase.auth.getUser(token);
     if (authError || !user) {
+      console.error(`Auth failed: ${authError?.message || "no user"}, token prefix: ${token.substring(0, 20)}...`);
       return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
     }
 
