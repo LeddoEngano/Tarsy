@@ -166,7 +166,7 @@ class ScreenCaptureService: NSObject, ObservableObject {
         config.height = Int(contentHeight * scale)
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = 3
-        config.showsCursor = true
+        config.showsCursor = !cropTitleBar
 
         if cropTitleBar {
             config.sourceRect = CGRect(
