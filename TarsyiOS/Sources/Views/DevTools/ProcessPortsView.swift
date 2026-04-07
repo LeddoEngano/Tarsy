@@ -13,6 +13,7 @@ struct ProcessPortsView: View {
     @State private var sortAscending = false
     @State private var isLoading = true
     @State private var killTarget: KillTarget? = nil
+    @State private var workspaceOnly = false
 
     private let pollTimer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
 
@@ -70,6 +71,35 @@ struct ProcessPortsView: View {
         }
     }
 
+    // MARK: - Tarsy Process Detection
+
+    /// Known process names associated with Tarsy workspaces
+    private static let tarsyProcessNames: Set<String> = [
+        "claude", "claude-code", "node", "npm", "npx", "next-server",
+        "vite", "tsx", "ts-node", "bun", "deno",
+        "gemini", "codex", "aider", "python3", "python",
+        "swift", "xcodebuild", "swiftc",
+        "cargo", "rustc",
+        "go", "air",
+        "ruby", "rails", "puma",
+        "java", "gradle", "mvn",
+        "php", "artisan", "composer",
+    ]
+
+    private func isTarsyProcess(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        return Self.tarsyProcessNames.contains(lower)
+            || lower.contains("claude")
+            || lower.contains("next-server")
+            || lower.contains("webpack")
+            || lower.contains("vite")
+            || lower.contains("expo")
+    }
+
+    private func isTarsyPort(_ port: PortItem) -> Bool {
+        return isTarsyProcess(port.processName) || port.isDevPort
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // Tab picker
@@ -93,6 +123,24 @@ struct ProcessPortsView: View {
             .cornerRadius(8)
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
+
+            // Workspace filter toggle
+            HStack(spacing: 6) {
+                Toggle("", isOn: $workspaceOnly)
+                    .labelsHidden()
+                    .tint(TarsyTheme.accentMoss)
+                    .scaleEffect(0.8)
+                Text("workspace only")
+                    .font(TarsyTheme.font(size: 11))
+                    .foregroundColor(workspaceOnly ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 4)
+            .onChange(of: workspaceOnly) { _, _ in
+                isLoading = true
+                requestData()
+            }
 
             if selectedTab == .processes {
                 processesContent
@@ -178,6 +226,7 @@ struct ProcessPortsView: View {
             HStack(spacing: 0) {
                 Text("PROCESS")
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 24) // account for icon column
                 Text("CPU")
                     .frame(width: 55, alignment: .trailing)
                 Text("MEM")
@@ -209,24 +258,40 @@ struct ProcessPortsView: View {
     }
 
     private func processRow(_ proc: ProcessItem) -> some View {
-        HStack(spacing: 0) {
+        let isTarsy = isTarsyProcess(proc.name)
+        let accentColor = isTarsy ? Color.white : TarsyTheme.textPrimary
+
+        return HStack(spacing: 0) {
+            // Tarsy indicator
+            if isTarsy {
+                TarsyEyes(size: 18, animated: false)
+                    .frame(width: 20, height: 20)
+                    .accessibilityLabel("Workspace process")
+            } else {
+                Color.clear.frame(width: 20, height: 20)
+            }
+
             Text(proc.name)
                 .lineLimit(1)
+                .foregroundColor(accentColor)
+                .fontWeight(isTarsy ? .semibold : .regular)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 4)
+
             Text(String(format: "%.1f%%", proc.cpu))
                 .frame(width: 55, alignment: .trailing)
                 .foregroundColor(proc.cpu > 50 ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
             Text(formatMB(proc.memoryMB))
                 .frame(width: 60, alignment: .trailing)
+                .foregroundColor(TarsyTheme.textSecondary)
             Text(proc.pid)
                 .frame(width: 55, alignment: .trailing)
                 .foregroundColor(TarsyTheme.textSecondary)
         }
         .font(TarsyTheme.font(size: 12))
-        .foregroundColor(TarsyTheme.textPrimary)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .background(TarsyTheme.backgroundPrimary)
+        .background(isTarsy ? TarsyTheme.backgroundSecondary : TarsyTheme.backgroundPrimary)
         .contextMenu {
             Button(role: .destructive) {
                 killTarget = .process(proc)
@@ -250,6 +315,7 @@ struct ProcessPortsView: View {
             HStack(spacing: 0) {
                 Text("PORT")
                     .frame(width: 70, alignment: .leading)
+                    .padding(.leading, 24) // account for icon column
                 Text("PROCESS")
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Text("PID")
@@ -286,10 +352,23 @@ struct ProcessPortsView: View {
     }
 
     private func portRow(_ port: PortItem) -> some View {
-        HStack(spacing: 0) {
+        let isTarsy = isTarsyPort(port)
+        let accentColor = isTarsy ? Color.white : TarsyTheme.textPrimary
+
+        return HStack(spacing: 0) {
+            // Tarsy indicator
+            if isTarsy {
+                TarsyEyes(size: 18, animated: false)
+                    .frame(width: 20, height: 20)
+                    .accessibilityLabel("Workspace port")
+            } else {
+                Color.clear.frame(width: 20, height: 20)
+            }
+
             HStack(spacing: 4) {
                 Text(":\(port.port)")
-                    .foregroundColor(TarsyTheme.textPrimary)
+                    .foregroundColor(accentColor)
+                    .fontWeight(isTarsy ? .semibold : .regular)
                 if port.isDevPort {
                     Circle()
                         .fill(TarsyTheme.accentMoss)
@@ -301,7 +380,8 @@ struct ProcessPortsView: View {
             Text(port.processName)
                 .lineLimit(1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .foregroundColor(TarsyTheme.textPrimary)
+                .foregroundColor(accentColor)
+                .fontWeight(isTarsy ? .semibold : .regular)
 
             Text(port.pid)
                 .frame(width: 60, alignment: .trailing)
@@ -319,6 +399,7 @@ struct ProcessPortsView: View {
         .font(TarsyTheme.font(size: 12))
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        .background(isTarsy ? TarsyTheme.backgroundSecondary : TarsyTheme.backgroundPrimary)
         .contextMenu {
             Button(role: .destructive) {
                 killTarget = .port(port)
@@ -377,8 +458,9 @@ struct ProcessPortsView: View {
     }
 
     private func requestData() {
-        connectionManager.send(WSPacket(action: .processList))
-        connectionManager.send(WSPacket(action: .portsList))
+        let payload: [String: String]? = workspaceOnly ? ["path": workspace.localPath] : nil
+        connectionManager.send(WSPacket(action: .processList, payload: payload))
+        connectionManager.send(WSPacket(action: .portsList, payload: payload))
     }
 
     private func killProcess(pid: String) {

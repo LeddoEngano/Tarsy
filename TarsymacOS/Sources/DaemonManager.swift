@@ -4138,7 +4138,57 @@ class DaemonManager: ObservableObject {
         )
     }
 
+    /// Returns PIDs that have open files under the given directory path.
+    /// Uses non-recursive `+d` to avoid slow scans on large trees (e.g. node_modules).
+    private func pidsForWorkspace(path: String) async -> Set<String> {
+        // Race lsof against a 5-second timeout to avoid blocking on large directories
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+                task.arguments = ["-t", "+d", (path as NSString).expandingTildeInPath]
+                let pipe = Pipe()
+                task.standardOutput = pipe
+                task.standardError = Pipe()
+                guard (try? task.run()) != nil else {
+                    continuation.resume(returning: [])
+                    return
+                }
+
+                // Timeout: kill lsof if it takes too long
+                let timer = DispatchSource.makeTimerSource(queue: .global())
+                timer.schedule(deadline: .now() + 5)
+                timer.setEventHandler {
+                    if task.isRunning { task.terminate() }
+                }
+                timer.resume()
+
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                task.waitUntilExit()
+                timer.cancel()
+
+                guard task.terminationStatus == 0,
+                      let output = String(data: data, encoding: .utf8) else {
+                    continuation.resume(returning: [])
+                    return
+                }
+                let pids = Set(output.components(separatedBy: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty })
+                continuation.resume(returning: pids)
+            }
+        }
+    }
+
     private func handleProcessList(clientId: String, packet: WSPacket) async {
+        let workspacePath = packet.payload?["path"]
+        let workspacePids: Set<String>?
+        if let wp = workspacePath {
+            workspacePids = await pidsForWorkspace(path: wp)
+        } else {
+            workspacePids = nil
+        }
+
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/bin/ps")
         task.arguments = ["aux"]
@@ -4165,8 +4215,11 @@ class DaemonManager: ObservableObject {
                 let cols = line.split(separator: " ", maxSplits: 10, omittingEmptySubsequences: true)
                 guard cols.count >= 11 else { continue }
                 let pid = String(cols[1])
+
+                // If workspace filter is active, skip PIDs not in workspace
+                if let allowedPids = workspacePids, !allowedPids.contains(pid) { continue }
+
                 let cpu = String(cols[2])
-                let mem = String(cols[3])
                 // VSZ is cols[4] in KB, RSS is cols[5] in KB — use RSS for actual memory
                 let rssKB = Double(String(cols[5])) ?? 0
                 let memMB = String(format: "%.1f", rssKB / 1024.0)
@@ -4234,6 +4287,14 @@ class DaemonManager: ObservableObject {
     }
 
     private func handlePortsList(clientId: String, packet: WSPacket) async {
+        let workspacePath = packet.payload?["path"]
+        let workspacePids: Set<String>?
+        if let wp = workspacePath {
+            workspacePids = await pidsForWorkspace(path: wp)
+        } else {
+            workspacePids = nil
+        }
+
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
         task.arguments = ["-i", "-P", "-n", "-sTCP:LISTEN"]
@@ -4262,6 +4323,10 @@ class DaemonManager: ObservableObject {
                 guard cols.count >= 9 else { continue }
                 let name = String(cols[0])
                 let pid = String(cols[1])
+
+                // If workspace filter is active, skip PIDs not in workspace
+                if let allowedPids = workspacePids, !allowedPids.contains(pid) { continue }
+
                 let address = String(cols[8])
                 // Parse port from address like "*:3000" or "127.0.0.1:8080"
                 if let portStr = address.split(separator: ":").last {
