@@ -19,6 +19,10 @@ actor TerminalSessionManager {
         sessions[sessionId]?.sendInput(input)
     }
 
+    func interruptSession(_ sessionId: String) {
+        sessions[sessionId]?.interrupt()
+    }
+
     func closeSession(_ sessionId: String) {
         sessions[sessionId]?.terminate()
         sessions.removeValue(forKey: sessionId)
@@ -168,6 +172,10 @@ actor TerminalSessionManager {
         await engineSessions[sessionId]?.respondToQuestion(answer)
     }
 
+    func interruptEngineSession(_ sessionId: String) async {
+        await engineSessions[sessionId]?.interrupt()
+    }
+
     func closeEngineSession(_ sessionId: String) async {
         await engineSessions[sessionId]?.terminate()
         engineSessions.removeValue(forKey: sessionId)
@@ -294,6 +302,10 @@ class TerminalSession {
     func sendInput(_ input: String) {
         guard let data = "\(input)\n".data(using: .utf8) else { return }
         inputPipe.fileHandleForWriting.write(data)
+    }
+
+    func interrupt() {
+        process.interrupt() // sends SIGINT
     }
 
     func terminate() {

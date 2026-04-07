@@ -251,6 +251,10 @@ actor CodexSession: AIEngine {
         log("handleApprovalAnswer: failed to parse structured response, falling back")
     }
 
+    func interrupt() {
+        process?.interrupt()
+    }
+
     func terminate() {
         log("terminate: isRunning=\(isRunning) activeTurnId=\(activeTurnId ?? "nil")")
         guard isRunning else { return }

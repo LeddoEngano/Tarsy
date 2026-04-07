@@ -63,6 +63,10 @@ public enum WSAction: String, Codable, Sendable {
     case terminalList = "terminal:list"
     case terminalComplete = "terminal:complete"
     case terminalCompleteResult = "terminal:complete_result"
+    case terminalInterrupt = "terminal:interrupt"
+
+    // Engine interrupt (Ctrl+C for AI agents)
+    case engineInterrupt = "engine:interrupt"
 
     // Claude Code
     case claudeCreate = "claude:create"

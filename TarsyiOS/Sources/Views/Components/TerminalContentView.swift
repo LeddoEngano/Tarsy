@@ -132,6 +132,7 @@ struct TerminalContentView: View {
     var onSendCommand: (String) -> Void
     var onRequestCompletion: (String) -> Void
     var onClearCompletions: () -> Void
+    var onInterrupt: () -> Void
     var completions: [TerminalCompletion]
     var isCompletionLoading: Bool
 
@@ -210,9 +211,14 @@ struct TerminalContentView: View {
     }
 
     var body: some View {
+        GeometryReader { geo in
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    // Push content to bottom when there's little output
+                    Spacer(minLength: 0)
+                        .frame(minHeight: geo.size.height * 0.6)
+
                     // Path header
                     Text(workspace.localPath)
                         .font(.system(size: 11, design: .monospaced))
@@ -259,26 +265,40 @@ struct TerminalContentView: View {
 
                         Spacer(minLength: 4)
 
-                        // History arrows
-                        HStack(spacing: 2) {
-                            Button(action: historyUp) {
-                                Image(systemName: "chevron.up")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(commandHistory.isEmpty ? TarsyTheme.textSecondary.opacity(0.2) : TarsyTheme.textSecondary)
-                                    .frame(width: 26, height: 22)
+                        // Ctrl+C + History arrows
+                        HStack(spacing: 4) {
+                            Button(action: {
+                                Haptics.medium()
+                                onInterrupt()
+                            }) {
+                                Text("⌃C")
+                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(TarsyTheme.textSecondary)
+                                    .frame(width: 30, height: 22)
+                                    .background(TarsyTheme.backgroundTertiary.opacity(0.6))
+                                    .cornerRadius(5)
                             }
-                            .disabled(commandHistory.isEmpty)
 
-                            Button(action: historyDown) {
-                                Image(systemName: "chevron.down")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(historyIndex < 0 ? TarsyTheme.textSecondary.opacity(0.2) : TarsyTheme.textSecondary)
-                                    .frame(width: 26, height: 22)
+                            HStack(spacing: 2) {
+                                Button(action: historyUp) {
+                                    Image(systemName: "chevron.up")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(commandHistory.isEmpty ? TarsyTheme.textSecondary.opacity(0.2) : TarsyTheme.textSecondary)
+                                        .frame(width: 26, height: 22)
+                                }
+                                .disabled(commandHistory.isEmpty)
+
+                                Button(action: historyDown) {
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(historyIndex < 0 ? TarsyTheme.textSecondary.opacity(0.2) : TarsyTheme.textSecondary)
+                                        .frame(width: 26, height: 22)
+                                }
+                                .disabled(historyIndex < 0)
                             }
-                            .disabled(historyIndex < 0)
+                            .background(TarsyTheme.backgroundTertiary.opacity(0.6))
+                            .cornerRadius(5)
                         }
-                        .background(TarsyTheme.backgroundTertiary.opacity(0.6))
-                        .cornerRadius(5)
                     }
                     .padding(.horizontal, 12)
                     .padding(.top, 4)
@@ -291,9 +311,13 @@ struct TerminalContentView: View {
                 }
             }
             .background(Color(hex: "0a0a0a"))
+            .scrollDismissesKeyboard(.interactively)
             .contentShape(Rectangle())
             .onTapGesture {
-                isKeyboardActive = true
+                // Only activate if keyboard isn't already showing
+                if !isKeyboardActive {
+                    isKeyboardActive = true
+                }
             }
             .onChange(of: chatService.updateCounter) { _, _ in
                 withAnimation(.easeOut(duration: 0.1)) {
@@ -327,6 +351,7 @@ struct TerminalContentView: View {
                 debounceTask?.cancel()
             }
         }
+        } // GeometryReader
     }
 
     // MARK: - Auto-completion Debounce

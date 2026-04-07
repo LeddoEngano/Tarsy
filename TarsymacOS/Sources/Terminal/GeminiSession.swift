@@ -200,6 +200,10 @@ actor GeminiSession: AIEngine {
         }
     }
 
+    func interrupt() {
+        process?.interrupt()
+    }
+
     func terminate() {
         log("terminate: isRunning=\(isRunning)")
         guard isRunning else { return }

@@ -222,6 +222,10 @@ actor ClaudeCodeSession: AIEngine {
         }
     }
 
+    func interrupt() {
+        process?.interrupt()
+    }
+
     func terminate() {
         isRunning = false
         lineBuffer = ""

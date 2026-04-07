@@ -14,5 +14,13 @@ protocol AIEngine: Actor {
     func start() throws
     func sendMessage(_ message: String)
     func respondToQuestion(_ answer: String)
+    func interrupt()
     func terminate()
+}
+
+extension AIEngine {
+    // Default interrupt sends SIGINT-equivalent; engines can override
+    func interrupt() {
+        // no-op by default — concrete sessions override this
+    }
 }

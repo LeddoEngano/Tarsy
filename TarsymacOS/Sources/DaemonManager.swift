@@ -596,6 +596,14 @@ class DaemonManager: ObservableObject {
             await handleTerminalClose(clientId: clientId, packet: packet)
         case .terminalComplete:
             await handleTerminalComplete(clientId: clientId, packet: packet)
+        case .terminalInterrupt:
+            if let sessionId = packet.payload?["sessionId"] {
+                await terminalManager.interruptSession(sessionId)
+            }
+        case .engineInterrupt:
+            if let sessionId = packet.payload?["sessionId"] {
+                await terminalManager.interruptEngineSession(sessionId)
+            }
         case .claudeCreate:
             await handleClaudeCreate(clientId: clientId, packet: packet)
         case .claudeUserResponse:

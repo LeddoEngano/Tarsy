@@ -814,6 +814,9 @@ struct WorkspaceView: View {
                                     terminalCompletions = []
                                 }
                             },
+                            onInterrupt: {
+                                interruptTerminal()
+                            },
                             completions: terminalCompletions,
                             isCompletionLoading: false
                         )
@@ -928,6 +931,9 @@ struct WorkspaceView: View {
                                 withAnimation(.easeOut(duration: 0.1)) {
                                     terminalCompletions = []
                                 }
+                            },
+                            onInterrupt: {
+                                interruptTerminal()
                             },
                             completions: terminalCompletions,
                             isCompletionLoading: false
@@ -1149,6 +1155,23 @@ struct WorkspaceView: View {
                                 .frame(width: 36, height: 36)
                         }
                         .accessibilityLabel("Add attachment")
+
+                        // Ctrl+C interrupt button — visible when agent is working
+                        if isAgentThinking || agentActivity != nil {
+                            Button(action: {
+                                Haptics.medium()
+                                interruptEngine()
+                            }) {
+                                Text("⌃C")
+                                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                    .foregroundColor(TarsyTheme.accentTerracotta)
+                                    .frame(width: 36, height: 36)
+                                    .background(TarsyTheme.accentTerracotta.opacity(0.12))
+                                    .cornerRadius(8)
+                            }
+                            .transition(.scale(scale: 0.5).combined(with: .opacity))
+                            .accessibilityLabel("Interrupt agent")
+                        }
                     }
 
                     Spacer()
@@ -1595,6 +1618,22 @@ struct WorkspaceView: View {
         connectionManager.send(WSPacket(
             action: .terminalComplete,
             payload: ["partial": partial, "path": workspace.localPath]
+        ))
+    }
+
+    private func interruptTerminal() {
+        guard let sessionId = currentTab.sessionId else { return }
+        connectionManager.send(WSPacket(
+            action: .terminalInterrupt,
+            payload: ["sessionId": sessionId]
+        ))
+    }
+
+    private func interruptEngine() {
+        guard let sessionId = currentTab.sessionId else { return }
+        connectionManager.send(WSPacket(
+            action: .engineInterrupt,
+            payload: ["sessionId": sessionId]
         ))
     }
 
