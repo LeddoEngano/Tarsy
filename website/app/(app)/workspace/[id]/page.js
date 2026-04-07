@@ -8,6 +8,7 @@ import { StreamPlayer } from "../../../lib/tarsy/StreamPlayer";
 import { useRemoteInput } from "../../../lib/tarsy/RemoteInput";
 import { GitPanel } from "../../../lib/tarsy/GitPanel";
 import { FileExplorer } from "../../../lib/tarsy/FileExplorer";
+import { useVoiceInput } from "../../../lib/tarsy/VoiceInput";
 
 export default function WorkspacePage() {
   const { id } = useParams();
@@ -40,6 +41,12 @@ export default function WorkspacePage() {
 
   // Remote input for stream
   const { containerProps, inputRef, handleInput, handleKeyDown } = useRemoteInput(send, viewMode === "stream");
+
+  // Voice input
+  const voice = useVoiceInput();
+
+  // Sudo password dialog
+  const [sudoRequest, setSudoRequest] = useState(null);
 
   // Load workspace info
   useEffect(() => {
@@ -76,6 +83,17 @@ export default function WorkspacePage() {
       }
     });
     return () => removeListener(listenerId);
+  }, [id, addListener, removeListener]);
+
+  // Listen for sudo requests
+  useEffect(() => {
+    const lid = `workspace-${id}-sudo`;
+    addListener(lid, (packet) => {
+      if (packet.action === "sudo:request") {
+        setSudoRequest({ id: packet.id, command: packet.payload?.command });
+      }
+    });
+    return () => removeListener(lid);
   }, [id, addListener, removeListener]);
 
   // Listen for engine packets
@@ -350,8 +368,32 @@ export default function WorkspacePage() {
             <div ref={messagesEndRef} />
           </div>
 
+          {/* Voice transcription overlay */}
+          {voice.isRecording && (
+            <div className="ws-voice-overlay">
+              <p className="ws-voice-text">{voice.transcription || "Listening..."}</p>
+            </div>
+          )}
+
           {/* Input */}
           <div className="ws-input-bar">
+            {voice.supported && (
+              <button
+                className={`ws-mic ${voice.isRecording ? "ws-mic--active" : ""}`}
+                onClick={() => {
+                  if (voice.isRecording) {
+                    voice.stopRecording();
+                    if (voice.transcription) {
+                      setInput((prev) => prev ? `${prev} ${voice.transcription}` : voice.transcription);
+                    }
+                  } else {
+                    voice.startRecording();
+                  }
+                }}
+              >
+                {voice.isRecording ? "Stop" : "Mic"}
+              </button>
+            )}
             <textarea
               className="ws-input"
               value={input}
@@ -371,6 +413,56 @@ export default function WorkspacePage() {
           </div>
         </>
       )}
+
+      {/* Sudo Password Dialog */}
+      {sudoRequest && (
+        <SudoDialog
+          command={sudoRequest.command}
+          onSubmit={(password) => {
+            send("sudo:response", { password, requestId: sudoRequest.id });
+            setSudoRequest(null);
+          }}
+          onCancel={() => setSudoRequest(null)}
+        />
+      )}
     </main>
+  );
+}
+
+function SudoDialog({ command, onSubmit, onCancel }) {
+  const [password, setPassword] = useState("");
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2 className="modal-title">Password Required</h2>
+          <button className="modal-close" onClick={onCancel}>Cancel</button>
+        </div>
+        <div className="modal-body">
+          {command && <p className="modal-desc">Command: {command}</p>}
+          <label className="auth-label">
+            Password
+            <input
+              type="password"
+              className="auth-input"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  onSubmit(password);
+                }
+              }}
+              autoFocus
+              autoComplete="current-password"
+            />
+          </label>
+          <button className="auth-submit" onClick={() => onSubmit(password)} disabled={!password}>
+            Submit
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
