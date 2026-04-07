@@ -18,6 +18,7 @@ private enum Theme {
 /// Handles token generation, QR rendering, countdown, auto-refresh, and paired state.
 struct PairingQRCodeView: View {
     let machineId: UUID?
+    var onPaired: (() -> Void)?
     @StateObject private var pairingService = PairingService()
 
     @State private var qrPayloadURL: String?
@@ -28,6 +29,8 @@ struct PairingQRCodeView: View {
     @State private var isGeneratingQR = false
     @State private var isPaired = false
     @State private var pairedUserName: String?
+    @State private var isCheckingPair = false
+    @State private var pairCheckTick = 0
 
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -39,32 +42,41 @@ struct PairingQRCodeView: View {
                 qrView
             }
         }
-        .task {
+        .task(id: machineId) {
+            // Retriggers when machineId changes (e.g. nil → UUID after daemon starts)
             await generateQR()
         }
         .onReceive(timer) { _ in
             updateCountdown()
+            checkIfPaired()
         }
     }
 
     private var pairedView: some View {
-        HStack(spacing: 8) {
+        VStack(spacing: 12) {
             Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 40))
                 .foregroundColor(Theme.moss)
-            Text("paired with \(pairedUserName ?? "iPhone")")
-                .font(TarsyTheme.font(size: 13, weight: .medium))
+
+            Text("paired successfully!")
+                .font(TarsyTheme.font(size: 14, weight: .medium))
                 .foregroundColor(Theme.textPrimary)
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 20)
         .frame(maxWidth: .infinity)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Theme.moss.opacity(0.1)))
+        .task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            onPaired?()
+        }
     }
 
     private var qrView: some View {
         VStack(spacing: 12) {
-            Text("pair your iphone")
-                .font(TarsyTheme.font(size: 14, weight: .semibold))
+            Text("scan this code with Tarsy\non your iPhone")
+                .font(TarsyTheme.font(size: 13, weight: .semibold))
                 .foregroundColor(Theme.textPrimary)
+                .multilineTextAlignment(.center)
+                .lineSpacing(3)
                 .padding(.bottom, 4)
 
             if let image = qrImage {
@@ -72,12 +84,12 @@ struct PairingQRCodeView: View {
                     .interpolation(.none)
                     .resizable()
                     .scaledToFit()
-                    .frame(width: 160, height: 160)
+                    .frame(width: 140, height: 140)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .padding(.bottom, 4)
             } else {
                 ProgressView()
-                    .frame(width: 160, height: 160)
+                    .frame(width: 140, height: 140)
                     .padding(.bottom, 4)
             }
 
@@ -90,24 +102,7 @@ struct PairingQRCodeView: View {
                     .padding(.bottom, 2)
             }
 
-            Text("scan this code with Tarsy on your\niPhone to connect this mac")
-                .font(TarsyTheme.font(size: 11))
-                .foregroundColor(Theme.textMuted)
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-                .padding(.bottom, 4)
-
-            // Countdown or refresh
-            if qrTimeRemaining > 0 {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(qrTimeRemaining > 60 ? Theme.moss : Theme.terracotta)
-                        .frame(width: 6, height: 6)
-                    Text(formatCountdown(qrTimeRemaining))
-                        .font(TarsyTheme.font(size: 11))
-                        .foregroundColor(Theme.textMuted)
-                }
-            } else if qrPayloadURL != nil {
+            if qrTimeRemaining <= 0, qrPayloadURL != nil {
                 Button(action: { Task { await generateQR() } }) {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.clockwise")
@@ -152,11 +147,34 @@ struct PairingQRCodeView: View {
         let remaining = expiry.timeIntervalSinceNow
         if remaining <= 0 {
             qrTimeRemaining = 0
-            if !isGeneratingQR {
-                Task { await generateQR() }
-            }
         } else {
             qrTimeRemaining = remaining
+        }
+    }
+
+    private func checkIfPaired() {
+        // Poll every 3 seconds (not every 1s tick)
+        pairCheckTick += 1
+        guard pairCheckTick % 3 == 0,
+              !isPaired, !isCheckingPair,
+              let token = pairingService.currentToken,
+              let machineId else { return }
+
+        isCheckingPair = true
+        Task {
+            defer { isCheckingPair = false }
+            // If the token row is gone, iOS consumed it = paired
+            let result: [MachinePairingRow] = try await supabase
+                .from("machine_pairings")
+                .select("id")
+                .eq("machine_id", value: machineId.uuidString)
+                .eq("pairing_token", value: token)
+                .execute()
+                .value
+
+            if result.isEmpty {
+                withAnimation { isPaired = true }
+            }
         }
     }
 
@@ -178,4 +196,8 @@ struct PairingQRCodeView: View {
         guard let cgImage = context.createCGImage(transformed, from: transformed.extent) else { return nil }
         return NSImage(cgImage: cgImage, size: NSSize(width: transformed.extent.width, height: transformed.extent.height))
     }
+}
+
+private struct MachinePairingRow: Codable {
+    let id: UUID
 }

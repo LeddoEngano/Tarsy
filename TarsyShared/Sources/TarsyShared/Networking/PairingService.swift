@@ -23,11 +23,19 @@ public class PairingService: ObservableObject {
         let code = generateConnectionCode()
         let expiry = Date().addingTimeInterval(300) // 5 minutes
 
+        let expiresAtString: String = {
+            let f = ISO8601DateFormatter()
+            f.timeZone = TimeZone(identifier: "UTC")
+            return f.string(from: expiry)
+        }()
+
+        print("[PairingService] Generating token for machine \(machineId), expires_at: \(expiresAtString), code: \(code)")
+
         let row: [String: String] = [
             "machine_id": machineId.uuidString,
             "pairing_token": token,
             "connection_code": code,
-            "expires_at": ISO8601DateFormatter().string(from: expiry)
+            "expires_at": expiresAtString
         ]
 
         try await supabase
@@ -39,7 +47,9 @@ public class PairingService: ObservableObject {
         currentConnectionCode = code
         expiresAt = expiry
 
-        return "tarsy://pair?m=\(machineId.uuidString)&t=\(token)"
+        let qrURL = "tarsy://pair?m=\(machineId.uuidString)&t=\(token)"
+        print("[PairingService] QR URL: \(qrURL)")
+        return qrURL
     }
 
     /// Deletes any existing pairing tokens for the machine before generating new ones.
@@ -77,10 +87,13 @@ public class PairingService: ObservableObject {
         pairingError = nil
         defer { isPairing = false }
 
+        print("[PairingService] Claiming machine with body: \(body)")
+
         let session = try await supabase.auth.session
         let jsonData = try JSONSerialization.data(withJSONObject: body)
 
         let url = TarsyConfig.supabaseURL.appendingPathComponent("functions/v1/claim-machine")
+        print("[PairingService] POST \(url.absoluteString)")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
@@ -89,22 +102,45 @@ public class PairingService: ObservableObject {
         request.httpBody = jsonData
 
         let (data, response) = try await URLSession.shared.data(for: request)
+        let httpResponse = response as? HTTPURLResponse
+        let responseBody = String(data: data, encoding: .utf8) ?? "<non-utf8>"
+        print("[PairingService] Response \(httpResponse?.statusCode ?? -1): \(responseBody)")
 
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+        guard let httpResponse, httpResponse.statusCode == 200 else {
             let errorResult = try? JSONDecoder().decode(ClaimResponse.self, from: data)
             let errorMsg = errorResult?.error ?? "Failed to claim machine"
+            print("[PairingService] Claim failed: \(errorMsg)")
             pairingError = errorMsg
             throw PairingError.claimFailed(errorMsg)
         }
 
-        let result = try JSONDecoder.supabaseDecoder.decode(ClaimResponse.self, from: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let str = try container.decode(String.self)
+            // Try ISO8601 with fractional seconds, then without
+            let formatters: [ISO8601DateFormatter] = {
+                let f1 = ISO8601DateFormatter()
+                f1.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                let f2 = ISO8601DateFormatter()
+                f2.formatOptions = [.withInternetDateTime]
+                return [f1, f2]
+            }()
+            for f in formatters {
+                if let date = f.date(from: str) { return date }
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode date: \(str)")
+        }
+        let result = try decoder.decode(ClaimResponse.self, from: data)
 
         guard result.success, let machine = result.machine else {
             let errorMsg = result.error ?? "Failed to claim machine"
+            print("[PairingService] Claim response not successful: \(errorMsg)")
             pairingError = errorMsg
             throw PairingError.claimFailed(errorMsg)
         }
 
+        print("[PairingService] Machine claimed successfully: \(machine.id)")
         return machine
     }
 
@@ -172,13 +208,3 @@ public enum PairingError: LocalizedError {
     }
 }
 
-// MARK: - JSONDecoder extension for Supabase snake_case
-
-private extension JSONDecoder {
-    static let supabaseDecoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }()
-}

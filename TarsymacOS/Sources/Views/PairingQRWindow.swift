@@ -9,7 +9,9 @@ struct PairingQRWindow: View {
     @EnvironmentObject var daemonManager: DaemonManager
 
     var body: some View {
-        PairingQRCodeView(machineId: daemonManager.machineId)
+        PairingQRCodeView(machineId: daemonManager.machineId, onPaired: {
+            NSApplication.shared.keyWindow?.close()
+        })
             .padding(24)
             .frame(width: 280)
             .background(Theme.bg)

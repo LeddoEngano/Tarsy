@@ -904,10 +904,10 @@ struct OnboardingWindow: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 0) {
                 readyIcon
-                    .padding(.top, 24)
-                    .padding(.bottom, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 12)
 
-                Text("tarsy is ready")
+                Text("tarsy is ready!")
                     .font(TarsyTheme.font(size: 20, weight: .bold))
                     .foregroundColor(Theme.textPrimary)
                     .padding(.bottom, 4)
@@ -917,22 +917,14 @@ struct OnboardingWindow: View {
                     .foregroundColor(Theme.textSecondary)
                     .padding(.bottom, 20)
 
-                readyStatusCards
-                    .padding(.horizontal, 48)
-                    .padding(.bottom, 24)
-
-                // QR Pairing Section
-                Divider()
-                    .background(Theme.border)
+                PairingQRCodeView(machineId: daemonManager.machineId, onPaired: {
+                    closeWindow()
+                })
                     .padding(.horizontal, 48)
                     .padding(.bottom, 20)
 
-                PairingQRCodeView(machineId: daemonManager.machineId)
-                    .padding(.horizontal, 48)
-                    .padding(.bottom, 24)
-
                 readyDismissButton
-                    .padding(.bottom, 24)
+                    .padding(.bottom, 16)
             }
         }
     }

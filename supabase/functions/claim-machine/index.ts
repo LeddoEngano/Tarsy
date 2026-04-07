@@ -108,7 +108,7 @@ serve(async (req) => {
     // Fetch updated machine details to return
     const { data: machine } = await supabase
       .from("machines")
-      .select("id, hostname, status, local_ip, model_identifier, display_name, last_seen_at")
+      .select("*")
       .eq("id", targetMachineId)
       .single();
 
