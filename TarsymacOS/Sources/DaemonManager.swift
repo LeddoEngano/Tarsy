@@ -594,6 +594,8 @@ class DaemonManager: ObservableObject {
             await handleTerminalInput(clientId: clientId, packet: packet)
         case .terminalClose:
             await handleTerminalClose(clientId: clientId, packet: packet)
+        case .terminalComplete:
+            await handleTerminalComplete(clientId: clientId, packet: packet)
         case .claudeCreate:
             await handleClaudeCreate(clientId: clientId, packet: packet)
         case .claudeUserResponse:
@@ -972,6 +974,99 @@ class DaemonManager: ObservableObject {
         await terminalManager.closeSession(sessionId)
         await sendToClientOrRelay(
             WSPacket(action: .terminalClose, payload: ["sessionId": sessionId], id: packet.id),
+            to: clientId
+        )
+    }
+
+    // MARK: - Terminal Completion
+
+    private func handleTerminalComplete(clientId: String, packet: WSPacket) async {
+        guard let partial = packet.payload?["partial"],
+              let path = packet.payload?["path"] else {
+            await sendToClientOrRelay(
+                WSPacket(action: .terminalCompleteResult, payload: ["completions": "[]"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        let expandedPath = (path as NSString).expandingTildeInPath
+
+        // Use compgen (bash builtin) to get command + file completions
+        // Pass user input via env vars to prevent shell injection
+        let result = await withCheckedContinuation { (continuation: CheckedContinuation<[String], Never>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let task = Process()
+                task.executableURL = URL(fileURLWithPath: "/bin/bash")
+                task.arguments = ["-c", """
+                    cd "$TARSY_CWD" 2>/dev/null
+                    # File completions (relative to cwd)
+                    files=$(compgen -f -- "$TARSY_PARTIAL" 2>/dev/null)
+                    # Command completions (only if partial has no path separator)
+                    cmds=""
+                    if [[ "$TARSY_PARTIAL" != */* ]]; then
+                        cmds=$(compgen -c -- "$TARSY_PARTIAL" 2>/dev/null)
+                    fi
+                    # Combine, deduplicate, limit to 30
+                    printf '%s\\n%s' "$files" "$cmds" | sort -u | head -30
+                    """]
+                var env = ProcessInfo.processInfo.environment
+                env["TARSY_PARTIAL"] = partial
+                env["TARSY_CWD"] = expandedPath
+                task.environment = env
+                let pipe = Pipe()
+                task.standardOutput = pipe
+                task.standardError = Pipe()
+
+                // Timeout
+                let timer = DispatchSource.makeTimerSource(queue: .global())
+                timer.schedule(deadline: .now() + 3)
+                timer.setEventHandler { if task.isRunning { task.terminate() } }
+                timer.resume()
+
+                guard (try? task.run()) != nil else {
+                    timer.cancel()
+                    continuation.resume(returning: [])
+                    return
+                }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                task.waitUntilExit()
+                timer.cancel()
+
+                guard let output = String(data: data, encoding: .utf8) else {
+                    continuation.resume(returning: [])
+                    return
+                }
+
+                let completions = output.components(separatedBy: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+                continuation.resume(returning: completions)
+            }
+        }
+
+        // Tag each completion with its type (dir, file, or cmd)
+        let tagged: [[String: String]] = result.map { item in
+            let fullPath = item.hasPrefix("/") ? item : "\(expandedPath)/\(item)"
+            var isDir: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: fullPath, isDirectory: &isDir)
+            let type: String
+            if exists && isDir.boolValue {
+                type = "dir"
+            } else if exists {
+                type = "file"
+            } else {
+                type = "cmd"
+            }
+            return ["name": item, "type": type]
+        }
+
+        // Encode as JSON string
+        let json = (try? JSONSerialization.data(withJSONObject: tagged))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+
+        await sendToClientOrRelay(
+            WSPacket(action: .terminalCompleteResult, payload: ["completions": json], id: packet.id),
             to: clientId
         )
     }

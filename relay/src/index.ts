@@ -69,7 +69,7 @@ function isMachineReplacementAbuse(userId: string): boolean {
 const CLIENT_ALLOWED_PREFIXES = [
   "workspace:", "stream:start", "stream:stop",
   "remote:", "screenshot:request",
-  "terminal:create", "terminal:input", "terminal:close", "terminal:list",
+  "terminal:create", "terminal:input", "terminal:close", "terminal:list", "terminal:complete",
   "claude:create", "claude:message", "claude:close", "claude:user_response",
   "engine:create", "engine:message", "engine:close", "engine:user_response",
   "openclaw:message",

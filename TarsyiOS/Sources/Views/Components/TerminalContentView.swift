@@ -97,15 +97,49 @@ private struct TerminalInputField: UIViewRepresentable {
     }
 }
 
+// MARK: - Terminal Completion Item
+
+struct TerminalCompletion: Identifiable, Equatable {
+    let id = UUID()
+    let name: String
+    let type: CompletionType // dir, file, or cmd
+
+    enum CompletionType: String {
+        case dir, file, cmd
+    }
+
+    var icon: String {
+        switch type {
+        case .dir: return "folder.fill"
+        case .file: return "doc.fill"
+        case .cmd: return "terminal.fill"
+        }
+    }
+
+    var iconColor: Color {
+        switch type {
+        case .dir: return TarsyTheme.accentAmber
+        case .file: return TarsyTheme.textSecondary
+        case .cmd: return TarsyTheme.textPrimary
+        }
+    }
+}
+
 // MARK: - Terminal Content View
 
 struct TerminalContentView: View {
     let workspace: Workspace
     @ObservedObject var chatService: ChatService
     var onSendCommand: (String) -> Void
+    var onRequestCompletion: (String) -> Void
+    var onClearCompletions: () -> Void
+    var completions: [TerminalCompletion]
+    var isCompletionLoading: Bool
 
     @State private var inputText = ""
     @State private var isKeyboardActive = false
+    /// Tracks whether completions are currently visible (to clear on next input change)
+    @State private var hadCompletions = false
 
     /// Terminal output split into lines for lazy rendering.
     /// ANSI codes are already stripped at receive time in WorkspaceView.
@@ -123,6 +157,13 @@ struct TerminalContentView: View {
             }
         }
         return lines
+    }
+
+    /// Extracts the last word from the input for completion context
+    private var lastWord: String {
+        let trimmed = inputText.trimmingCharacters(in: .whitespaces)
+        guard let lastSpace = trimmed.lastIndex(of: " ") else { return trimmed }
+        return String(trimmed[trimmed.index(after: lastSpace)...])
     }
 
     var body: some View {
@@ -147,9 +188,42 @@ struct TerminalContentView: View {
                             .textSelection(.enabled)
                     }
 
+                    // Autocomplete overlay (above prompt)
+                    if isCompletionLoading {
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .tint(TarsyTheme.textSecondary)
+                            Text("completing...")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .id("completion-loading")
+                    } else if !completions.isEmpty {
+                        completionOverlay
+                            .id("completions")
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
+
                     // Inline prompt + input
                     HStack(spacing: 0) {
-                        Text("$ ")
+                        // Tab button
+                        Button(action: {
+                            Haptics.light()
+                            onRequestCompletion(inputText)
+                        }) {
+                            Text("⇥")
+                                .font(.system(size: 15, weight: .medium, design: .monospaced))
+                                .foregroundColor(inputText.isEmpty ? TarsyTheme.textSecondary.opacity(0.3) : TarsyTheme.textSecondary)
+                                .frame(width: 28, height: 24)
+                                .background(TarsyTheme.backgroundTertiary.opacity(inputText.isEmpty ? 0.3 : 0.8))
+                                .cornerRadius(5)
+                        }
+                        .disabled(inputText.isEmpty)
+
+                        Text(" $ ")
                             .font(.system(size: 13, design: .monospaced))
                             .foregroundColor(TarsyTheme.textSecondary)
 
@@ -197,9 +271,73 @@ struct TerminalContentView: View {
                     }
                 }
             }
+            .onChange(of: completions) { _, newValue in
+                hadCompletions = !newValue.isEmpty
+                withAnimation(.easeOut(duration: 0.15)) {
+                    proxy.scrollTo("terminal-bottom", anchor: .bottom)
+                }
+            }
+            .onChange(of: inputText) { _, _ in
+                // Clear stale completions when user types after completions were shown
+                if hadCompletions {
+                    hadCompletions = false
+                    onClearCompletions()
+                }
+            }
             .onDisappear {
                 isKeyboardActive = false
             }
+        }
+    }
+
+    // MARK: - Completion Overlay
+
+    private var completionOverlay: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(completions) { item in
+                    Button(action: {
+                        Haptics.light()
+                        applyCompletion(item)
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: item.icon)
+                                .font(.system(size: 10))
+                                .foregroundColor(item.iconColor)
+                            Text(item.name)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(TarsyTheme.textPrimary)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .background(TarsyTheme.backgroundTertiary)
+                        .cornerRadius(6)
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+    }
+
+    // MARK: - Apply Completion
+
+    private func applyCompletion(_ item: TerminalCompletion) {
+        var completed = item.name
+        // Append / for directories to allow continued path completion
+        if item.type == .dir && !completed.hasSuffix("/") {
+            completed += "/"
+        }
+
+        let word = lastWord
+        // Replace from the known end position to avoid ambiguous backwards search
+        if !word.isEmpty && inputText.hasSuffix(word) {
+            inputText = String(inputText.dropLast(word.count)) + completed
+        } else if !word.isEmpty, let range = inputText.range(of: word, options: .backwards) {
+            inputText = inputText.replacingCharacters(in: range, with: completed)
+        } else {
+            inputText += completed
         }
     }
 }

@@ -93,6 +93,9 @@ struct WorkspaceView: View {
     @State private var pendingCreateRequests: [String: String] = [:]
     /// Queued commands for terminal tabs whose session hasn't been created yet
     @State private var pendingTerminalCommands: [String: String] = [:]
+    /// Autocomplete results for the terminal tab
+    @State private var terminalCompletions: [TerminalCompletion] = []
+    @State private var isCompletionLoading = false
 
     /// Returns true if the packet's sessionId matches the currently active tab
     private func isActiveTabSession(_ packet: WSPacket) -> Bool {
@@ -391,6 +394,7 @@ struct WorkspaceView: View {
                             }
                             // Switch tab
                             selectedTabIndex = index
+                            terminalCompletions = []
                             // Restore new tab state
                             let restored = tabStates[tab.id] ?? TabState()
                             isAgentThinking = restored.isThinking
@@ -796,8 +800,19 @@ struct WorkspaceView: View {
                             workspace: workspace,
                             chatService: chatService,
                             onSendCommand: { command in
+                                terminalCompletions = []
+                                isCompletionLoading = false
                                 sendTerminalCommand(command)
-                            }
+                            },
+                            onRequestCompletion: { input in
+                                isCompletionLoading = true
+                                requestTerminalCompletion(input)
+                            },
+                            onClearCompletions: {
+                                terminalCompletions = []
+                            },
+                            completions: terminalCompletions,
+                            isCompletionLoading: isCompletionLoading
                         )
                     } else {
                         chatArea
@@ -900,8 +915,19 @@ struct WorkspaceView: View {
                             workspace: workspace,
                             chatService: chatService,
                             onSendCommand: { command in
+                                terminalCompletions = []
+                                isCompletionLoading = false
                                 sendTerminalCommand(command)
-                            }
+                            },
+                            onRequestCompletion: { input in
+                                isCompletionLoading = true
+                                requestTerminalCompletion(input)
+                            },
+                            onClearCompletions: {
+                                terminalCompletions = []
+                            },
+                            completions: terminalCompletions,
+                            isCompletionLoading: isCompletionLoading
                         )
                     } else {
                         chatArea
@@ -1023,6 +1049,13 @@ struct WorkspaceView: View {
 
     private var infoBar: some View {
         VStack(spacing: 0) {
+            // Divider above info bar for terminal tabs
+            if currentTab.type == .terminal {
+                Rectangle()
+                    .fill(TarsyTheme.textSecondary.opacity(0.15))
+                    .frame(height: 0.5)
+            }
+
             // Info bar
             HStack(spacing: 0) {
                 // Branch + pull
@@ -1075,7 +1108,7 @@ struct WorkspaceView: View {
                 Color.clear.frame(height: 20)
             }
         }
-        .background(TarsyTheme.backgroundPrimary)
+        .background(currentTab.type == .terminal ? Color(hex: "0a0a0a") : TarsyTheme.backgroundPrimary)
     }
 
     private var inputBar: some View {
@@ -1544,6 +1577,24 @@ struct WorkspaceView: View {
         }
     }
 
+    private func requestTerminalCompletion(_ input: String) {
+        // Extract the last word being typed as the partial to complete
+        let trimmed = input.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let partial: String
+        if let lastSpace = trimmed.lastIndex(of: " ") {
+            partial = String(trimmed[trimmed.index(after: lastSpace)...])
+        } else {
+            partial = trimmed
+        }
+        guard !partial.isEmpty else { return }
+
+        connectionManager.send(WSPacket(
+            action: .terminalComplete,
+            payload: ["partial": partial, "path": workspace.localPath]
+        ))
+    }
+
     private func waitForConnectionAndStartClaude() async {
         // Wait for WebSocket to be connected and authenticated
         var attempts = 0
@@ -1848,6 +1899,20 @@ struct WorkspaceView: View {
                         let range = NSRange(output.startIndex..., in: output)
                         let cleaned = Self.ansiRegex.stringByReplacingMatches(in: output, range: range, withTemplate: "")
                         chatService.addAssistantChunk(workspaceId: workspace.id, tabId: termTabId, content: cleaned)
+                    }
+
+                case .terminalCompleteResult:
+                    isCompletionLoading = false
+                    if let json = packet.payload?["completions"],
+                       let data = json.data(using: .utf8),
+                       let items = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            terminalCompletions = items.compactMap { dict in
+                                guard let name = dict["name"], let typeStr = dict["type"],
+                                      let type = TerminalCompletion.CompletionType(rawValue: typeStr) else { return nil }
+                                return TerminalCompletion(name: name, type: type)
+                            }
+                        }
                     }
 
                 // Engine status (model, tokens, context %)
