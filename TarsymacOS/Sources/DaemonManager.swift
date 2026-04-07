@@ -174,10 +174,7 @@ class DaemonManager: ObservableObject {
         await wsServer?.broadcast(agentsPacket)
         await relayClient.send(packet: agentsPacket)
 
-        // 7b. Scan slash commands (user-level + known workspace paths)
-        detectedSlashCommands = await Task.detached { self.scanSlashCommands(workspacePaths: Array(self.registeredWorkspacePaths)) }.value
-        log("Detected \(detectedSlashCommands.count) slash commands")
-        await broadcastSlashCommands()
+        // 7b. Slash commands are scanned and sent per-workspace in handleEngineCreate
 
         // 8. UltraContext — watch Claude Code session files + sync via proxy
         Task { await SessionFileWatcher.shared.start() }
@@ -323,8 +320,6 @@ class DaemonManager: ObservableObject {
                         payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
                     )
                     await self?.sendToClientOrRelay(packet, to: clientId)
-                    // Send slash commands
-                    await self?.broadcastSlashCommands(to: clientId)
                     // Send OpenClaw availability
                     let openclawInstalled = await self?.openClaw.isInstalled() ?? false
                     await self?.sendToClientOrRelay(
@@ -431,8 +426,6 @@ class DaemonManager: ObservableObject {
                             payload: ["agents": agents.map(\.rawValue).joined(separator: ",")]
                         )
                         await self?.sendToClientOrRelay(agentPacket, to: "relay")
-                        // Send slash commands
-                        await self?.broadcastSlashCommands(to: "relay")
                         // Send OpenClaw availability
                         let openclawInstalled = await self?.openClaw.isInstalled() ?? false
                         await self?.sendToClientOrRelay(
@@ -772,6 +765,17 @@ class DaemonManager: ObservableObject {
             )
         case .securityRotateResult, .securityFingerprintUpdate:
             break // Handled on iOS side
+        case .slashCommandsRequest:
+            let workspacePath = packet.payload?["path"]
+            var paths = Array(registeredWorkspacePaths)
+            if let wp = workspacePath {
+                let expanded = (wp as NSString).expandingTildeInPath
+                let resolved = URL(fileURLWithPath: expanded).resolvingSymlinksInPath().path
+                if !paths.contains(resolved) { paths.append(resolved) }
+            }
+            let cmds = scanSlashCommands(workspacePaths: paths)
+            detectedSlashCommands = cmds
+            await broadcastSlashCommands(to: clientId)
         case .relayNoClients:
             log("Relay reports no clients connected — stopping stream")
             await stopStreamCleanup()

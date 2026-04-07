@@ -645,6 +645,10 @@ public class ConnectionManager: ObservableObject {
             if let json = packet.payload?["commands"],
                let data = json.data(using: .utf8),
                let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+                #if DEBUG
+                let names = parsed.compactMap { $0["name"] }
+                print("[ConnectionManager] Received \(parsed.count) slash commands: \(names.filter { !$0.contains(":") })")
+                #endif
                 detectedSlashCommands = parsed
             }
             notifyListeners(packet)

@@ -65,7 +65,6 @@ struct WorkspaceView: View {
     }
     @State private var autocompleteItems: [AutocompleteItem] = []
     @State private var cachedFileEntries: [AutocompleteItem] = []
-    @State private var detectedSlashCommands: [AutocompleteItem] = []
     @State private var viewMode: ViewMode = .stream
     @State private var showSessionPicker = false
     @State private var showCommitConfirmation = false
@@ -308,20 +307,11 @@ struct WorkspaceView: View {
             setupOutputHandler()
             await waitForConnectionAndStartClaude()
 
-            // Initialize slash commands from ConnectionManager (received before workspace opened)
-            if detectedSlashCommands.isEmpty && !connectionManager.detectedSlashCommands.isEmpty {
-                detectedSlashCommands = connectionManager.detectedSlashCommands.map { cmd in
-                    AutocompleteItem(
-                        icon: "terminal",
-                        label: cmd["name"] ?? "",
-                        insertText: cmd["name"] ?? "",
-                        description: cmd["description"] ?? ""
-                    )
-                }
-            }
-
             // Preload file tree for @ autocomplete
             connectionManager.send(WSPacket(action: .fileTree, payload: ["path": workspace.localPath]))
+
+            // Request slash commands for this workspace
+            connectionManager.send(WSPacket(action: .slashCommandsRequest, payload: ["path": workspace.localPath]))
 
             // Auto-start stream since stream mode is default
             if viewMode == .stream {
@@ -1379,28 +1369,25 @@ struct WorkspaceView: View {
         if text.hasPrefix("/") && isClaudeTab {
             let filter = String(text.dropFirst()).lowercased()
 
-            // Sync from ConnectionManager (always has latest from macOS)
-            if !connectionManager.detectedSlashCommands.isEmpty {
-                detectedSlashCommands = connectionManager.detectedSlashCommands.map { cmd in
-                    AutocompleteItem(
-                        icon: "terminal",
-                        label: cmd["name"] ?? "",
-                        insertText: cmd["name"] ?? "",
-                        description: cmd["description"] ?? ""
-                    )
-                }
+            // Read detected commands directly from ConnectionManager (always latest)
+            let detected: [AutocompleteItem] = connectionManager.detectedSlashCommands.map { cmd in
+                AutocompleteItem(
+                    icon: "terminal",
+                    label: cmd["name"] ?? "",
+                    insertText: cmd["name"] ?? "",
+                    description: cmd["description"] ?? ""
+                )
             }
 
-            // Merge detected commands from macOS with builtin defaults
-            // Order: simple commands first, then builtins, then namespaced
+            // Merge: simple detected first, then builtins (deduped), then namespaced detected
             let allCommands: [AutocompleteItem]
-            if detectedSlashCommands.isEmpty {
+            if detected.isEmpty {
                 allCommands = AutocompleteOverlay.slashCommands
             } else {
-                let simple = detectedSlashCommands.filter { !$0.label.contains(":") }
-                let namespaced = detectedSlashCommands.filter { $0.label.contains(":") }
+                let simple = detected.filter { !$0.label.contains(":") }
+                let namespaced = detected.filter { $0.label.contains(":") }
                 let builtins = AutocompleteOverlay.slashCommands.filter { builtin in
-                    !detectedSlashCommands.contains(where: { $0.label == builtin.label })
+                    !detected.contains(where: { $0.label == builtin.label })
                 }
                 allCommands = simple + builtins + namespaced
             }
@@ -1894,24 +1881,6 @@ struct WorkspaceView: View {
                        let idx = tabs.firstIndex(where: { ($0.type == .claude || $0.type == .engine) && $0.sessionId == nil && $0.engineType != preferred }) {
                         let tabType: TerminalTab.TabType = preferred == .claude ? .claude : .engine
                         tabs[idx] = TerminalTab(id: "\(preferred.rawValue)-1", title: preferred.displayName, isFixed: false, type: tabType, sessionId: nil, engineType: preferred)
-                    }
-
-                // Slash commands from macOS
-                case .slashCommandsDetected:
-                    if let json = packet.payload?["commands"],
-                       let data = json.data(using: .utf8),
-                       let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
-                        #if DEBUG
-                        print("[Autocomplete] Received \(parsed.count) slash commands from macOS: \(parsed.compactMap { $0["name"] }.prefix(10))")
-                        #endif
-                        detectedSlashCommands = parsed.map { cmd in
-                            AutocompleteItem(
-                                icon: "terminal",
-                                label: cmd["name"] ?? "",
-                                insertText: cmd["name"] ?? "",
-                                description: cmd["description"] ?? ""
-                            )
-                        }
                     }
 
                 // Branch update
