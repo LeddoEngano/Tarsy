@@ -10,6 +10,8 @@ public class AuthManager: ObservableObject {
     @Published public var currentUser: User?
     @Published public var errorMessage: String?
 
+    /// Set while an OAuth flow (GitHub/Apple) is in progress to prevent double-handling from onOpenURL.
+    private var isHandlingOAuth = false
     private var currentNonce: String?
 
     public init() {
@@ -132,6 +134,7 @@ public class AuthManager: ObservableObject {
     public func signInWithAppleOAuth() async {
         isLoading = true
         errorMessage = nil
+        isHandlingOAuth = true
         do {
             #if os(iOS)
             let scheme = "com.tarsy.ios"
@@ -182,14 +185,17 @@ public class AuthManager: ObservableObject {
                 errorMessage = error.localizedDescription
             }
         }
+        isHandlingOAuth = false
         isLoading = false
     }
 
     // MARK: - Sign in with GitHub
 
     public func signInWithGitHub() async {
+        print("[AuthManager] signInWithGitHub started")
         isLoading = true
         errorMessage = nil
+        isHandlingOAuth = true
         do {
             #if os(iOS)
             let scheme = "com.tarsy.ios"
@@ -204,6 +210,7 @@ public class AuthManager: ObservableObject {
                 redirectTo: redirectURL
             )
 
+            print("[AuthManager] GitHub OAuth URL obtained, launching ASWebAuthenticationSession")
             // Use ASWebAuthenticationSession — auto-dismisses on callback
             let callbackURL = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<URL, Error>) in
                 let session = ASWebAuthenticationSession(
@@ -228,26 +235,39 @@ public class AuthManager: ObservableObject {
             }
 
             // Exchange callback URL for session
+            print("[AuthManager] GitHub callback received: \(callbackURL.absoluteString.prefix(80))...")
             let session = try await supabase.auth.session(from: callbackURL)
             currentUser = session.user
             isAuthenticated = true
+            print("[AuthManager] GitHub sign-in successful, user: \(session.user.email ?? "no email")")
         } catch {
             // Check if user cancelled
             let nsError = error as NSError
+            print("[AuthManager] GitHub sign-in error: \(error)")
             if nsError.domain == ASWebAuthenticationSessionErrorDomain,
                nsError.code == ASWebAuthenticationSessionError.canceledLogin.rawValue {
-                // User cancelled — not an error
+                print("[AuthManager] User cancelled GitHub OAuth")
             } else if let session = try? await supabase.auth.session {
+                print("[AuthManager] Recovered session from existing auth")
                 currentUser = session.user
                 isAuthenticated = true
             } else {
                 errorMessage = error.localizedDescription
             }
         }
+        isHandlingOAuth = false
         isLoading = false
+        print("[AuthManager] signInWithGitHub finished — isAuthenticated=\(isAuthenticated), isLoading=\(isLoading)")
     }
 
     public func handleOAuthCallback(url: URL) async {
+        // If an OAuth flow (signInWithGitHub/signInWithAppleOAuth) is already handling
+        // the callback via ASWebAuthenticationSession, skip to avoid double-processing.
+        guard !isHandlingOAuth else {
+            print("[AuthManager] handleOAuthCallback skipped — OAuth flow already in progress")
+            return
+        }
+        print("[AuthManager] handleOAuthCallback processing: \(url.absoluteString.prefix(80))...")
         isLoading = true
         errorMessage = nil
         do {

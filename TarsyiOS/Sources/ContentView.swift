@@ -154,19 +154,26 @@ struct ContentView: View {
     }
 
     private func checkOnboardingState() {
-        if let profile = profileService.profile {
-            if profile.onboarded {
-                showPermissionOnboarding = false
-            }
-            if profile.displayName == nil || profile.displayName?.isEmpty == true {
-                // Auto-populate from Apple Sign In metadata if available
-                Task {
-                    if let fullName = try? await supabase.auth.session.user.userMetadata["full_name"]?.value as? String,
-                       !fullName.isEmpty {
-                        await profileService.updateDisplayName(fullName)
-                    } else {
-                        showNameOnboarding = true
-                    }
+        guard let profile = profileService.profile else { return }
+
+        if profile.onboarded {
+            showPermissionOnboarding = false
+        }
+
+        if profile.displayName == nil || profile.displayName?.isEmpty == true {
+            // Auto-populate from Apple/GitHub metadata if available
+            Task {
+                // Try full_name first (Apple Sign In), then name or user_name (GitHub)
+                let session = try? await supabase.auth.session
+                let meta = session?.user.userMetadata
+                let fullName: String? = (meta?["full_name"]?.value as? String)
+                    ?? (meta?["name"]?.value as? String)
+                    ?? (meta?["user_name"]?.value as? String)
+
+                if let fullName, !fullName.isEmpty {
+                    await profileService.updateDisplayName(fullName)
+                } else {
+                    showNameOnboarding = true
                 }
             }
         }
