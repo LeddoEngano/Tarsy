@@ -33,6 +33,23 @@ const MAX_UNAUTH_CONNECTIONS = 50;
 // Rate limiting: track machine replacements per userId
 const machineReplacements = new Map<string, number[]>(); // userId -> timestamps
 
+// Rate limiting for HTTP permission-response endpoint (per userId)
+const HTTP_RATE_LIMIT_MAX = 10;
+const HTTP_RATE_LIMIT_WINDOW = 60_000; // 1 minute
+const httpRateLimits = new Map<string, number[]>();
+
+function isHttpRateLimited(userId: string): boolean {
+  const now = Date.now();
+  const timestamps = httpRateLimits.get(userId) || [];
+  const recent = timestamps.filter(t => now - t < HTTP_RATE_LIMIT_WINDOW);
+  httpRateLimits.set(userId, recent);
+  if (recent.length >= HTTP_RATE_LIMIT_MAX) {
+    return true;
+  }
+  recent.push(now);
+  return false;
+}
+
 function isMachineReplacementAbuse(userId: string): boolean {
   const now = Date.now();
   const timestamps = machineReplacements.get(userId) || [];
@@ -270,6 +287,10 @@ const server = Bun.serve({
         const { userId, error } = await validateToken(token);
         if (!userId) {
           return new Response(JSON.stringify({ error: error || "Invalid token" }), { status: 401 });
+        }
+
+        if (isHttpRateLimited(userId)) {
+          return new Response(JSON.stringify({ error: "Too many requests" }), { status: 429 });
         }
 
         const body = await req.json() as {

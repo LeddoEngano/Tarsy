@@ -16,12 +16,20 @@ const SUBJECT_LABELS = {
 
 const VALID_SUBJECTS = Object.keys(SUBJECT_LABELS);
 
-// In-memory rate limiting (per-process)
+// In-memory rate limiting (per-process).
+// NOTE: This works for single-process deployments (e.g., `next start`).
+// For serverless (Vercel), replace with an external store (Upstash Redis, KV, etc.).
 const rateLimitMap = new Map();
 const RATE_LIMIT_MAX = 5;
 const RATE_LIMIT_WINDOW = 60 * 60 * 1000; // 1 hour
+const MAX_RATE_LIMIT_ENTRIES = 10_000; // Prevent unbounded memory growth
 
 function checkRateLimit(ip) {
+  // Evict if map grows too large (DoS via many unique IPs)
+  if (rateLimitMap.size > MAX_RATE_LIMIT_ENTRIES) {
+    rateLimitMap.clear();
+  }
+
   const now = Date.now();
   const entry = rateLimitMap.get(ip) || [];
   const recent = entry.filter((t) => now - t < RATE_LIMIT_WINDOW);

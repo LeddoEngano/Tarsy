@@ -320,12 +320,25 @@ actor GenericCLIEngine: AIEngine {
         return env
     }
 
+    /// Sanitize user message to prevent CLI flag injection.
+    /// Process arguments don't go through a shell, but a leading dash could
+    /// inject flags into the target CLI (e.g., --system-prompt for Gemini).
+    private func sanitizeMessage(_ message: String) -> String {
+        var msg = message
+        // Strip leading dashes that could be interpreted as CLI flags
+        while msg.hasPrefix("-") {
+            msg = String(msg.dropFirst())
+        }
+        return msg.trimmingCharacters(in: .whitespaces)
+    }
+
     /// Build CLI arguments per engine.
     private func argsForEngine(message: String) -> [String] {
+        let safeMessage = sanitizeMessage(message)
         switch engineType {
         case .gemini:
             // gemini -p "prompt" --output-format stream-json [--yolo | --approval-mode auto_edit]
-            var args = ["-p", message, "--output-format", "stream-json"]
+            var args = ["-p", safeMessage, "--output-format", "stream-json"]
             if permissionMode == .dangerous {
                 args.append("--yolo")
             } else {
@@ -334,25 +347,25 @@ actor GenericCLIEngine: AIEngine {
             return args
         case .codex:
             // Codex is handled by CodexSession — this fallback should not be reached
-            return [message]
+            return [safeMessage]
         case .aider:
-            var args = ["--message", message]
+            var args = ["--message", safeMessage]
             if permissionMode != .dangerous {
                 args.append(contentsOf: ["--no-auto-commits", "--no-git"])
             }
             return args
         case .cursor:
-            return [message]
+            return [safeMessage]
         case .windsurf:
-            return [message]
+            return [safeMessage]
         case .amp:
-            return ["--prompt", message]
+            return ["--prompt", safeMessage]
         case .cline:
-            return ["--prompt", message]
+            return ["--prompt", safeMessage]
         case .copilot:
-            return ["copilot", message]
+            return ["copilot", safeMessage]
         case .custom, .claude:
-            return [message]
+            return [safeMessage]
         }
     }
 
