@@ -5,6 +5,7 @@ import { useMachines, useWorkspaces, useActiveTasks, useSignOut } from "../../li
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { NewWorkspaceModal, PairingModal } from "../../lib/tarsy/WorkspaceModals";
+import { FeedbackModal } from "../../lib/tarsy/FeedbackModal";
 
 const STACK_LABELS = {
   web: "Web",
@@ -29,6 +30,7 @@ export default function DashboardPage() {
   const signOut = useSignOut();
   const [showNewWorkspace, setShowNewWorkspace] = useState(false);
   const [showPairing, setShowPairing] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
 
   return (
     <main className="app-container">
@@ -153,6 +155,14 @@ export default function DashboardPage() {
         </button>
       </div>
 
+      {/* Nav Links */}
+      <div className="dash-nav">
+        <a href="/mcp" className="dash-nav-link">MCP Store</a>
+        <a href="/devtools" className="dash-nav-link">Dev Tools</a>
+        <a href="/settings" className="dash-nav-link">Settings</a>
+        <button className="dash-nav-link" onClick={() => setShowFeedback(true)}>Feedback</button>
+      </div>
+
       {/* Modals */}
       {showNewWorkspace && selectedMachine && (
         <NewWorkspaceModal
@@ -166,6 +176,9 @@ export default function DashboardPage() {
           onClose={() => setShowPairing(false)}
           onPaired={() => window.location.reload()}
         />
+      )}
+      {showFeedback && (
+        <FeedbackModal onClose={() => setShowFeedback(false)} />
       )}
     </main>
   );
