@@ -26,6 +26,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>com.tarsy.ios</string>
+				<string>tarsy</string>
 			</array>
 		</dict>
 	</array>

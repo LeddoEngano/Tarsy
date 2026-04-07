@@ -5,6 +5,7 @@ struct DashboardView: View {
     @EnvironmentObject var authManager: AuthManager
     @EnvironmentObject var workspaceService: WorkspaceService
     @EnvironmentObject var machineService: MachineService
+    @EnvironmentObject var connectionManager: ConnectionManager
 
     @EnvironmentObject var subscriptionManager: SubscriptionManager
     @EnvironmentObject var profileService: ProfileService
@@ -35,17 +36,8 @@ struct DashboardView: View {
                             .font(TarsyTheme.font(size: 24, weight: .bold))
                             .foregroundColor(TarsyTheme.accentAmber)
 
-                        if machineService.machines.count > 1 {
+                        if !machineService.machines.isEmpty {
                             machinePicker
-                        } else if !machineService.machines.isEmpty {
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(machineService.isOnline ? TarsyTheme.statusRunning : TarsyTheme.statusError)
-                                    .frame(width: 6, height: 6)
-                                Text(machineService.isOnline ? "mac online" : "mac offline")
-                                    .font(TarsyTheme.font(size: 10))
-                                    .foregroundColor(TarsyTheme.textSecondary)
-                            }
                         } else if hasFetchedMachines {
                             HStack(spacing: 4) {
                                 Circle()
@@ -198,6 +190,11 @@ struct DashboardView: View {
         .sheet(isPresented: $showActiveSessions) {
             ActiveSessionsView()
         }
+        .fullScreenCover(isPresented: $showQRScanner) {
+            QRScannerView()
+                .environmentObject(machineService)
+                .environmentObject(connectionManager)
+        }
         // MARK: - Hidden for App Store review (re-enable after approval)
 //        .sheet(isPresented: $showAIWizard) {
 //            AIProjectWizardView()
@@ -229,153 +226,97 @@ struct DashboardView: View {
             }
             deepLinkRouter.pendingWorkspaceId = nil
         }
+        .onChange(of: deepLinkRouter.pendingPairing) { _, pairing in
+            guard let pairing else { return }
+            deepLinkRouter.pendingPairing = nil
+            Task {
+                let service = PairingService()
+                do {
+                    _ = try await service.claimMachine(machineId: pairing.machineId, pairingToken: pairing.token)
+                    await machineService.fetchMachine()
+                    if machineService.isOnline {
+                        let session = try await supabase.auth.session
+                        connectionManager.smartConnect(
+                            lanHost: machineService.bestIP,
+                            port: TarsyConfig.websocketPort,
+                            token: session.accessToken
+                        )
+                    }
+                } catch {
+                    #if DEBUG
+                    print("[DeepLink] Pairing failed: \(error)")
+                    #endif
+                }
+            }
+        }
     }
 
     // MARK: - Machine Setup Guide
 
+    @State private var showQRScanner = false
+
     private var machineSetupGuide: some View {
         ScrollView {
-            VStack(spacing: 32) {
-                Spacer().frame(height: 24)
+        VStack(spacing: 0) {
+            Spacer()
 
-                // Header
-                VStack(spacing: 12) {
-                    Image(systemName: "desktopcomputer")
-                        .font(TarsyTheme.font(size: 48))
-                        .foregroundColor(TarsyTheme.accentAmber)
+            // Logo + branding
+            TarsyEyes(size: 80)
+                .padding(.bottom, 20)
 
-                    Text("connect your mac")
-                        .font(TarsyTheme.font(size: 20, weight: .bold))
-                        .foregroundColor(TarsyTheme.textPrimary)
+            Text("tarsy")
+                .font(TarsyTheme.font(size: 28, weight: .bold))
+                .foregroundColor(TarsyTheme.textPrimary)
+                .padding(.bottom, 4)
 
-                    Text("tarsy needs a companion app running\non your mac to get started")
-                        .font(TarsyTheme.monoFontSmall)
-                        .foregroundColor(TarsyTheme.textSecondary)
-                        .multilineTextAlignment(.center)
+            Text("remote agent controller")
+                .font(TarsyTheme.font(size: 13))
+                .foregroundColor(TarsyTheme.textSecondary)
+                .padding(.bottom, 40)
+
+            // Scan button
+            Button(action: { showQRScanner = true }) {
+                HStack(spacing: 10) {
+                    Image(systemName: "qrcode.viewfinder")
+                        .font(TarsyTheme.font(size: 16))
+                    Text("Scan to Connect Mac")
+                        .font(TarsyTheme.font(size: 15, weight: .medium))
                 }
-
-                // Steps
-                VStack(spacing: 0) {
-                    setupStep(
-                        number: "1",
-                        icon: "arrow.down.circle",
-                        title: "download tarsy for mac",
-                        description: "get the companion app from tarsy.dev",
-                        isLast: false
-                    )
-
-                    setupStep(
-                        number: "2",
-                        icon: "person.badge.key",
-                        title: "sign in with the same account",
-                        description: "use the same login method you used here",
-                        isLast: false
-                    )
-
-                    setupStep(
-                        number: "3",
-                        icon: "checkmark.shield",
-                        title: "grant permissions",
-                        description: "screen recording, accessibility, and file access",
-                        isLast: false
-                    )
-
-                    setupStep(
-                        number: "4",
-                        icon: "wifi",
-                        title: "your mac appears here",
-                        description: "automatic — works on the same network or remotely",
-                        isLast: true
-                    )
-                }
-                .padding(16)
-                .background(TarsyTheme.backgroundSecondary)
-                .cornerRadius(12)
-                .overlay(
+                .foregroundColor(TarsyTheme.backgroundPrimary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 16)
+                .background(
                     RoundedRectangle(cornerRadius: 12)
-                        .stroke(TarsyTheme.backgroundTertiary, lineWidth: 1)
+                        .fill(TarsyTheme.textAccent)
                 )
-                .padding(.horizontal, 16)
-
-                // Download button
-                Link(destination: URL(string: "https://tarsy.dev")!) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "arrow.down.to.line")
-                            .font(TarsyTheme.font(size: 14, weight: .semibold))
-                        Text("download for mac")
-                            .font(TarsyTheme.font(size: 14, weight: .semibold))
-                    }
-                    .foregroundColor(TarsyTheme.backgroundPrimary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(TarsyTheme.accentAmber)
-                    .cornerRadius(10)
-                }
-                .padding(.horizontal, 16)
-
-                // Refresh hint
-                Button(action: {
-                    Task {
-                        await machineService.fetchMachine()
-                    }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.clockwise")
-                            .font(TarsyTheme.font(size: 11))
-                        Text("already installed? tap to refresh")
-                            .font(TarsyTheme.font(size: 11))
-                    }
-                    .foregroundColor(TarsyTheme.textSecondary)
-                }
-
-                Spacer()
             }
+            .padding(.horizontal, 40)
+
+            Spacer()
+
+            // Terms / Privacy
+            HStack(spacing: 4) {
+                Text("By continuing, you agree to our")
+                    .font(TarsyTheme.font(size: 10))
+                    .foregroundColor(TarsyTheme.textSecondary)
+            }
+            HStack(spacing: 4) {
+                Link("Terms of Service", destination: URL(string: "https://tarsy.dev/terms")!)
+                    .font(TarsyTheme.font(size: 10))
+                    .foregroundColor(TarsyTheme.textPrimary)
+                Text("and")
+                    .font(TarsyTheme.font(size: 10))
+                    .foregroundColor(TarsyTheme.textSecondary)
+                Link("Privacy Policy", destination: URL(string: "https://tarsy.dev/privacy")!)
+                    .font(TarsyTheme.font(size: 10))
+                    .foregroundColor(TarsyTheme.textPrimary)
+            }
+            .padding(.bottom, 20)
+        }
+        .frame(maxHeight: .infinity)
         }
         .refreshable {
             await machineService.fetchMachine()
-        }
-    }
-
-    private func setupStep(number: String, icon: String, title: String, description: String, isLast: Bool) -> some View {
-        HStack(alignment: .top, spacing: 14) {
-            // Left: number circle + connector line
-            VStack(spacing: 0) {
-                ZStack {
-                    Circle()
-                        .fill(TarsyTheme.accentAmber.opacity(0.15))
-                        .frame(width: 32, height: 32)
-                    Text(number)
-                        .font(TarsyTheme.font(size: 13, weight: .bold))
-                        .foregroundColor(TarsyTheme.accentAmber)
-                }
-
-                if !isLast {
-                    Rectangle()
-                        .fill(TarsyTheme.backgroundTertiary)
-                        .frame(width: 1)
-                        .frame(maxHeight: .infinity)
-                }
-            }
-            .frame(width: 32)
-
-            // Right: content
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Image(systemName: icon)
-                        .font(TarsyTheme.font(size: 12))
-                        .foregroundColor(TarsyTheme.accentAmber)
-                    Text(title)
-                        .font(TarsyTheme.font(size: 13, weight: .semibold))
-                        .foregroundColor(TarsyTheme.textPrimary)
-                }
-
-                Text(description)
-                    .font(TarsyTheme.font(size: 11))
-                    .foregroundColor(TarsyTheme.textSecondary)
-            }
-            .padding(.bottom, isLast ? 0 : 20)
-
-            Spacer()
         }
     }
 
@@ -506,6 +447,14 @@ struct DashboardView: View {
                         Image(systemName: "checkmark")
                     }
                 }
+            }
+
+            Divider()
+
+            Button {
+                showQRScanner = true
+            } label: {
+                Label("Add Mac...", systemImage: "qrcode.viewfinder")
             }
         } label: {
             HStack(spacing: 6) {

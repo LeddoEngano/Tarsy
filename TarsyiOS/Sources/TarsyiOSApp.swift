@@ -6,6 +6,12 @@ import TarsyShared
 @MainActor
 class DeepLinkRouter: ObservableObject {
     @Published var pendingWorkspaceId: UUID?
+    @Published var pendingPairing: PendingPairing?
+
+    struct PendingPairing: Equatable {
+        let machineId: String
+        let token: String
+    }
 }
 
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
@@ -134,13 +140,19 @@ struct TarsyiOSApp: App {
                     LiveActivityManager.shared.startWidgetResponseObserver()
                 }
                 .onOpenURL { url in
-                    guard url.scheme == "com.tarsy.ios" else { return }
-                    if url.host == "login-callback" {
-                        Task { await authManager.handleOAuthCallback(url: url) }
-                    } else if url.host == "workspace",
-                              let idStr = url.pathComponents.dropFirst().first,
-                              let workspaceId = UUID(uuidString: idStr) {
-                        deepLinkRouter.pendingWorkspaceId = workspaceId
+                    if url.scheme == "tarsy", url.host == "pair" {
+                        // QR code pairing deep link: tarsy://pair?m=...&t=...
+                        if let params = PairingService.parsePairingURL(url) {
+                            deepLinkRouter.pendingPairing = .init(machineId: params.machineId, token: params.token)
+                        }
+                    } else if url.scheme == "com.tarsy.ios" {
+                        if url.host == "login-callback" {
+                            Task { await authManager.handleOAuthCallback(url: url) }
+                        } else if url.host == "workspace",
+                                  let idStr = url.pathComponents.dropFirst().first,
+                                  let workspaceId = UUID(uuidString: idStr) {
+                            deepLinkRouter.pendingWorkspaceId = workspaceId
+                        }
                     }
                 }
                 .onChange(of: scenePhase) { _, newPhase in

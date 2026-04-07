@@ -41,6 +41,7 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLSchemes:
               - com.tarsy.ios
+              - tarsy
         NSSupportsLiveActivities: true
         NSSupportsLiveActivitiesFrequentUpdates: true
         UIAppFonts:

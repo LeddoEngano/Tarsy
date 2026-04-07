@@ -901,40 +901,44 @@ struct OnboardingWindow: View {
     // MARK: - Ready Step
 
     private var readyStep: some View {
-        VStack(spacing: 0) {
-            Spacer()
+        ScrollView(showsIndicators: false) {
+            VStack(spacing: 0) {
+                readyIcon
+                    .padding(.top, 24)
+                    .padding(.bottom, 16)
 
-            readyIcon
-                .padding(.bottom, 16)
+                Text("tarsy is ready")
+                    .font(TarsyTheme.font(size: 20, weight: .bold))
+                    .foregroundColor(Theme.textPrimary)
+                    .padding(.bottom, 4)
 
-            Text("tarsy is ready")
-                .font(TarsyTheme.font(size: 20, weight: .bold))
-                .foregroundColor(Theme.textPrimary)
-                .padding(.bottom, 4)
+                Text("everything is set up and running")
+                    .font(TarsyTheme.font(size: 12))
+                    .foregroundColor(Theme.textSecondary)
+                    .padding(.bottom, 20)
 
-            Text("everything is set up and running")
-                .font(TarsyTheme.font(size: 12))
-                .foregroundColor(Theme.textSecondary)
-                .padding(.bottom, 24)
+                readyStatusCards
+                    .padding(.horizontal, 48)
+                    .padding(.bottom, 24)
 
-            readyStatusCards
-                .padding(.horizontal, 48)
-                .padding(.bottom, 28)
+                // QR Pairing Section
+                Divider()
+                    .background(Theme.border)
+                    .padding(.horizontal, 48)
+                    .padding(.bottom, 20)
 
-            Text("tarsy runs in your menu bar.\nopen the app on your iPhone to start.")
-                .font(TarsyTheme.font(size: 11))
-                .foregroundColor(Theme.textMuted)
-                .multilineTextAlignment(.center)
-                .lineSpacing(3)
-                .padding(.bottom, 24)
+                PairingQRCodeView(machineId: daemonManager.machineId)
+                    .padding(.horizontal, 48)
+                    .padding(.bottom, 24)
 
-            readyDismissButton
-
-            Spacer()
+                readyDismissButton
+                    .padding(.bottom, 24)
+            }
         }
     }
 
     @State private var readyLogoVisible = false
+
 
     private var readyIcon: some View {
         Image("WhiteTarsyLogo")

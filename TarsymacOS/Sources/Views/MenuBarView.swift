@@ -72,6 +72,11 @@ struct MenuBarView: View {
                     }
                 }
 
+                menuItem(icon: "qrcode", label: "Show Pairing QR Code") {
+                    openWindow(id: "pairing-qr")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+
                 menuItem(icon: "gear", label: "Setup") {
                     openWindow(id: "onboarding")
                 }

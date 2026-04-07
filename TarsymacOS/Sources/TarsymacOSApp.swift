@@ -62,6 +62,15 @@ struct TarsymacOSApp: App {
         }
         .menuBarExtraStyle(.window)
 
+        // Pairing QR Code window
+        Window("Pair iPhone", id: "pairing-qr") {
+            PairingQRWindow()
+                .environmentObject(daemonManager)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
         // Settings
         Settings {
             SettingsView()
