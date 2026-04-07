@@ -140,6 +140,10 @@ actor GenericCLIEngine: AIEngine {
         sendMessage(answer)
     }
 
+    func interrupt() {
+        currentProcess?.interrupt()
+    }
+
     func terminate() {
         isRunning = false
         currentProcess?.terminate()
@@ -321,7 +325,7 @@ actor GenericCLIEngine: AIEngine {
     }
 
     /// Sanitize user message to prevent CLI flag injection.
-    /// Process arguments don't go through a shell, but a leading dash could
+    /// Process arguments don't go through a shell, but the message could still
     /// inject flags into the target CLI (e.g., --system-prompt for Gemini).
     private func sanitizeMessage(_ message: String) -> String {
         var msg = message
@@ -329,15 +333,25 @@ actor GenericCLIEngine: AIEngine {
         while msg.hasPrefix("-") {
             msg = String(msg.dropFirst())
         }
+        // Strip null bytes which can truncate strings in C-based CLIs
+        msg = msg.replacingOccurrences(of: "\0", with: "")
+        // Limit message length to prevent memory abuse (256KB is generous for any prompt)
+        let maxLength = 256 * 1024
+        if msg.count > maxLength {
+            msg = String(msg.prefix(maxLength))
+        }
         return msg.trimmingCharacters(in: .whitespaces)
     }
 
     /// Build CLI arguments per engine.
+    /// Uses `--` (end-of-options marker) before positional arguments where supported
+    /// to prevent message content from being interpreted as flags.
     private func argsForEngine(message: String) -> [String] {
         let safeMessage = sanitizeMessage(message)
         switch engineType {
         case .gemini:
             // gemini -p "prompt" --output-format stream-json [--yolo | --approval-mode auto_edit]
+            // -p takes the next arg as the prompt value, so safeMessage is already positional to -p
             var args = ["-p", safeMessage, "--output-format", "stream-json"]
             if permissionMode == .dangerous {
                 args.append("--yolo")
@@ -347,7 +361,8 @@ actor GenericCLIEngine: AIEngine {
             return args
         case .codex:
             // Codex is handled by CodexSession — this fallback should not be reached
-            return [safeMessage]
+            // Use `--` to prevent message from being parsed as flags
+            return ["--", safeMessage]
         case .aider:
             var args = ["--message", safeMessage]
             if permissionMode != .dangerous {
@@ -355,17 +370,17 @@ actor GenericCLIEngine: AIEngine {
             }
             return args
         case .cursor:
-            return [safeMessage]
+            return ["--", safeMessage]
         case .windsurf:
-            return [safeMessage]
+            return ["--", safeMessage]
         case .amp:
             return ["--prompt", safeMessage]
         case .cline:
             return ["--prompt", safeMessage]
         case .copilot:
-            return ["copilot", safeMessage]
+            return ["copilot", "--", safeMessage]
         case .custom, .claude:
-            return [safeMessage]
+            return ["--", safeMessage]
         }
     }
 

@@ -208,9 +208,27 @@ public struct WSPacket: Codable, Sendable {
         return try encoder.encode(self)
     }
 
+    /// Maximum allowed size for a single WSPacket payload in bytes (1MB).
+    /// Binary frames (video, screenshots) bypass this limit as they use raw WebSocket binary messages.
+    private static let maxPacketSize = 1_048_576
+
     public static func decode(from data: Data) throws -> WSPacket {
+        guard data.count <= maxPacketSize else {
+            throw WSPacketError.payloadTooLarge(data.count)
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(WSPacket.self, from: data)
+    }
+
+    public enum WSPacketError: LocalizedError {
+        case payloadTooLarge(Int)
+
+        public var errorDescription: String? {
+            switch self {
+            case .payloadTooLarge(let size):
+                return "WSPacket too large: \(size) bytes (max \(WSPacket.maxPacketSize))"
+            }
+        }
     }
 }

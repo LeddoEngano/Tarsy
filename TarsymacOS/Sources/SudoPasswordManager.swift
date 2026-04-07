@@ -48,8 +48,9 @@ actor SudoPasswordManager {
         .devTools: ["xcode-select", "xcodebuild", "softwareupdate"],
     ]
 
-    /// Shell metacharacters that indicate command chaining (potential injection)
-    private static let dangerousPatterns = ["; ", " && ", " || ", " | ", "$(", "`", " > ", " >> ", " < "]
+    /// Shell metacharacters that indicate command chaining (potential injection).
+    /// Checked without requiring surrounding spaces to prevent bypass via ";cmd" or "&&cmd".
+    private static let dangerousPatterns = [";", "&&", "||", "|", "$(", "`", "${", "\n", "\r", ">", ">>", "<", "<<"]
 
     /// Known sudo flags to strip when parsing commands
     private static let sudoFlags: Set<String> = ["-S", "-E", "-v", "-k", "-K", "-n", "-H", "-P", "-b"]

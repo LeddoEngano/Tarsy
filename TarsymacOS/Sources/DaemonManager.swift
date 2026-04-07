@@ -1579,9 +1579,17 @@ class DaemonManager: ObservableObject {
 
     // MARK: - Remote Input
 
+    /// Clamp a coordinate to valid range, rejecting NaN and Infinity
+    private func clampCoordinate(_ value: Double, fallback: Double = 0.5) -> Double {
+        guard value.isFinite else { return fallback }
+        return min(max(value, 0.0), 1.0)
+    }
+
     private func handleRemoteInput(packet: WSPacket) {
-        let x = Double(packet.payload?["x"] ?? "0.5") ?? 0.5
-        let y = Double(packet.payload?["y"] ?? "0.5") ?? 0.5
+        let rawX = Double(packet.payload?["x"] ?? "0.5") ?? 0.5
+        let rawY = Double(packet.payload?["y"] ?? "0.5") ?? 0.5
+        let x = clampCoordinate(rawX)
+        let y = clampCoordinate(rawY)
         log("remoteInput: \(packet.action.rawValue) x=\(String(format: "%.3f", x)) y=\(String(format: "%.3f", y))")
 
         switch packet.action {
@@ -1596,23 +1604,27 @@ class DaemonManager: ObservableObject {
         case .remoteScroll:
             let dx = Double(packet.payload?["dx"] ?? "0") ?? 0
             let dy = Double(packet.payload?["dy"] ?? "0") ?? 0
+            guard dx.isFinite, dy.isFinite else { return }
             remoteInput.scroll(relativeX: x, relativeY: y, deltaX: dx, deltaY: dy)
         case .remoteScrollEnd:
             remoteInput.scrollEnd()
         case .remoteDrag:
-            let toX = Double(packet.payload?["toX"] ?? "0") ?? 0
-            let toY = Double(packet.payload?["toY"] ?? "0") ?? 0
+            let toX = clampCoordinate(Double(packet.payload?["toX"] ?? "0") ?? 0, fallback: 0)
+            let toY = clampCoordinate(Double(packet.payload?["toY"] ?? "0") ?? 0, fallback: 0)
             remoteInput.drag(fromX: x, fromY: y, toX: toX, toY: toY)
         case .remotePinchStart:
             remoteInput.pinchStart(relativeX: x, relativeY: y)
         case .remotePinch:
             let scale = Double(packet.payload?["scale"] ?? "1") ?? 1
+            guard scale.isFinite, scale > 0 else { return }
             remoteInput.pinchUpdate(scale: scale)
         case .remotePinchEnd:
             remoteInput.pinchEnd()
         case .remoteKeyboard:
             if let text = packet.payload?["text"] {
-                remoteInput.typeText(text)
+                // Limit keyboard input to 10KB to prevent memory abuse
+                let safeText = text.count > 10_240 ? String(text.prefix(10_240)) : text
+                remoteInput.typeText(safeText)
             }
         case .remoteButton:
             if let button = packet.payload?["button"] {

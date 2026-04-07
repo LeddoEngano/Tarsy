@@ -345,9 +345,16 @@ const server = Bun.serve({
           "http://localhost",
           "https://localhost",
         ];
-        const isAllowed = ALLOWED_ORIGINS.some((allowed) =>
-          origin === allowed || origin.startsWith(allowed + ":")
-        );
+        let isAllowed = ALLOWED_ORIGINS.includes(origin);
+        // Allow localhost with any port (for local development)
+        if (!isAllowed) {
+          try {
+            const parsed = new URL(origin);
+            if (parsed.hostname === "localhost") {
+              isAllowed = parsed.protocol === "http:" || parsed.protocol === "https:";
+            }
+          } catch {}
+        }
         if (!isAllowed) {
           console.log(`[Relay] Rejected WebSocket from disallowed origin: ${origin}`);
           return new Response("Forbidden: origin not allowed", { status: 403 });

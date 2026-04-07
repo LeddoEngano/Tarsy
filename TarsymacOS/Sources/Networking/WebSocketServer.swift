@@ -20,6 +20,9 @@ actor WebSocketServer {
 
     /// Auth failure rate limiting by IP: tracks failure count and optional ban expiry
     private var authFailures: [String: (count: Int, firstFailure: Date, bannedUntil: Date?)] = [:]
+    /// Per-client message rate limiting: max messages per second
+    private var clientMessageCounts: [String: (count: Int, resetAt: Date)] = [:]
+    private let maxMessagesPerSecond = 120
     /// Called on successful auth with the auth packet. Returns extra fields to include in authSuccess.
     private var onAuthSuccess: (@Sendable (WSPacket) async -> [String: String])?
 
@@ -203,6 +206,18 @@ actor WebSocketServer {
         return false
     }
 
+    /// Check if a client has exceeded the message rate limit
+    private func isClientRateLimited(_ clientId: String) -> Bool {
+        let now = Date()
+        var entry = clientMessageCounts[clientId] ?? (count: 0, resetAt: now.addingTimeInterval(1))
+        if now >= entry.resetAt {
+            entry = (count: 0, resetAt: now.addingTimeInterval(1))
+        }
+        entry.count += 1
+        clientMessageCounts[clientId] = entry
+        return entry.count > maxMessagesPerSecond
+    }
+
     /// Record an auth failure for rate limiting. Returns true if the IP is now banned.
     private func recordAuthFailure(ip: String) -> Bool {
         let now = Date()
@@ -335,6 +350,12 @@ actor WebSocketServer {
                     return
                 }
 
+                // Rate limit: drop excess messages silently
+                if await self.isClientRateLimited(clientId) {
+                    await self.receiveLoop(connection: connection, clientId: clientId, authenticated: true, clientIP: clientIP)
+                    return
+                }
+
                 // Fire-and-forget: don't block the receive loop waiting for packet handling.
                 // This allows new messages (like sudoResponse) to arrive while a handler is suspended.
                 let handler = await self.getPacketHandler()
@@ -354,6 +375,7 @@ actor WebSocketServer {
         connections[clientId]?.cancel()
         connections.removeValue(forKey: clientId)
         authenticatedClients.remove(clientId)
+        clientMessageCounts.removeValue(forKey: clientId)
         onClientDisconnected?(clientId)
     }
 

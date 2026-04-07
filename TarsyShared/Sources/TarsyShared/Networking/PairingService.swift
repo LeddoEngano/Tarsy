@@ -29,7 +29,7 @@ public class PairingService: ObservableObject {
             return f.string(from: expiry)
         }()
 
-        print("[PairingService] Generating token for machine \(machineId), expires_at: \(expiresAtString), code: \(code)")
+        print("[PairingService] Generating pairing token for machine \(machineId), expires_at: \(expiresAtString)")
 
         let row: [String: String] = [
             "machine_id": machineId.uuidString,
@@ -48,7 +48,7 @@ public class PairingService: ObservableObject {
         expiresAt = expiry
 
         let qrURL = "tarsy://pair?m=\(machineId.uuidString)&t=\(token)"
-        print("[PairingService] QR URL: \(qrURL)")
+        print("[PairingService] QR URL generated for machine \(machineId)")
         return qrURL
     }
 
@@ -87,7 +87,7 @@ public class PairingService: ObservableObject {
         pairingError = nil
         defer { isPairing = false }
 
-        print("[PairingService] Claiming machine with body: \(body)")
+        print("[PairingService] Claiming machine with \(body.count) fields")
 
         let session = try await supabase.auth.session
         let jsonData = try JSONSerialization.data(withJSONObject: body)
