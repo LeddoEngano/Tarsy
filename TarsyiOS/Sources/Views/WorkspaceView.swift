@@ -91,6 +91,8 @@ struct WorkspaceView: View {
     @State private var tabStates: [String: TabState] = [:]
     /// Maps WSPacket.id → tab.id for pending engineCreate requests
     @State private var pendingCreateRequests: [String: String] = [:]
+    /// Queued commands for terminal tabs whose session hasn't been created yet
+    @State private var pendingTerminalCommands: [String: String] = [:]
 
     /// Returns true if the packet's sessionId matches the currently active tab
     private func isActiveTabSession(_ packet: WSPacket) -> Bool {
@@ -563,53 +565,9 @@ struct WorkspaceView: View {
         }
     }
 
-    // MARK: - Terminal Area
+    // MARK: - Terminal
 
     private static let ansiRegex = try! NSRegularExpression(pattern: "\u{1B}\\[[0-9;]*[A-Za-z]")
-
-    private var terminalOutputText: String {
-        let header = "\(workspace.localPath)\n\n"
-        let raw = chatService.messages
-            .map { msg in
-                if msg.role == .user {
-                    return "$ \(msg.content)\n"
-                } else {
-                    return msg.content
-                }
-            }
-            .joined()
-        let range = NSRange(raw.startIndex..., in: raw)
-        let cleaned = Self.ansiRegex.stringByReplacingMatches(in: raw, range: range, withTemplate: "")
-        return header + cleaned
-    }
-
-    private var terminalArea: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                Text(terminalOutputText)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(TarsyTheme.textPrimary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                    .id("terminal-content")
-
-                Color.clear
-                    .frame(height: 1)
-                    .id("terminal-bottom")
-            }
-            .background(Color(hex: "0a0a0a"))
-            .onChange(of: chatService.updateCounter) { _, _ in
-                withAnimation(.easeOut(duration: 0.1)) {
-                    proxy.scrollTo("terminal-bottom", anchor: .bottom)
-                }
-            }
-            .onChange(of: chatService.messages.count) { _, _ in
-                withAnimation(.easeOut(duration: 0.1)) {
-                    proxy.scrollTo("terminal-bottom", anchor: .bottom)
-                }
-            }
-        }
-    }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy) {
         withAnimation(.easeOut(duration: 0.2)) {
@@ -834,12 +792,20 @@ struct WorkspaceView: View {
                     Divider().background(TarsyTheme.backgroundTertiary)
 
                     if currentTab.type == .terminal {
-                        terminalArea
+                        TerminalContentView(
+                            workspace: workspace,
+                            chatService: chatService,
+                            onSendCommand: { command in
+                                sendTerminalCommand(command)
+                            }
+                        )
                     } else {
                         chatArea
                     }
 
-                    inputBar
+                    if currentTab.type != .terminal {
+                        inputBar
+                    }
                 }
                 .frame(height: max(UIScreen.main.bounds.height, UIScreen.main.bounds.width) * 0.4)
                 .background(TarsyTheme.backgroundPrimary.opacity(0.95))
@@ -930,7 +896,13 @@ struct WorkspaceView: View {
             ZStack {
                 VStack(spacing: 0) {
                     if currentTab.type == .terminal {
-                        terminalArea
+                        TerminalContentView(
+                            workspace: workspace,
+                            chatService: chatService,
+                            onSendCommand: { command in
+                                sendTerminalCommand(command)
+                            }
+                        )
                     } else {
                         chatArea
 
@@ -943,7 +915,9 @@ struct WorkspaceView: View {
                         }
                     }
 
-                    inputBar
+                    if currentTab.type != .terminal {
+                        inputBar
+                    }
                 }
 
                 if let questions = interactiveQuestions {
@@ -1539,13 +1513,33 @@ struct WorkspaceView: View {
                     action: .openclawMessage,
                     payload: ["message": messageText]
                 ))
+            }
+        }
+    }
+
+    private func sendTerminalCommand(_ command: String) {
+        let msg = ChatMessage(
+            workspaceId: workspace.id,
+            tabId: currentTab.id,
+            role: .user,
+            content: command
+        )
+        Task {
+            await chatService.addMessage(msg)
+            if let sessionId = currentTab.sessionId {
+                connectionManager.send(WSPacket(
+                    action: .terminalInput,
+                    payload: ["sessionId": sessionId, "input": command]
+                ))
             } else {
-                if let sessionId = currentTab.sessionId {
-                    connectionManager.send(WSPacket(
-                        action: .terminalInput,
-                        payload: ["sessionId": sessionId, "input": messageText]
-                    ))
-                }
+                // Terminal session not yet created — create it and queue the command
+                let createPacket = WSPacket(
+                    action: .terminalCreate,
+                    payload: ["path": workspace.localPath]
+                )
+                pendingCreateRequests[createPacket.id] = currentTab.id
+                pendingTerminalCommands[currentTab.id] = command
+                connectionManager.send(createPacket)
             }
         }
     }
@@ -1837,13 +1831,23 @@ struct WorkspaceView: View {
                         if let idx = tabs.firstIndex(where: { $0.id == tabId }) {
                             tabs[idx].sessionId = sessionId
                         }
+                        // Send any queued command that was waiting for this session
+                        if let queuedCommand = pendingTerminalCommands.removeValue(forKey: tabId) {
+                            connectionManager.send(WSPacket(
+                                action: .terminalInput,
+                                payload: ["sessionId": sessionId, "input": queuedCommand]
+                            ))
+                        }
                     }
 
                 case .terminalOutput:
                     if let output = packet.payload?["output"] {
                         let termSid = packet.payload?["sessionId"] ?? ""
                         let termTabId = tabId(forSession: termSid) ?? currentTab.id
-                        chatService.addAssistantChunk(workspaceId: workspace.id, tabId: termTabId, content: output)
+                        // Strip ANSI escape codes at receive time to avoid repeated regex on render
+                        let range = NSRange(output.startIndex..., in: output)
+                        let cleaned = Self.ansiRegex.stringByReplacingMatches(in: output, range: range, withTemplate: "")
+                        chatService.addAssistantChunk(workspaceId: workspace.id, tabId: termTabId, content: cleaned)
                     }
 
                 // Engine status (model, tokens, context %)
@@ -2245,6 +2249,78 @@ struct TabButton: View {
 struct MessageBubble: View {
     let message: ChatMessage
 
+    private enum ContentSegment {
+        case text(String)
+        case codeBlock(language: String?, code: String)
+    }
+
+    private let parsedSegments: [(offset: Int, segment: ContentSegment)]
+
+    init(message: ChatMessage) {
+        self.message = message
+        self.parsedSegments = Self.parseSegments(message.content)
+    }
+
+    private static func parseSegments(_ content: String) -> [(offset: Int, segment: ContentSegment)] {
+        var result: [ContentSegment] = []
+        var remaining = content[...]
+
+        while let tripleBacktickRange = remaining.range(of: "```") {
+            let textBefore = String(remaining[remaining.startIndex..<tripleBacktickRange.lowerBound])
+            if !textBefore.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                result.append(.text(textBefore))
+            }
+
+            let afterOpening = remaining[tripleBacktickRange.upperBound...]
+            // Extract optional language hint on the opening line
+            var language: String? = nil
+            if let newline = afterOpening.firstIndex(of: "\n") {
+                let langHint = afterOpening[afterOpening.startIndex..<newline]
+                    .trimmingCharacters(in: .whitespaces)
+                if !langHint.isEmpty && !langHint.contains(" ") {
+                    language = langHint
+                }
+            }
+
+            // Closing ``` must be at start of a line to avoid matching inner backticks
+            if let closingRange = afterOpening.range(of: "\n```") {
+                var codeStart = afterOpening.startIndex
+                // Skip the language line if present
+                if let newline = afterOpening.firstIndex(of: "\n"),
+                   newline < closingRange.lowerBound {
+                    codeStart = afterOpening.index(after: newline)
+                }
+                let code = String(afterOpening[codeStart..<closingRange.lowerBound])
+                    .trimmingCharacters(in: .newlines)
+                result.append(.codeBlock(language: language, code: code))
+                // Skip past the closing \n```
+                let afterClosing = afterOpening.index(closingRange.upperBound, offsetBy: 0)
+                remaining = afterOpening[afterClosing...]
+            } else {
+                // No closing ```, treat rest as code block
+                var codeStart = afterOpening.startIndex
+                if let newline = afterOpening.firstIndex(of: "\n") {
+                    codeStart = afterOpening.index(after: newline)
+                }
+                let code = String(afterOpening[codeStart...])
+                    .trimmingCharacters(in: .newlines)
+                result.append(.codeBlock(language: language, code: code))
+                remaining = afterOpening[afterOpening.endIndex...]
+            }
+        }
+
+        let trailing = String(remaining)
+        if !trailing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            result.append(.text(trailing))
+        }
+
+        if result.isEmpty {
+            result.append(.text(content))
+        }
+
+        return result.enumerated().map { ($0.offset, $0.element) }
+    }
+
     var body: some View {
         HStack {
             if message.role == .user { Spacer(minLength: 60) }
@@ -2254,17 +2330,90 @@ struct MessageBubble: View {
                     .font(TarsyTheme.font(size: 9))
                     .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
 
-                Text(message.content)
-                    .font(TarsyTheme.monoFontSmall)
-                    .foregroundColor(message.role == .user ? TarsyTheme.backgroundPrimary : TarsyTheme.textPrimary)
+                if message.role == .user {
+                    Text(message.content)
+                        .font(TarsyTheme.monoFontSmall)
+                        .foregroundColor(TarsyTheme.backgroundPrimary)
+                        .padding(10)
+                        .background(TarsyTheme.accentAmber)
+                        .cornerRadius(10)
+                        .textSelection(.enabled)
+                } else {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(parsedSegments, id: \.offset) { item in
+                            switch item.segment {
+                            case .text(let text):
+                                Text(text)
+                                    .font(TarsyTheme.monoFontSmall)
+                                    .foregroundColor(TarsyTheme.textPrimary)
+
+                            case .codeBlock(let language, let code):
+                                CodeBlockView(language: language, code: code)
+                            }
+                        }
+                    }
                     .padding(10)
-                    .background(message.role == .user ? TarsyTheme.accentAmber : TarsyTheme.backgroundSecondary)
+                    .background(TarsyTheme.backgroundSecondary)
                     .cornerRadius(10)
                     .textSelection(.enabled)
+                }
             }
 
             if message.role == .assistant { Spacer(minLength: 60) }
         }
+    }
+}
+
+struct CodeBlockView: View {
+    let language: String?
+    let code: String
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header bar
+            HStack {
+                if let language {
+                    Text(language)
+                        .font(TarsyTheme.font(size: 9))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                }
+                Spacer()
+                Button {
+                    UIPasteboard.general.string = code
+                    Haptics.light()
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        copied = false
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10))
+                        Text(copied ? "copied" : "copy")
+                            .font(TarsyTheme.font(size: 9))
+                    }
+                    .foregroundColor(copied ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(TarsyTheme.backgroundPrimary.opacity(0.6))
+
+            // Code content
+            Text(code)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(TarsyTheme.textPrimary)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(TarsyTheme.backgroundPrimary)
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(TarsyTheme.backgroundTertiary, lineWidth: 1)
+        )
     }
 }
 
