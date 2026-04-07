@@ -196,6 +196,21 @@ class RemoteInputService {
         case "rotate_right":
             // Cmd+Right Arrow = Rotate Right
             sendSimulatorShortcut(virtualKey: 124, flags: .maskCommand)
+        case "app_switcher":
+            // Double Cmd+Shift+H = App Switcher
+            inputQueue.async { [self] in
+                ensureWindowFocused()
+                let flags: CGEventFlags = [.maskCommand, .maskShift]
+                for _ in 0..<2 {
+                    let down = CGEvent(keyboardEventSource: eventSource, virtualKey: 4, keyDown: true)
+                    down?.flags = flags
+                    down?.post(tap: .cghidEventTap)
+                    let up = CGEvent(keyboardEventSource: eventSource, virtualKey: 4, keyDown: false)
+                    up?.flags = flags
+                    up?.post(tap: .cghidEventTap)
+                    usleep(100_000)
+                }
+            }
         case "screenshot":
             break
         default:

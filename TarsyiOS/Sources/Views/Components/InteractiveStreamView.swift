@@ -218,6 +218,7 @@ struct InteractiveStreamView: View {
                             HStack(spacing: 12) {
                                 screenshotButton
                                 deviceButton(icon: "house.fill", action: "home")
+                                deviceButton(icon: "square.stack.3d.up", action: "app_switcher")
                             }
 
                             Spacer()
