@@ -215,12 +215,6 @@ struct InteractiveStreamView: View {
                                 }
                             }
                         } else {
-                            HStack(spacing: 12) {
-                                screenshotButton
-                                deviceButton(icon: "house.fill", action: "home")
-                                deviceButton(icon: "square.stack.3d.up", action: "app_switcher")
-                            }
-
                             Spacer()
 
                             HStack(spacing: 8) {
@@ -251,6 +245,24 @@ struct InteractiveStreamView: View {
                             .padding(.top, 8)
                             Spacer()
                         }
+                    }
+
+                    Spacer()
+
+                    // Left column: mobile device buttons
+                    if !isWebMode {
+                        HStack {
+                            VStack(spacing: 10) {
+                                screenshotButton
+                                deviceButton(icon: "house.fill", action: "home")
+                                deviceButton(icon: "square.stack.3d.up", action: "app_switcher")
+                            }
+                            .padding(6)
+                            .background(.black.opacity(0.4))
+                            .cornerRadius(22)
+                            Spacer()
+                        }
+                        .padding(.leading, 12)
                     }
 
                     Spacer()

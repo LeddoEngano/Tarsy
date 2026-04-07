@@ -129,13 +129,19 @@ struct StreamPlayerView: View {
                 // Stream content — H.264 via WebSocket
                 VStack(spacing: 0) {
                     if let layer = viewModel.h264Decoder.displayLayer {
-                        H264PlayerView(displayLayer: layer)
-                            .id("h264-\(isFullscreen)")
-                            .aspectRatio(16.0/13.0, contentMode: .fit)
-                            .clipped()
-                            .onTapGesture(count: 2) {
-                                isFullscreen.toggle()
-                            }
+                        GeometryReader { geo in
+                            H264PlayerView(displayLayer: layer)
+                                .id("h264-\(isFullscreen)")
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .highPriorityGesture(
+                                    TapGesture(count: 2).onEnded { isFullscreen.toggle() }
+                                )
+                                .gesture(miniTapGesture(containerSize: geo.size))
+                                .gesture(miniScrollGesture(containerSize: geo.size))
+                                .gesture(miniLongPressGesture(containerSize: geo.size))
+                        }
+                        .aspectRatio(16.0/13.0, contentMode: .fit)
+                        .clipped()
                     }
                     Spacer(minLength: 0)
                 }
@@ -161,69 +167,83 @@ struct StreamPlayerView: View {
                             .cornerRadius(4)
                     }
 
+                    // Mobile device buttons — left column
+                    if !isWebMode {
+                        HStack {
+                            VStack(spacing: 6) {
+                                streamButton("camera.viewfinder") { saveScreenshot() }
+                                streamButton("house.fill") {
+                                    connectionManager.send(WSPacket(action: .remoteButton, payload: ["button": "home"]))
+                                }
+                                streamButton("square.stack.3d.up") {
+                                    connectionManager.send(WSPacket(action: .remoteButton, payload: ["button": "app_switcher"]))
+                                }
+                            }
+                            .padding(4)
+                            .background(.black.opacity(0.4))
+                            .cornerRadius(16)
+                            Spacer()
+                        }
+                        .padding(.leading, 4)
+                    }
+
                     Spacer()
 
-                    // Bottom controls — matches browser layout
-                    VStack(alignment: .leading, spacing: 8) {
-                        streamButton("camera.viewfinder") {
-                            #if DEBUG
-                            print("[Screenshot] Button tapped")
-                            #endif
-                            saveScreenshot()
+                    // Bottom controls
+                    HStack(spacing: 8) {
+                        if isWebMode {
+                            // Screenshot
+                            streamButton("camera.viewfinder") { saveScreenshot() }
+                                .accessibilityLabel("Take screenshot")
+
+                            // URL
+                            streamButton("globe") {
+                                miniUrlText = currentBrowserUrl()
+                                withAnimation(.easeInOut(duration: 0.25)) { showMiniUrlBar = true }
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isMiniUrlFocused = true }
+                            }
+                            .accessibilityLabel("Enter URL")
+
+                            // Back
+                            streamButton("chevron.left") {
+                                connectionManager.send(WSPacket(action: .browserBack, payload: [:]))
+                            }
+                            .accessibilityLabel("Go back")
+
+                            // Forward
+                            streamButton("chevron.right") {
+                                connectionManager.send(WSPacket(action: .browserForward, payload: [:]))
+                            }
+                            .accessibilityLabel("Go forward")
+
+                            // Reload
+                            streamButton("arrow.clockwise") {
+                                connectionManager.send(WSPacket(action: .browserRefresh, payload: [:]))
+                            }
+                            .accessibilityLabel("Reload page")
                         }
-                        .accessibilityLabel("Take screenshot")
 
-                        HStack(spacing: 8) {
-                            if isWebMode {
-                                // URL
-                                streamButton("globe") {
-                                    miniUrlText = currentBrowserUrl()
-                                    withAnimation(.easeInOut(duration: 0.25)) { showMiniUrlBar = true }
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { isMiniUrlFocused = true }
-                                }
-                                .accessibilityLabel("Enter URL")
+                        Spacer()
 
-                                // Back
-                                streamButton("chevron.left") {
-                                    connectionManager.send(WSPacket(action: .browserBack, payload: [:]))
-                                }
-                                .accessibilityLabel("Go back")
-
-                                // Forward
-                                streamButton("chevron.right") {
-                                    connectionManager.send(WSPacket(action: .browserForward, payload: [:]))
-                                }
-                                .accessibilityLabel("Go forward")
-
-                                // Reload
-                                streamButton("arrow.clockwise") {
-                                    connectionManager.send(WSPacket(action: .browserRefresh, payload: [:]))
-                                }
-                                .accessibilityLabel("Reload page")
+                        // Port badge
+                        if isWebMode && detectedPorts.count > 1 {
+                            Button(action: { showPortPicker = true }) {
+                                Text(":\(String(selectedPort ?? 0))")
+                                    .font(TarsyTheme.font(size: 10))
+                                    .foregroundColor(.white.opacity(0.7))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 6)
+                                    .background(.ultraThinMaterial)
+                                    .cornerRadius(8)
                             }
-
-                            Spacer()
-
-                            // Port badge
-                            if isWebMode && detectedPorts.count > 1 {
-                                Button(action: { showPortPicker = true }) {
-                                    Text(":\(String(selectedPort ?? 0))")
-                                        .font(TarsyTheme.font(size: 10))
-                                        .foregroundColor(.white.opacity(0.7))
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 6)
-                                        .background(.ultraThinMaterial)
-                                        .cornerRadius(8)
-                                }
-                                .accessibilityLabel("Select port \(selectedPort ?? 0)")
-                            }
-
-                            // Fullscreen
-                            streamButton("arrow.up.left.and.arrow.down.right") {
-                                isFullscreen.toggle()
-                            }
-                            .accessibilityLabel(isFullscreen ? "Exit fullscreen" : "Enter fullscreen")
+                            .accessibilityLabel("Select port \(selectedPort ?? 0)")
                         }
+
+                        // Fullscreen
+                        streamButton("arrow.up.left.and.arrow.down.right") {
+                            isFullscreen.toggle()
+                        }
+                        .accessibilityLabel(isFullscreen ? "Exit fullscreen" : "Enter fullscreen")
                     }
                 }
                 .padding(8)
@@ -333,6 +353,14 @@ struct StreamPlayerView: View {
             connectionManager.removeListener("stream-ports-\(workspace.id)")
             viewModel.disconnect()
             isActive = false
+            miniDragActive = false
+            miniLastDragTranslation = .zero
+        }
+        .onChange(of: connectionManager.isConnected) { _, connected in
+            if !connected && miniDragActive {
+                miniDragActive = false
+                miniLastDragTranslation = .zero
+            }
         }
         .confirmationDialog("Select Port", isPresented: $showPortPicker, titleVisibility: .visible) {
             ForEach(detectedPorts) { port in
@@ -683,6 +711,88 @@ struct StreamPlayerView: View {
         connectionManager.send(WSPacket(action: .browserOpenUrl, payload: ["url": "http://localhost:\(port)"]))
     }
 
+    // MARK: - Mini Gestures (non-fullscreen interactivity)
+
+    @State private var miniDragActive = false
+    @State private var miniLastDragTranslation: CGSize = .zero
+    @State private var miniLastScrollTime: CFAbsoluteTime = 0
+    @State private var miniImageSize: CGSize = .zero
+
+    private func miniRelativePosition(from point: CGPoint, containerSize: CGSize) -> CGPoint? {
+        let relX = point.x / containerSize.width
+        let relY = point.y / containerSize.height
+        guard relX >= 0, relX <= 1, relY >= 0, relY <= 1 else { return nil }
+        return CGPoint(x: relX, y: relY)
+    }
+
+    private func f(_ v: CGFloat) -> String { String(format: "%.4f", v) }
+
+    private func miniTapGesture(containerSize: CGSize) -> some Gesture {
+        SpatialTapGesture()
+            .onEnded { value in
+                guard let rel = miniRelativePosition(from: value.location, containerSize: containerSize) else { return }
+                Haptics.light()
+                connectionManager.send(WSPacket(
+                    action: .remoteTap,
+                    payload: ["x": f(rel.x), "y": f(rel.y)]
+                ))
+            }
+    }
+
+    private func miniLongPressGesture(containerSize: CGSize) -> some Gesture {
+        LongPressGesture(minimumDuration: 0.5)
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .onEnded { value in
+                if case .second(true, let drag) = value, let loc = drag?.location,
+                   let rel = miniRelativePosition(from: loc, containerSize: containerSize) {
+                    Haptics.medium()
+                    connectionManager.send(WSPacket(
+                        action: .remoteLongPress,
+                        payload: ["x": f(rel.x), "y": f(rel.y)]
+                    ))
+                }
+            }
+    }
+
+    private func miniScrollGesture(containerSize: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { value in
+                guard let rel = miniRelativePosition(from: value.startLocation, containerSize: containerSize) else { return }
+
+                if !miniDragActive {
+                    miniDragActive = true
+                    miniLastDragTranslation = .zero
+                    connectionManager.send(WSPacket(
+                        action: .remoteScrollStart,
+                        payload: ["x": f(rel.x), "y": f(rel.y)]
+                    ))
+                }
+
+                let now = CFAbsoluteTimeGetCurrent()
+                guard now - miniLastScrollTime > 0.033 else { return }
+                miniLastScrollTime = now
+
+                let dx = value.translation.width - miniLastDragTranslation.width
+                let dy = value.translation.height - miniLastDragTranslation.height
+                miniLastDragTranslation = value.translation
+
+                connectionManager.send(WSPacket(
+                    action: .remoteScroll,
+                    payload: ["x": f(rel.x), "y": f(rel.y), "dx": f(dx), "dy": f(dy)]
+                ))
+            }
+            .onEnded { _ in
+                if miniDragActive {
+                    connectionManager.send(WSPacket(
+                        action: .remoteScrollEnd,
+                        payload: ["x": "0.5", "y": "0.5"]
+                    ))
+                    miniDragActive = false
+                    miniLastDragTranslation = .zero
+                }
+            }
+    }
+
     @ViewBuilder
     private func streamButton(_ icon: String, color: Color = .white, action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -691,7 +801,7 @@ struct StreamPlayerView: View {
                 .foregroundColor(color.opacity(0.9))
                 .frame(width: 28, height: 28)
                 .background(.ultraThinMaterial)
-                .cornerRadius(7)
+                .clipShape(Circle())
         }
     }
 }
