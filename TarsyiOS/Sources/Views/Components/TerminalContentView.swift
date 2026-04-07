@@ -32,7 +32,6 @@ private struct TerminalInputField: UIViewRepresentable {
         tf.setContentHuggingPriority(.defaultLow, for: .horizontal)
         tf.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        // Invisible placeholder
         tf.attributedPlaceholder = NSAttributedString(
             string: "command...",
             attributes: [
@@ -102,7 +101,7 @@ private struct TerminalInputField: UIViewRepresentable {
 struct TerminalCompletion: Identifiable, Equatable {
     let id = UUID()
     let name: String
-    let type: CompletionType // dir, file, or cmd
+    let type: CompletionType
 
     enum CompletionType: String {
         case dir, file, cmd
@@ -138,8 +137,14 @@ struct TerminalContentView: View {
 
     @State private var inputText = ""
     @State private var isKeyboardActive = false
-    /// Tracks whether completions are currently visible (to clear on next input change)
-    @State private var hadCompletions = false
+    /// Debounce task for auto-completion requests
+    @State private var debounceTask: Task<Void, Never>?
+    /// Set to true when applying a completion to skip the debounce cycle
+    @State private var isApplyingCompletion = false
+    /// Command history index (-1 = not browsing, 0 = most recent)
+    @State private var historyIndex: Int = -1
+    /// Saved input before entering history browse mode
+    @State private var savedInput: String = ""
 
     /// Terminal output split into lines for lazy rendering.
     /// ANSI codes are already stripped at receive time in WorkspaceView.
@@ -149,7 +154,6 @@ struct TerminalContentView: View {
             if msg.role == .user {
                 lines.append(TerminalLine(id: "u\(index)", text: "$ \(msg.content)", isCommand: true))
             } else {
-                // Split assistant output into individual lines for lazy rendering
                 let msgLines = msg.content.components(separatedBy: "\n")
                 for (lineIdx, line) in msgLines.enumerated() {
                     lines.append(TerminalLine(id: "o\(index)_\(lineIdx)", text: line, isCommand: false))
@@ -159,11 +163,50 @@ struct TerminalContentView: View {
         return lines
     }
 
+    /// Last path component of the workspace for the prompt (e.g. "my-project")
+    private var promptDirectory: String {
+        (workspace.localPath as NSString).lastPathComponent
+    }
+
     /// Extracts the last word from the input for completion context
     private var lastWord: String {
         let trimmed = inputText.trimmingCharacters(in: .whitespaces)
         guard let lastSpace = trimmed.lastIndex(of: " ") else { return trimmed }
         return String(trimmed[trimmed.index(after: lastSpace)...])
+    }
+
+    /// Previous commands in reverse order (most recent first)
+    private var commandHistory: [String] {
+        chatService.messages
+            .filter { $0.role == .user }
+            .map { $0.content }
+            .reversed()
+            .filter { !$0.isEmpty }
+    }
+
+    private func historyUp() {
+        let history = commandHistory
+        guard !history.isEmpty else { return }
+        if historyIndex == -1 {
+            savedInput = inputText
+        }
+        let nextIndex = min(historyIndex + 1, history.count - 1)
+        guard nextIndex != historyIndex else { return }
+        historyIndex = nextIndex
+        isApplyingCompletion = true // prevent debounce from firing
+        inputText = history[nextIndex]
+    }
+
+    private func historyDown() {
+        guard historyIndex >= 0 else { return }
+        let nextIndex = historyIndex - 1
+        historyIndex = nextIndex
+        isApplyingCompletion = true
+        if nextIndex < 0 {
+            inputText = savedInput
+        } else {
+            inputText = commandHistory[nextIndex]
+        }
     }
 
     var body: some View {
@@ -188,20 +231,8 @@ struct TerminalContentView: View {
                             .textSelection(.enabled)
                     }
 
-                    // Autocomplete overlay (above prompt)
-                    if isCompletionLoading {
-                        HStack(spacing: 6) {
-                            ProgressView()
-                                .scaleEffect(0.6)
-                                .tint(TarsyTheme.textSecondary)
-                            Text("completing...")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(TarsyTheme.textSecondary.opacity(0.6))
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 4)
-                        .id("completion-loading")
-                    } else if !completions.isEmpty {
+                    // Autocomplete suggestions (above prompt)
+                    if !completions.isEmpty {
                         completionOverlay
                             .id("completions")
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -209,33 +240,45 @@ struct TerminalContentView: View {
 
                     // Inline prompt + input
                     HStack(spacing: 0) {
-                        // Tab button
-                        Button(action: {
-                            Haptics.light()
-                            onRequestCompletion(inputText)
-                        }) {
-                            Text("⇥")
-                                .font(.system(size: 15, weight: .medium, design: .monospaced))
-                                .foregroundColor(inputText.isEmpty ? TarsyTheme.textSecondary.opacity(0.3) : TarsyTheme.textSecondary)
-                                .frame(width: 28, height: 24)
-                                .background(TarsyTheme.backgroundTertiary.opacity(inputText.isEmpty ? 0.3 : 0.8))
-                                .cornerRadius(5)
-                        }
-                        .disabled(inputText.isEmpty)
-
-                        Text(" $ ")
+                        Text("\(promptDirectory) $ ")
                             .font(.system(size: 13, design: .monospaced))
                             .foregroundColor(TarsyTheme.textSecondary)
+                            .lineLimit(1)
 
                         TerminalInputField(
                             text: $inputText,
                             isActive: $isKeyboardActive,
                             onSubmit: { command in
                                 Haptics.light()
+                                historyIndex = -1
+                                savedInput = ""
                                 onSendCommand(command)
                             }
                         )
                         .frame(height: 20)
+
+                        Spacer(minLength: 4)
+
+                        // History arrows
+                        HStack(spacing: 2) {
+                            Button(action: historyUp) {
+                                Image(systemName: "chevron.up")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(commandHistory.isEmpty ? TarsyTheme.textSecondary.opacity(0.2) : TarsyTheme.textSecondary)
+                                    .frame(width: 26, height: 22)
+                            }
+                            .disabled(commandHistory.isEmpty)
+
+                            Button(action: historyDown) {
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundColor(historyIndex < 0 ? TarsyTheme.textSecondary.opacity(0.2) : TarsyTheme.textSecondary)
+                                    .frame(width: 26, height: 22)
+                            }
+                            .disabled(historyIndex < 0)
+                        }
+                        .background(TarsyTheme.backgroundTertiary.opacity(0.6))
+                        .cornerRadius(5)
                     }
                     .padding(.horizontal, 12)
                     .padding(.top, 4)
@@ -271,22 +314,47 @@ struct TerminalContentView: View {
                     }
                 }
             }
-            .onChange(of: completions) { _, newValue in
-                hadCompletions = !newValue.isEmpty
+            .onChange(of: completions) { _, _ in
                 withAnimation(.easeOut(duration: 0.15)) {
                     proxy.scrollTo("terminal-bottom", anchor: .bottom)
                 }
             }
-            .onChange(of: inputText) { _, _ in
-                // Clear stale completions when user types after completions were shown
-                if hadCompletions {
-                    hadCompletions = false
-                    onClearCompletions()
-                }
+            .onChange(of: inputText) { _, newValue in
+                scheduleCompletion(for: newValue)
             }
             .onDisappear {
                 isKeyboardActive = false
+                debounceTask?.cancel()
             }
+        }
+    }
+
+    // MARK: - Auto-completion Debounce
+
+    private func scheduleCompletion(for input: String) {
+        debounceTask?.cancel()
+
+        // If we just applied a completion (e.g. directory), request immediately for chaining
+        if isApplyingCompletion {
+            isApplyingCompletion = false
+            if !input.isEmpty {
+                onRequestCompletion(input)
+            }
+            return
+        }
+
+        let word = lastWord
+        // Clear completions if input is empty or last word is too short
+        if input.trimmingCharacters(in: .whitespaces).isEmpty || word.count < 2 {
+            onClearCompletions()
+            return
+        }
+
+        // Debounce: wait 300ms before requesting
+        debounceTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            onRequestCompletion(input)
         }
     }
 
@@ -325,13 +393,14 @@ struct TerminalContentView: View {
 
     private func applyCompletion(_ item: TerminalCompletion) {
         var completed = item.name
-        // Append / for directories to allow continued path completion
         if item.type == .dir && !completed.hasSuffix("/") {
             completed += "/"
         }
 
+        // Flag so the next onChange triggers immediate re-completion (for directory chaining)
+        isApplyingCompletion = true
+
         let word = lastWord
-        // Replace from the known end position to avoid ambiguous backwards search
         if !word.isEmpty && inputText.hasSuffix(word) {
             inputText = String(inputText.dropLast(word.count)) + completed
         } else if !word.isEmpty, let range = inputText.range(of: word, options: .backwards) {

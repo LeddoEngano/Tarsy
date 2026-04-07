@@ -35,19 +35,6 @@ struct DashboardView: View {
                         Text("tarsy")
                             .font(TarsyTheme.font(size: 24, weight: .bold))
                             .foregroundColor(TarsyTheme.accentAmber)
-
-                        if !machineService.machines.isEmpty {
-                            machinePicker
-                        } else if hasFetchedMachines {
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(TarsyTheme.statusIdle)
-                                    .frame(width: 6, height: 6)
-                                Text("no mac connected")
-                                    .font(TarsyTheme.font(size: 10))
-                                    .foregroundColor(TarsyTheme.textSecondary)
-                            }
-                        }
                     }
 
                     Spacer()
@@ -113,6 +100,32 @@ struct DashboardView: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .background(TarsyTheme.backgroundPrimary)
+
+                // Machine picker row
+                if !machineService.machines.isEmpty {
+                    HStack {
+                        machinePicker
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .background(TarsyTheme.backgroundPrimary)
+                } else if hasFetchedMachines {
+                    HStack {
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(TarsyTheme.statusIdle)
+                                .frame(width: 6, height: 6)
+                            Text("no mac connected")
+                                .font(TarsyTheme.font(size: 10))
+                                .foregroundColor(TarsyTheme.textSecondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 8)
+                    .background(TarsyTheme.backgroundPrimary)
+                }
 
                 // Content
                 ZStack {

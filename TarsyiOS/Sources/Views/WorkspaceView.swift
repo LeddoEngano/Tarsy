@@ -95,7 +95,6 @@ struct WorkspaceView: View {
     @State private var pendingTerminalCommands: [String: String] = [:]
     /// Autocomplete results for the terminal tab
     @State private var terminalCompletions: [TerminalCompletion] = []
-    @State private var isCompletionLoading = false
 
     /// Returns true if the packet's sessionId matches the currently active tab
     private func isActiveTabSession(_ packet: WSPacket) -> Bool {
@@ -163,7 +162,11 @@ struct WorkspaceView: View {
                 }
             }
             .ignoresSafeArea(.keyboard)
-            .onTapGesture { isInputFocused = false }
+            .onTapGesture {
+                isInputFocused = false
+                // Also dismiss terminal keyboard via responder chain
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
 
             // Checkpoint feedback toast
             if let feedback = checkpointFeedback {
@@ -801,18 +804,18 @@ struct WorkspaceView: View {
                             chatService: chatService,
                             onSendCommand: { command in
                                 terminalCompletions = []
-                                isCompletionLoading = false
                                 sendTerminalCommand(command)
                             },
                             onRequestCompletion: { input in
-                                isCompletionLoading = true
                                 requestTerminalCompletion(input)
                             },
                             onClearCompletions: {
-                                terminalCompletions = []
+                                withAnimation(.easeOut(duration: 0.1)) {
+                                    terminalCompletions = []
+                                }
                             },
                             completions: terminalCompletions,
-                            isCompletionLoading: isCompletionLoading
+                            isCompletionLoading: false
                         )
                     } else {
                         chatArea
@@ -916,18 +919,18 @@ struct WorkspaceView: View {
                             chatService: chatService,
                             onSendCommand: { command in
                                 terminalCompletions = []
-                                isCompletionLoading = false
                                 sendTerminalCommand(command)
                             },
                             onRequestCompletion: { input in
-                                isCompletionLoading = true
                                 requestTerminalCompletion(input)
                             },
                             onClearCompletions: {
-                                terminalCompletions = []
+                                withAnimation(.easeOut(duration: 0.1)) {
+                                    terminalCompletions = []
+                                }
                             },
                             completions: terminalCompletions,
-                            isCompletionLoading: isCompletionLoading
+                            isCompletionLoading: false
                         )
                     } else {
                         chatArea
@@ -1902,7 +1905,6 @@ struct WorkspaceView: View {
                     }
 
                 case .terminalCompleteResult:
-                    isCompletionLoading = false
                     if let json = packet.payload?["completions"],
                        let data = json.data(using: .utf8),
                        let items = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
