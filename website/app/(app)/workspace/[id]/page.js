@@ -6,6 +6,8 @@ import { useConnection } from "../../../lib/tarsy/ConnectionProvider";
 import { createClient } from "../../../lib/supabase/client";
 import { StreamPlayer } from "../../../lib/tarsy/StreamPlayer";
 import { useRemoteInput } from "../../../lib/tarsy/RemoteInput";
+import { GitPanel } from "../../../lib/tarsy/GitPanel";
+import { FileExplorer } from "../../../lib/tarsy/FileExplorer";
 
 export default function WorkspacePage() {
   const { id } = useParams();
@@ -32,12 +34,12 @@ export default function WorkspacePage() {
   const [questions, setQuestions] = useState(null);
   const [permissionRequest, setPermissionRequest] = useState(null);
 
-  // View mode
-  const [showStream, setShowStream] = useState(false);
+  // View mode: "chat" | "stream" | "git" | "files"
+  const [viewMode, setViewMode] = useState("chat");
   const messagesEndRef = useRef(null);
 
   // Remote input for stream
-  const { containerProps, inputRef, handleInput, handleKeyDown } = useRemoteInput(send, showStream);
+  const { containerProps, inputRef, handleInput, handleKeyDown } = useRemoteInput(send, viewMode === "stream");
 
   // Load workspace info
   useEffect(() => {
@@ -220,12 +222,15 @@ export default function WorkspacePage() {
           </div>
         </div>
         <div className="ws-header-actions">
-          <button
-            className={`ws-view-btn ${showStream ? "ws-view-btn--active" : ""}`}
-            onClick={() => setShowStream(!showStream)}
-          >
-            {showStream ? "Chat" : "Stream"}
-          </button>
+          {["chat", "stream", "git", "files"].map((mode) => (
+            <button
+              key={mode}
+              className={`ws-view-btn ${viewMode === mode ? "ws-view-btn--active" : ""}`}
+              onClick={() => setViewMode(mode)}
+            >
+              {mode.charAt(0).toUpperCase() + mode.slice(1)}
+            </button>
+          ))}
           <a href="/dashboard" className="ws-back">Dashboard</a>
         </div>
       </div>
@@ -246,7 +251,7 @@ export default function WorkspacePage() {
       )}
 
       {/* Stream View */}
-      {showStream && (
+      {viewMode === "stream" && (
         <div {...containerProps} className="ws-stream-wrap">
           <StreamPlayer workspacePath={workspace.local_path} stack={workspace.stack} />
           <input
@@ -259,8 +264,18 @@ export default function WorkspacePage() {
         </div>
       )}
 
+      {/* Git View */}
+      {viewMode === "git" && (
+        <GitPanel workspacePath={workspace.local_path} />
+      )}
+
+      {/* Files View */}
+      {viewMode === "files" && (
+        <FileExplorer workspacePath={workspace.local_path} />
+      )}
+
       {/* Chat View */}
-      {!showStream && (
+      {viewMode === "chat" && (
         <>
           <div className="ws-messages">
             {messages.map((msg) => (

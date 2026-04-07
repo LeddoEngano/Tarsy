@@ -3,6 +3,8 @@
 import { useConnection } from "../../lib/tarsy/ConnectionProvider";
 import { useMachines, useWorkspaces, useActiveTasks, useSignOut } from "../../lib/tarsy/hooks";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
+import { NewWorkspaceModal, PairingModal } from "../../lib/tarsy/WorkspaceModals";
 
 const STACK_LABELS = {
   web: "Web",
@@ -25,6 +27,8 @@ export default function DashboardPage() {
   const { workspaces, loading: workspacesLoading } = useWorkspaces(selectedMachine?.id);
   const tasks = useActiveTasks();
   const signOut = useSignOut();
+  const [showNewWorkspace, setShowNewWorkspace] = useState(false);
+  const [showPairing, setShowPairing] = useState(false);
 
   return (
     <main className="app-container">
@@ -136,6 +140,33 @@ export default function DashboardPage() {
           </div>
         )}
       </div>
+
+      {/* Action Buttons */}
+      <div className="dash-actions">
+        {selectedMachine && (
+          <button className="dash-action-btn" onClick={() => setShowNewWorkspace(true)}>
+            New Workspace
+          </button>
+        )}
+        <button className="dash-action-btn" onClick={() => setShowPairing(true)}>
+          Pair Machine
+        </button>
+      </div>
+
+      {/* Modals */}
+      {showNewWorkspace && selectedMachine && (
+        <NewWorkspaceModal
+          machineId={selectedMachine.id}
+          onClose={() => setShowNewWorkspace(false)}
+          onCreated={(ws) => router.push(`/workspace/${ws.id}`)}
+        />
+      )}
+      {showPairing && (
+        <PairingModal
+          onClose={() => setShowPairing(false)}
+          onPaired={() => window.location.reload()}
+        />
+      )}
     </main>
   );
 }
