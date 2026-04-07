@@ -30,8 +30,7 @@ class DaemonManager: ObservableObject {
     private var sleepObserver: Any?
     private var wakeObserver: Any?
     private var isReconnectingRelay = false
-    private var devServerSessions: [String: String] = [:] // workspacePath -> terminalSessionId
-    private var devServerDetectedPorts: [String: Int] = [:] // workspacePath -> detected port
+    private var portMonitor: PortMonitorService!
     private var displaySleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var systemSleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var lastActiveClientId: String = "relay"
@@ -113,6 +112,25 @@ class DaemonManager: ObservableObject {
         // 0. Init orchestrator
         orchestrator = WorkspaceOrchestrator(terminalManager: terminalManager)
 
+        // 0b. Init port monitor
+        portMonitor = PortMonitorService(
+            terminalManager: terminalManager,
+            sendPacket: { [weak self] packet, clientId in
+                guard let self else { return }
+                await self.sendToClientOrRelay(packet, to: clientId)
+            },
+            log: { [weak self] msg in
+                Task { @MainActor in self?.log(msg) }
+            },
+            detectSudoPrompt: { [weak self] output, sessionId in
+                guard let self else { return }
+                await MainActor.run { self.detectSudoPromptInOutput(output, sessionId: sessionId) }
+            },
+            rewriteSudoCommand: { command, workingDirectory in
+                await SudoPasswordManager.shared.rewriteCommandIfSudo(command, workingDirectory: workingDirectory)
+            }
+        )
+
         // Wire up sudo password manager to send requests to iOS
         await SudoPasswordManager.shared.setSendPacket { [weak self] packet in
             guard let self else { return }
@@ -187,6 +205,7 @@ class DaemonManager: ObservableObject {
         tokenRetryTask?.cancel()
         tokenRetryTask = nil
         Task {
+            await portMonitor?.shutdownAll()
             await updateMachineStatus("offline")
             await relayClient.disconnect()
             await wsServer?.stop()
@@ -607,11 +626,36 @@ class DaemonManager: ObservableObject {
         case .openclawMessage:
             await handleOpenClawMessage(clientId: clientId, packet: packet)
         case .devServerStart:
-            await handleDevServerStart(clientId: clientId, packet: packet)
+            guard let path = packet.payload?["path"],
+                  let command = packet.payload?["command"], !command.isEmpty else {
+                await sendToClientOrRelay(
+                    WSPacket(action: .error, payload: ["message": "Missing path or command for dev server"], id: packet.id),
+                    to: clientId
+                )
+                break
+            }
+            await portMonitor.startDevServer(
+                clientId: clientId,
+                packetId: packet.id,
+                workspacePath: (path as NSString).expandingTildeInPath,
+                command: command,
+                streamUrl: packet.payload?["streamUrl"]
+            )
         case .devServerStop:
-            await handleDevServerStop(clientId: clientId, packet: packet)
+            guard let path = packet.payload?["path"] else { break }
+            await portMonitor.stopDevServer(
+                clientId: clientId,
+                packetId: packet.id,
+                workspacePath: (path as NSString).expandingTildeInPath
+            )
         case .devServerStatus:
-            await handleDevServerStatus(clientId: clientId, packet: packet)
+            guard let path = packet.payload?["path"] else { break }
+            await portMonitor.devServerStatus(
+                clientId: clientId,
+                packetId: packet.id,
+                workspacePath: (path as NSString).expandingTildeInPath,
+                streamUrl: packet.payload?["streamUrl"]
+            )
         case .browserOpenUrl:
             await handleBrowserOpenUrl(clientId: clientId, packet: packet)
         case .browserBack:
@@ -666,7 +710,12 @@ class DaemonManager: ObservableObject {
             await handleGitPull(clientId: clientId, packet: packet)
         // HTTP Proxy
         case .proxyDetectPorts:
-            await handleProxyDetectPorts(clientId: clientId, packet: packet)
+            guard let path = packet.payload?["path"] else { break }
+            await portMonitor.detectPorts(
+                clientId: clientId,
+                packetId: packet.id,
+                workspacePath: (path as NSString).expandingTildeInPath
+            )
         case .proxyRequest:
             await handleProxyRequest(clientId: clientId, packet: packet)
         // File Explorer
@@ -1202,284 +1251,18 @@ class DaemonManager: ObservableObject {
         }
     }
 
-    // MARK: - Dev Server
+    // MARK: - Browser
 
-    private func handleDevServerStart(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"],
-              let command = packet.payload?["command"], !command.isEmpty else {
-            await sendToClientOrRelay(
-                WSPacket(action: .error, payload: ["message": "Missing path or command for dev server"], id: packet.id),
-                to: clientId
-            )
+    private func openBrowserToUrl(_ urlString: String) async {
+        guard let url = URL(string: urlString),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            log("openBrowserToUrl: blocked non-http URL '\(urlString)'")
             return
         }
-
-        let expandedPath = (path as NSString).expandingTildeInPath
-        let streamUrl = packet.payload?["streamUrl"]
-
-        // Already running? Check with a real port probe instead of just checking the shell
-        if let existingId = devServerSessions[expandedPath],
-           await terminalManager.isSessionAlive(existingId) {
-            let actuallyServing = portFromUrl(streamUrl).map { isPortListening(port: $0) } ?? true
-            if actuallyServing {
-                await sendToClientOrRelay(
-                    WSPacket(action: .devServerStart, payload: ["status": "running", "sessionId": existingId], id: packet.id),
-                    to: clientId
-                )
-                return
-            } else {
-                // Shell alive but server died inside it — kill and restart
-                await terminalManager.closeSession(existingId)
-                devServerSessions.removeValue(forKey: expandedPath)
-                log("devServerStart: old session alive but port closed, restarting")
-            }
-        }
-
-        do {
-            let sessionId = try await terminalManager.createSession(workingDirectory: expandedPath)
-            devServerSessions[expandedPath] = sessionId
-
-            // Monitor terminal output for server-ready signals, port detection, and conflict PIDs
-            let serverReady = DevServerReadySignal()
-            let conflictDetector = DevServerConflictDetector()
-            await terminalManager.setOutputHandler(for: sessionId) { [weak self] output in
-                guard let strongSelf = self else { return }
-                Task {
-                    let wasReady = await serverReady.isReady
-                    await serverReady.check(output)
-                    await conflictDetector.check(output)
-                    await strongSelf.detectSudoPromptInOutput(output, sessionId: sessionId)
-                    await MainActor.run { strongSelf.log("devServer[\(sessionId.prefix(8))]: \(output.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))") }
-
-                    // Store detected port for later verification (don't notify iOS yet — wait for process stability check)
-                    if !wasReady, await serverReady.isReady {
-                        let detectedPort = strongSelf.extractPort(from: output)
-                        if let port = detectedPort {
-                            await MainActor.run { strongSelf.devServerDetectedPorts[expandedPath] = port }
-                        }
-                    }
-                }
-            }
-
-            // If command needs sudo (check package.json scripts too), ask for password before sending
-            var needsSudo = false
-            guard let rewrittenCmd = await SudoPasswordManager.shared.rewriteCommandIfSudo(command, workingDirectory: expandedPath) else {
-                log("devServerStart: sudo password cancelled")
-                await sendToClientOrRelay(
-                    WSPacket(action: .sudoResult, payload: ["status": "cancelled"], id: packet.id),
-                    to: clientId
-                )
-                return
-            }
-            needsSudo = (rewrittenCmd != command)
-
-            // Validate the command starts with an allowed dev server runner
-            let allowedRunners: Set<String> = ["npm", "pnpm", "yarn", "bun", "npx", "node", "deno", "python", "python3", "ruby", "cargo", "go", "make"]
-            let cmdName = command.components(separatedBy: " ").first ?? command
-            let baseCmdName = (cmdName as NSString).lastPathComponent  // Handle full paths like /usr/bin/npm
-            guard allowedRunners.contains(baseCmdName) else {
-                log("devServerStart: blocked disallowed command '\(baseCmdName)'")
-                await sendToClientOrRelay(
-                    WSPacket(action: .devServerStart, payload: ["status": "error", "error": "Command not allowed: \(baseCmdName)"], id: packet.id),
-                    to: clientId
-                )
-                return
-            }
-
-            // Source shell config + common version managers to ensure PATH has npm/node/pnpm/etc.
-            // Sent as a separate input to avoid interpolating the user command into the shell setup string.
-            let nvmSetup = "export NVM_DIR=\"$HOME/.nvm\"; [ -s \"$NVM_DIR/nvm.sh\" ] && . \"$NVM_DIR/nvm.sh\""
-            await terminalManager.sendInput(nvmSetup, to: sessionId)
-
-            // Run the actual dev server command (validated against allowedRunners above)
-            await terminalManager.sendInput(rewrittenCmd, to: sessionId)
-            log("devServerStart: running '\(command)' in \(expandedPath)\(needsSudo ? " (with sudo)" : "")")
-
-            // Wait for actual confirmation: either output-based or port-based
-            // Give more time if sudo is involved (user might need to enter password via fallback)
-            let targetPort = portFromUrl(streamUrl)
-            let timeout: Int = needsSudo ? 45 : 30
-            let confirmed = await waitForDevServer(signal: serverReady, port: targetPort, timeout: timeout)
-
-            if confirmed {
-                // Wait briefly then verify the process actually survived (e.g. Next.js may exit after detecting a duplicate)
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                let stillAlive = await terminalManager.isSessionAlive(sessionId)
-                let detectedPort = await MainActor.run { devServerDetectedPorts[expandedPath] }
-
-                if stillAlive, let port = detectedPort, isPortListening(port: UInt16(port)) {
-                    log("devServerStart: confirmed running on port \(port)")
-                    await sendToClientOrRelay(
-                        WSPacket(action: .devServerStart, payload: [
-                            "status": "ready",
-                            "port": "\(port)",
-                            "sessionId": sessionId
-                        ], id: packet.id),
-                        to: clientId
-                    )
-                    if let url = streamUrl, !url.isEmpty {
-                        await openBrowserToUrl(url)
-                    }
-                } else {
-                    // Process died — check if there was a conflict with another dev server
-                    let conflictPID = await conflictDetector.conflictPID
-                    log("devServerStart: process died after startup (conflictPID=\(conflictPID?.description ?? "none"))")
-                    devServerSessions.removeValue(forKey: expandedPath)
-
-                    if let pid = conflictPID {
-                        // Kill the conflicting process and retry once
-                        log("devServerStart: killing conflicting process PID \(pid)")
-                        kill(pid, SIGTERM)
-                        // Wait for process to die
-                        try? await Task.sleep(nanoseconds: 1_000_000_000)
-                        // Force kill if still alive
-                        if kill(pid, 0) == 0 {
-                            log("devServerStart: SIGTERM didn't work, sending SIGKILL to PID \(pid)")
-                            kill(pid, SIGKILL)
-                            try? await Task.sleep(nanoseconds: 500_000_000)
-                        }
-                        log("devServerStart: retrying after killing conflicting process")
-                        // Retry by calling ourselves recursively (conflict is now resolved)
-                        await handleDevServerStart(clientId: clientId, packet: packet)
-                        return
-                    }
-
-                    // No conflict PID — try to find an existing server on a common port
-                    log("devServerStart: scanning for existing server on common ports")
-                    let commonPorts: [UInt16] = [3000, 3001, 3002, 4200, 5173, 5174, 8000, 8080, 8888]
-                    var foundPort: Int? = nil
-                    for p in commonPorts {
-                        if isPortListening(port: p) && isHTTPResponding(port: p) {
-                            foundPort = Int(p)
-                            log("devServerStart: port \(p) — TCP=true, HTTP=true")
-                            break
-                        } else if isPortListening(port: p) {
-                            log("devServerStart: port \(p) — TCP=true, HTTP=false (zombie)")
-                        }
-                    }
-                    if let port = foundPort {
-                        log("devServerStart: found existing server on port \(port)")
-                        await MainActor.run { devServerDetectedPorts[expandedPath] = port }
-                        await sendToClientOrRelay(
-                            WSPacket(action: .devServerStart, payload: [
-                                "status": "ready",
-                                "port": "\(port)",
-                                "sessionId": sessionId
-                            ], id: packet.id),
-                            to: clientId
-                        )
-                    } else {
-                        log("devServerStart: no server found after process died")
-                        await sendToClientOrRelay(
-                            WSPacket(action: .devServerStart, payload: ["status": "error", "error": "Dev server exited unexpectedly"], id: packet.id),
-                            to: clientId
-                        )
-                    }
-                }
-            } else {
-                // Timeout — scan common ports to see if the server is actually running
-                log("devServerStart: timeout, scanning common ports before giving up")
-                let commonPorts: [UInt16] = [3000, 3001, 3002, 4200, 5173, 5174, 8000, 8080, 8888]
-                var foundPort: Int? = nil
-                if let targetPort, isPortListening(port: targetPort) {
-                    foundPort = Int(targetPort)
-                } else {
-                    for p in commonPorts {
-                        if isPortListening(port: p) {
-                            foundPort = Int(p)
-                            break
-                        }
-                    }
-                }
-
-                if let port = foundPort {
-                    log("devServerStart: found server on port \(port) after timeout")
-                    await MainActor.run { devServerDetectedPorts[expandedPath] = port }
-                    await sendToClientOrRelay(
-                        WSPacket(action: .devServerStart, payload: [
-                            "status": "ready",
-                            "port": "\(port)",
-                            "sessionId": sessionId
-                        ], id: packet.id),
-                        to: clientId
-                    )
-                } else {
-                    log("devServerStart: could not confirm, assuming started")
-                    await sendToClientOrRelay(
-                        WSPacket(action: .devServerStart, payload: ["status": "started_unconfirmed", "sessionId": sessionId], id: packet.id),
-                        to: clientId
-                    )
-                }
-            }
-        } catch {
-            await sendToClientOrRelay(
-                WSPacket(action: .error, payload: ["message": "Dev server failed: \(error.localizedDescription)"], id: packet.id),
-                to: clientId
-            )
-        }
+        log("openBrowserToUrl: opening \(urlString)")
+        NSWorkspace.shared.open(url)
     }
-
-    private func handleDevServerStop(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"] else { return }
-        let expandedPath = (path as NSString).expandingTildeInPath
-
-        if let sessionId = devServerSessions[expandedPath] {
-            // Send Ctrl+C first to gracefully stop the dev server, then close session
-            await terminalManager.sendInput("\u{03}", to: sessionId)
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            await terminalManager.closeSession(sessionId)
-            devServerSessions.removeValue(forKey: expandedPath)
-            devServerDetectedPorts.removeValue(forKey: expandedPath)
-            log("devServerStop: stopped for \(expandedPath)")
-        }
-
-        await sendToClientOrRelay(
-            WSPacket(action: .devServerStop, payload: ["status": "stopped"], id: packet.id),
-            to: clientId
-        )
-    }
-
-    private func handleDevServerStatus(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"] else { return }
-        let expandedPath = (path as NSString).expandingTildeInPath
-        let streamUrl = packet.payload?["streamUrl"]
-
-        var running = false
-
-        if let sessionId = devServerSessions[expandedPath] {
-            let shellAlive = await terminalManager.isSessionAlive(sessionId)
-            if !shellAlive {
-                devServerSessions.removeValue(forKey: expandedPath)
-            } else if let port = portFromUrl(streamUrl) {
-                // Real check: is the port actually open?
-                running = isPortListening(port: port)
-                if !running {
-                    log("devServerStatus: shell alive but port \(port) closed")
-                }
-            } else {
-                // No port to check, trust the shell
-                running = true
-            }
-        }
-
-        var statusPayload: [String: String] = ["running": running ? "true" : "false"]
-        // Include the port so the iOS client can auto-connect when switching modes
-        if running, let port = portFromUrl(streamUrl) {
-            statusPayload["port"] = "\(port)"
-        } else if running, let _ = devServerSessions[expandedPath] {
-            // Try to find the port from detected dev server output
-            if let detected = devServerDetectedPorts[expandedPath] {
-                statusPayload["port"] = "\(detected)"
-            }
-        }
-
-        await sendToClientOrRelay(
-            WSPacket(action: .devServerStatus, payload: statusPayload, id: packet.id),
-            to: clientId
-        )
-    }
-
-    // MARK: - Browser
 
     private func handleBrowserOpenUrl(clientId: String, packet: WSPacket) async {
         guard let urlString = packet.payload?["url"], !urlString.isEmpty else {
@@ -1690,103 +1473,6 @@ class DaemonManager: ObservableObject {
                 continuation.resume(returning: result?.stringValue ?? "")
             }
         }
-    }
-
-    // MARK: - Dev Server Helpers
-
-    private func openBrowserToUrl(_ urlString: String) async {
-        guard let url = URL(string: urlString),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https" else {
-            log("openBrowserToUrl: blocked non-http URL '\(urlString)'")
-            return
-        }
-        log("openBrowserToUrl: opening \(urlString)")
-        NSWorkspace.shared.open(url)
-    }
-
-    private nonisolated func extractPort(from output: String) -> Int? {
-        // Match patterns like "localhost:3000", "127.0.0.1:5173", ":8080", "port 3000"
-        let patterns = [
-            "localhost:(\\d{4,5})",
-            "127\\.0\\.0\\.1:(\\d{4,5})",
-            "0\\.0\\.0\\.0:(\\d{4,5})",
-            "\\[::\\]:(\\d{4,5})",
-            "port\\s+(\\d{4,5})",
-            ":(\\d{4,5})"
-        ]
-        for pattern in patterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
-               let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
-               let range = Range(match.range(at: 1), in: output) {
-                return Int(output[range])
-            }
-        }
-        return nil
-    }
-
-    private func portFromUrl(_ urlString: String?) -> UInt16? {
-        guard let urlString, let url = URL(string: urlString) else { return nil }
-        if let port = url.port { return UInt16(port) }
-        // Default ports
-        if url.scheme == "https" { return 443 }
-        return 80
-    }
-
-    private nonisolated func waitForDevServer(signal: DevServerReadySignal, port: UInt16?, timeout: Int) async -> Bool {
-        for _ in 0..<(timeout * 2) {
-            try? await Task.sleep(nanoseconds: 500_000_000)
-
-            // Check if output contained ready signals
-            if await signal.isReady { return true }
-
-            // Check if port is open (runs on calling thread, not main)
-            if let port, isPortListening(port: port) { return true }
-        }
-        return false
-    }
-
-    private nonisolated func isPortListening(port: UInt16, host: String = "127.0.0.1") -> Bool {
-        let sock = socket(AF_INET, SOCK_STREAM, 0)
-        guard sock >= 0 else { return false }
-        defer { Darwin.close(sock) }
-
-        var addr = sockaddr_in()
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = port.bigEndian
-        addr.sin_addr.s_addr = inet_addr(host)
-
-        let flags = fcntl(sock, F_GETFL, 0)
-        _ = fcntl(sock, F_SETFL, flags | O_NONBLOCK)
-
-        let result = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                connect(sock, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
-            }
-        }
-
-        if result == 0 { return true }
-
-        var pollFd = pollfd(fd: sock, events: Int16(POLLOUT), revents: 0)
-        let pollResult = poll(&pollFd, 1, 200)
-        return pollResult > 0 && (pollFd.revents & Int16(POLLOUT)) != 0
-    }
-
-    private nonisolated func isHTTPResponding(port: UInt16, host: String = "127.0.0.1") -> Bool {
-        let sem = DispatchSemaphore(value: 0)
-        var responding = false
-        guard let url = URL(string: "http://\(host):\(port)/") else { return false }
-        var request = URLRequest(url: url, timeoutInterval: 2)
-        request.httpMethod = "HEAD"
-        let task = URLSession.shared.dataTask(with: request) { _, response, _ in
-            if let http = response as? HTTPURLResponse, (200...599).contains(http.statusCode) {
-                responding = true
-            }
-            sem.signal()
-        }
-        task.resume()
-        _ = sem.wait(timeout: .now() + 3)
-        return responding
     }
 
     // MARK: - Remote Input
@@ -3773,125 +3459,6 @@ class DaemonManager: ObservableObject {
 
     // MARK: - HTTP Proxy (WKWebView tunnel)
 
-    private func handleProxyDetectPorts(clientId: String, packet: WSPacket) async {
-        guard let path = packet.payload?["path"] else { return }
-        let expandedPath = (path as NSString).expandingTildeInPath
-        log("proxyDetectPorts: scanning for \(expandedPath)")
-
-        let ports = await withCheckedContinuation { (continuation: CheckedContinuation<[[String: String]], Never>) in
-            DispatchQueue.global(qos: .userInitiated).async {
-                // Get all listening TCP ports
-                let proc = Process()
-                proc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-                proc.arguments = ["-iTCP", "-sTCP:LISTEN", "-P", "-n", "-F", "pcn"]
-                let pipe = Pipe()
-                proc.standardOutput = pipe
-                proc.standardError = Pipe()
-
-                do {
-                    try proc.run()
-                    proc.waitUntilExit()
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: data, encoding: .utf8) ?? ""
-
-                    var results: [[String: String]] = []
-                    var currentPid = ""
-                    var currentName = ""
-
-                    for line in output.components(separatedBy: "\n") {
-                        if line.hasPrefix("p") {
-                            currentPid = String(line.dropFirst())
-                        } else if line.hasPrefix("c") {
-                            currentName = String(line.dropFirst())
-                        } else if line.hasPrefix("n") {
-                            let addr = String(line.dropFirst())
-                            // Extract port from addresses like *:3000 or 127.0.0.1:3000
-                            if let colonIdx = addr.lastIndex(of: ":") {
-                                let portStr = String(addr[addr.index(after: colonIdx)...])
-                                if let port = Int(portStr), port >= 1024 && port < 65535 {
-                                    // Check if process cwd matches workspace
-                                    let cwdProc = Process()
-                                    cwdProc.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-                                    cwdProc.arguments = ["-p", currentPid, "-d", "cwd", "-F", "n"]
-                                    let cwdPipe = Pipe()
-                                    cwdProc.standardOutput = cwdPipe
-                                    cwdProc.standardError = Pipe()
-                                    try? cwdProc.run()
-                                    cwdProc.waitUntilExit()
-                                    let cwdData = cwdPipe.fileHandleForReading.readDataToEndOfFile()
-                                    let cwdOutput = String(data: cwdData, encoding: .utf8) ?? ""
-
-                                    let matchesWorkspace = cwdOutput.contains(expandedPath)
-                                    let isDevServer = ["node", "next-server", "vite", "bun", "deno", "python", "ruby", "php"].contains(where: { currentName.lowercased().contains($0) })
-
-                                    if matchesWorkspace && isDevServer {
-                                        results.append([
-                                            "port": "\(port)",
-                                            "process": currentName,
-                                            "pid": currentPid,
-                                            "match": "workspace"
-                                        ])
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // If no workspace matches, fallback: show dev servers on common ports
-                    if results.isEmpty {
-                        let commonPorts: Set<Int> = [3000, 3001, 4000, 4200, 5000, 5173, 5174, 8000, 8080, 8888]
-                        // Re-scan but only for common dev ports
-                        var currentPid2 = ""
-                        var currentName2 = ""
-                        for line in output.components(separatedBy: "\n") {
-                            if line.hasPrefix("p") { currentPid2 = String(line.dropFirst()) }
-                            else if line.hasPrefix("c") { currentName2 = String(line.dropFirst()) }
-                            else if line.hasPrefix("n") {
-                                let addr = String(line.dropFirst())
-                                if let colonIdx = addr.lastIndex(of: ":") {
-                                    let portStr = String(addr[addr.index(after: colonIdx)...])
-                                    if let port = Int(portStr), commonPorts.contains(port) {
-                                        let isDevServer = ["node", "next-server", "vite", "bun", "deno", "python", "ruby", "php"].contains(where: { currentName2.lowercased().contains($0) })
-                                        if isDevServer {
-                                            results.append([
-                                                "port": "\(port)",
-                                                "process": currentName2,
-                                                "pid": currentPid2,
-                                                "match": "global"
-                                            ])
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Deduplicate by port
-                    var seen = Set<String>()
-                    let unique = results.filter { seen.insert($0["port"] ?? "").inserted }
-
-                    let sorted = unique.sorted { a, b in
-                        (Int(a["port"] ?? "0") ?? 0) < (Int(b["port"] ?? "0") ?? 0)
-                    }
-
-                    continuation.resume(returning: sorted)
-                } catch {
-                    continuation.resume(returning: [])
-                }
-            }
-        }
-
-        let json = (try? JSONSerialization.data(withJSONObject: ports))
-            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
-
-        log("proxyDetectPorts: found \(ports.count) ports")
-
-        await sendToClientOrRelay(
-            WSPacket(action: .proxyDetectPortsResult, payload: ["ports": json, "success": "true"], id: packet.id),
-            to: clientId
-        )
-    }
-
     private func handleProxyRequest(clientId: String, packet: WSPacket) async {
         guard let urlString = packet.payload?["url"],
               let method = packet.payload?["method"],
@@ -4435,67 +4002,6 @@ private class LoopbackRedirectGuard: NSObject, URLSessionTaskDelegate {
         } else {
             // Block redirect to non-loopback host
             completionHandler(nil)
-        }
-    }
-}
-
-// MARK: - Dev Server Ready Detection
-
-actor DevServerReadySignal {
-    private(set) var isReady = false
-
-    private static let readyPatterns: [String] = [
-        "ready on",
-        "ready in",
-        "started server on",
-        "listening on",
-        "localhost:",
-        "127.0.0.1:",
-        "compiled successfully",
-        "compiled client and server",
-        "webpack compiled",
-        "vite",
-        "Local:",
-        "Network:",
-        "➜",
-        "started at",
-        "running at",
-    ]
-
-    func check(_ output: String) {
-        guard !isReady else { return }
-        let lower = output.lowercased()
-        for pattern in Self.readyPatterns {
-            if lower.contains(pattern.lowercased()) {
-                isReady = true
-                return
-            }
-        }
-    }
-}
-
-/// Detects "Another dev server is already running" messages and extracts the conflicting PID
-actor DevServerConflictDetector {
-    private(set) var conflictPID: pid_t? = nil
-
-    func check(_ output: String) {
-        guard conflictPID == nil else { return }
-        // Match "PID:  31279" or "- PID: 31279" patterns from Next.js/Vite conflict messages
-        if output.contains("already running") || output.contains("PID") {
-            let patterns = [
-                "PID:\\s*(\\d+)",
-                "pid\\s+(\\d+)",
-                "kill\\s+(\\d+)"
-            ]
-            for pattern in patterns {
-                if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
-                   let match = regex.firstMatch(in: output, range: NSRange(output.startIndex..., in: output)),
-                   let range = Range(match.range(at: 1), in: output),
-                   let pid = pid_t(output[range]) {
-                    conflictPID = pid
-                    return
-                }
-            }
         }
     }
 }

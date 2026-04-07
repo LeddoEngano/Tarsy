@@ -422,8 +422,20 @@ struct WebBrowserView: View {
             state = .detecting
 
             if connectionManager.connectionMode == .relay {
-                // Relay: can't check port directly, just connect
-                selectPort(saved)
+                // Relay: verify port via macOS daemon instead of direct HTTP (Bug #4 fix)
+                // The daemon checks locally and responds with running status + port
+                var payload: [String: String] = ["path": workspace.localPath]
+                if let url = workspace.streamUrl, !url.isEmpty {
+                    payload["streamUrl"] = url
+                }
+                connectionManager.send(WSPacket(action: .devServerStatus, payload: payload))
+                // Timeout: if no response in 3s, fall back to port scan
+                Task {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    if state == .detecting {
+                        connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.localPath]))
+                    }
+                }
                 return
             }
 
