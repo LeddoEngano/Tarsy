@@ -50,6 +50,7 @@ struct WorkspaceView: View {
     @State private var showGitSheet = false
     @State private var showFileExplorer = false
     @State private var showMCPStore = false
+    @State private var showDevTools = false
     @State private var showPaywall = false
     @State private var importedSessionTabs: Set<String> = []
     @State private var checkpointFeedback: String? = nil
@@ -194,6 +195,10 @@ struct WorkspaceView: View {
             MCPStoreView(workspacePath: workspace.localPath)
                 .environmentObject(connectionManager)
         }
+        .sheet(isPresented: $showDevTools) {
+            DevToolsView(workspace: workspace)
+                .environmentObject(connectionManager)
+        }
         .sheet(isPresented: $showPaywall) {
             PaywallView()
                 .environmentObject(subscriptionManager)
@@ -245,6 +250,9 @@ struct WorkspaceView: View {
                         }
                         Button(action: { showMCPStore = true }) {
                             Label("integrations", systemImage: "puzzlepiece.extension")
+                        }
+                        Button(action: { showDevTools = true }) {
+                            Label("devtools", systemImage: "wrench.and.screwdriver")
                         }
                         NavigationLink(destination: AIContextEditorView(workspace: workspace).environmentObject(workspaceService)) {
                             Label("ai context", systemImage: "brain")

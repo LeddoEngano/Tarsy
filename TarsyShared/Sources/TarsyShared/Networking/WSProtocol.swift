@@ -154,6 +154,18 @@ public enum WSAction: String, Codable, Sendable {
     // UltraContext
     case ultracontextStatus = "ultracontext:status"
 
+    // DevTools
+    case processList = "devtools:process_list"
+    case processListResult = "devtools:process_list_result"
+    case processKill = "devtools:process_kill"
+    case processKillResult = "devtools:process_kill_result"
+    case portsList = "devtools:ports_list"
+    case portsListResult = "devtools:ports_list_result"
+    case httpRequest = "devtools:http_request"
+    case httpResponse = "devtools:http_response"
+    case systemResources = "devtools:system_resources"
+    case systemResourcesResult = "devtools:system_resources_result"
+
     // Security
     case securityRotateSecret = "security:rotate_machine_secret"
     case securityRotateResult = "security:rotate_result"

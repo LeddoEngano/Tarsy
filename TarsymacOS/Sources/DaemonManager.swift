@@ -53,6 +53,7 @@ class DaemonManager: ObservableObject {
 
     // MARK: - Live Activity Push State
     private var lastLAPushTime: [String: Date] = [:]          // sessionId -> last push sent time
+    private var previousCPUTicks: (user: Double, system: Double, idle: Double, nice: Double)?
     private var sessionStartTimes: [String: Double] = [:]     // sessionId -> Unix timestamp
     private var sessionContextPercent: [String: Double] = [:]  // sessionId -> context %
     private var sessionWorkspaceId: [String: String] = [:]     // sessionId -> workspaceId string
@@ -763,6 +764,17 @@ class DaemonManager: ObservableObject {
             let cmds = scanSlashCommands(workspacePaths: paths)
             detectedSlashCommands = cmds
             await broadcastSlashCommands(to: clientId)
+        // DevTools
+        case .processList:
+            await handleProcessList(clientId: clientId, packet: packet)
+        case .processKill:
+            await handleProcessKill(clientId: clientId, packet: packet)
+        case .portsList:
+            await handlePortsList(clientId: clientId, packet: packet)
+        case .httpRequest:
+            await handleHTTPRequest(clientId: clientId, packet: packet)
+        case .systemResources:
+            await handleSystemResources(clientId: clientId, packet: packet)
         case .relayNoClients:
             log("Relay reports no clients connected — stopping stream")
             await stopStreamCleanup()
@@ -3971,6 +3983,315 @@ class DaemonManager: ObservableObject {
         } else {
             await wsServer?.broadcast(packet)
             await relayClient.send(packet: packet)
+        }
+    }
+    // MARK: - DevTools Handlers
+
+    private func handleSystemResources(clientId: String, packet: WSPacket) async {
+        var payload: [String: String] = [:]
+
+        // CPU usage via host_statistics (delta between snapshots)
+        let host = mach_host_self()
+        var loadInfo = host_cpu_load_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<host_cpu_load_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let cpuResult = withUnsafeMutablePointer(to: &loadInfo) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics(host, HOST_CPU_LOAD_INFO, $0, &count)
+            }
+        }
+        if cpuResult == KERN_SUCCESS {
+            let user = Double(loadInfo.cpu_ticks.0)
+            let system = Double(loadInfo.cpu_ticks.1)
+            let idle = Double(loadInfo.cpu_ticks.2)
+            let nice = Double(loadInfo.cpu_ticks.3)
+
+            if let prev = previousCPUTicks {
+                let dUser = user - prev.user
+                let dSystem = system - prev.system
+                let dIdle = idle - prev.idle
+                let dNice = nice - prev.nice
+                let dTotal = dUser + dSystem + dIdle + dNice
+                let dUsed = dUser + dSystem + dNice
+                let cpuPercent = dTotal > 0 ? (dUsed / dTotal) * 100.0 : 0
+                payload["cpu_percent"] = String(format: "%.1f", cpuPercent)
+            } else {
+                // First reading — return 0, next poll will have a delta
+                payload["cpu_percent"] = "0"
+            }
+            previousCPUTicks = (user, system, idle, nice)
+        } else {
+            payload["cpu_percent"] = "0"
+        }
+        mach_port_deallocate(mach_task_self_, host)
+
+        // Memory usage via host_statistics64
+        var vmInfo = vm_statistics64_data_t()
+        var vmCount = mach_msg_type_number_t(MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
+        let memResult = withUnsafeMutablePointer(to: &vmInfo) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(vmCount)) {
+                host_statistics64(host, HOST_VM_INFO64, $0, &vmCount)
+            }
+        }
+        let pageSize = UInt64(vm_kernel_page_size)
+        if memResult == KERN_SUCCESS {
+            let active = UInt64(vmInfo.active_count) * pageSize
+            let wired = UInt64(vmInfo.wire_count) * pageSize
+            let compressed = UInt64(vmInfo.compressor_page_count) * pageSize
+            let used = active + wired + compressed
+            payload["memory_used_bytes"] = String(used)
+        } else {
+            payload["memory_used_bytes"] = "0"
+        }
+        let totalMem = ProcessInfo.processInfo.physicalMemory
+        payload["memory_total_bytes"] = String(totalMem)
+
+        // Disk usage via FileManager
+        if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: "/") {
+            let totalDisk = (attrs[.systemSize] as? UInt64) ?? 0
+            let freeDisk = (attrs[.systemFreeSize] as? UInt64) ?? 0
+            payload["disk_total_bytes"] = String(totalDisk)
+            payload["disk_used_bytes"] = String(totalDisk - freeDisk)
+        } else {
+            payload["disk_total_bytes"] = "0"
+            payload["disk_used_bytes"] = "0"
+        }
+
+        await sendToClientOrRelay(
+            WSPacket(action: .systemResourcesResult, payload: payload, id: packet.id),
+            to: clientId
+        )
+    }
+
+    private func handleProcessList(clientId: String, packet: WSPacket) async {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/ps")
+        task.arguments = ["aux"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+
+        do {
+            try task.run()
+            // Read before waiting to avoid pipe buffer deadlock
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
+            guard let output = String(data: data, encoding: .utf8) else {
+                await sendToClientOrRelay(
+                    WSPacket(action: .processListResult, payload: ["error": "Failed to read process list"], id: packet.id),
+                    to: clientId
+                )
+                return
+            }
+
+            let lines = output.components(separatedBy: "\n").dropFirst() // Skip header
+            var processes: [[String: String]] = []
+            for line in lines {
+                let cols = line.split(separator: " ", maxSplits: 10, omittingEmptySubsequences: true)
+                guard cols.count >= 11 else { continue }
+                let pid = String(cols[1])
+                let cpu = String(cols[2])
+                let mem = String(cols[3])
+                // VSZ is cols[4] in KB, RSS is cols[5] in KB — use RSS for actual memory
+                let rssKB = Double(String(cols[5])) ?? 0
+                let memMB = String(format: "%.1f", rssKB / 1024.0)
+                let name = String(cols[10]).components(separatedBy: "/").last ?? String(cols[10])
+                processes.append([
+                    "name": name,
+                    "pid": pid,
+                    "cpu": cpu,
+                    "memory_mb": memMB,
+                ])
+            }
+
+            if let jsonData = try? JSONSerialization.data(withJSONObject: processes),
+               let json = String(data: jsonData, encoding: .utf8) {
+                await sendToClientOrRelay(
+                    WSPacket(action: .processListResult, payload: ["processes": json], id: packet.id),
+                    to: clientId
+                )
+            }
+        } catch {
+            await sendToClientOrRelay(
+                WSPacket(action: .processListResult, payload: ["error": error.localizedDescription], id: packet.id),
+                to: clientId
+            )
+        }
+    }
+
+    private func handleProcessKill(clientId: String, packet: WSPacket) async {
+        guard let pidStr = packet.payload?["pid"], let pid = Int32(pidStr), pid > 1 else {
+            await sendToClientOrRelay(
+                WSPacket(action: .processKillResult, payload: ["success": "false", "error": "Invalid or protected PID"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        // Don't allow killing our own process
+        if pid == ProcessInfo.processInfo.processIdentifier {
+            await sendToClientOrRelay(
+                WSPacket(action: .processKillResult, payload: ["success": "false", "error": "Cannot kill Tarsy daemon"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        let result = kill(pid, SIGTERM)
+        if result == 0 {
+            // Wait briefly, then check if still alive and send SIGKILL
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            let stillAlive = kill(pid, 0) == 0
+            if stillAlive {
+                kill(pid, SIGKILL)
+            }
+            await sendToClientOrRelay(
+                WSPacket(action: .processKillResult, payload: ["success": "true", "pid": pidStr], id: packet.id),
+                to: clientId
+            )
+        } else {
+            let errorMsg = String(cString: strerror(errno))
+            await sendToClientOrRelay(
+                WSPacket(action: .processKillResult, payload: ["success": "false", "pid": pidStr, "error": errorMsg], id: packet.id),
+                to: clientId
+            )
+        }
+    }
+
+    private func handlePortsList(clientId: String, packet: WSPacket) async {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        task.arguments = ["-i", "-P", "-n", "-sTCP:LISTEN"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+
+        do {
+            try task.run()
+            // Read before waiting to avoid pipe buffer deadlock
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
+            guard let output = String(data: data, encoding: .utf8) else {
+                await sendToClientOrRelay(
+                    WSPacket(action: .portsListResult, payload: ["error": "Failed to read ports"], id: packet.id),
+                    to: clientId
+                )
+                return
+            }
+
+            let lines = output.components(separatedBy: "\n").dropFirst() // Skip header
+            var ports: [[String: String]] = []
+            var seenPorts = Set<String>()
+            for line in lines {
+                let cols = line.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: true)
+                guard cols.count >= 9 else { continue }
+                let name = String(cols[0])
+                let pid = String(cols[1])
+                let address = String(cols[8])
+                // Parse port from address like "*:3000" or "127.0.0.1:8080"
+                if let portStr = address.split(separator: ":").last {
+                    let port = String(portStr)
+                    let key = "\(port)-\(pid)"
+                    if !seenPorts.contains(key) {
+                        seenPorts.insert(key)
+                        ports.append([
+                            "port": port,
+                            "process_name": name,
+                            "pid": pid,
+                        ])
+                    }
+                }
+            }
+
+            if let jsonData = try? JSONSerialization.data(withJSONObject: ports),
+               let json = String(data: jsonData, encoding: .utf8) {
+                await sendToClientOrRelay(
+                    WSPacket(action: .portsListResult, payload: ["ports": json], id: packet.id),
+                    to: clientId
+                )
+            }
+        } catch {
+            await sendToClientOrRelay(
+                WSPacket(action: .portsListResult, payload: ["error": error.localizedDescription], id: packet.id),
+                to: clientId
+            )
+        }
+    }
+
+    private func handleHTTPRequest(clientId: String, packet: WSPacket) async {
+        guard let urlStr = packet.payload?["url"],
+              let url = URL(string: urlStr) else {
+            await sendToClientOrRelay(
+                WSPacket(action: .httpResponse, payload: ["error": "Invalid URL"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        // Only allow loopback hosts for security
+        let allowedHosts: Set<String> = ["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"]
+        guard let host = url.host, allowedHosts.contains(host) else {
+            await sendToClientOrRelay(
+                WSPacket(action: .httpResponse, payload: ["error": "Only localhost requests are allowed"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+
+        let method = packet.payload?["method"]?.uppercased() ?? "GET"
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = 30
+
+        // Parse headers
+        if let headersJson = packet.payload?["headers"],
+           let headersData = headersJson.data(using: .utf8),
+           let headers = try? JSONSerialization.jsonObject(with: headersData) as? [String: String] {
+            for (key, value) in headers {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+        }
+
+        // Body for POST
+        if method == "POST", let body = packet.payload?["body"] {
+            request.httpBody = body.data(using: .utf8)
+        }
+
+        let startTime = CFAbsoluteTimeGetCurrent()
+        let session = URLSession(configuration: .ephemeral, delegate: LoopbackRedirectGuard(), delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+
+        do {
+            let (data, response) = try await session.data(for: request)
+            let elapsed = Int((CFAbsoluteTimeGetCurrent() - startTime) * 1000)
+            guard let httpResponse = response as? HTTPURLResponse else {
+                await sendToClientOrRelay(
+                    WSPacket(action: .httpResponse, payload: ["error": "Not an HTTP response"], id: packet.id),
+                    to: clientId
+                )
+                return
+            }
+
+            let bodyStr = String(data: data, encoding: .utf8) ?? "(binary data, \(data.count) bytes)"
+            var responseHeaders: [String: String] = [:]
+            for (key, value) in httpResponse.allHeaderFields {
+                responseHeaders[String(describing: key)] = String(describing: value)
+            }
+            let headersJson = (try? JSONSerialization.data(withJSONObject: responseHeaders)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+
+            await sendToClientOrRelay(
+                WSPacket(action: .httpResponse, payload: [
+                    "status_code": String(httpResponse.statusCode),
+                    "headers": headersJson,
+                    "body": bodyStr,
+                    "duration_ms": String(elapsed),
+                ], id: packet.id),
+                to: clientId
+            )
+        } catch {
+            await sendToClientOrRelay(
+                WSPacket(action: .httpResponse, payload: ["error": error.localizedDescription], id: packet.id),
+                to: clientId
+            )
         }
     }
 }
