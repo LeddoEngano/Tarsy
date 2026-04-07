@@ -1054,10 +1054,20 @@ class DaemonManager: ObservableObject {
         }
 
         // Tag each completion with its type (dir, file, or cmd)
-        let tagged: [[String: String]] = result.map { item in
+        // Filter out completions that resolve outside the workspace (path traversal)
+        let tagged: [[String: String]] = result.compactMap { item in
             let fullPath = item.hasPrefix("/") ? item : "\(expandedPath)/\(item)"
+            // Resolve symlinks and .. to get canonical path
+            let resolved = (fullPath as NSString).standardizingPath
             var isDir: ObjCBool = false
-            let exists = FileManager.default.fileExists(atPath: fullPath, isDirectory: &isDir)
+            let exists = FileManager.default.fileExists(atPath: resolved, isDirectory: &isDir)
+
+            // For file/dir completions, ensure they stay within workspace
+            if exists {
+                let workspacePrefix = (expandedPath as NSString).standardizingPath
+                guard resolved.hasPrefix(workspacePrefix) else { return nil }
+            }
+
             let type: String
             if exists && isDir.boolValue {
                 type = "dir"
