@@ -278,6 +278,17 @@ class TerminalSession {
         }
 
         try process.run()
+
+        // After the shell starts (and .zshrc finishes), force cd to the correct
+        // workspace directory. This guarantees the right cwd even when the user's
+        // shell profile contains a `cd` that overrides currentDirectoryURL.
+        if let dir = workingDirectory {
+            let escaped = dir.replacingOccurrences(of: "'", with: "'\\''")
+            let cdCmd = "cd '\(escaped)'\n"
+            if let data = cdCmd.data(using: .utf8) {
+                inputPipe.fileHandleForWriting.write(data)
+            }
+        }
     }
 
     func sendInput(_ input: String) {
