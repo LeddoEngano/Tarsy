@@ -99,7 +99,8 @@ private struct TerminalInputField: UIViewRepresentable {
 // MARK: - Terminal Completion Item
 
 struct TerminalCompletion: Identifiable, Equatable {
-    let id = UUID()
+    /// Deterministic ID derived from name + type (avoids UUID churn in SwiftUI diffing)
+    var id: String { "\(type.rawValue):\(name)" }
     let name: String
     let type: CompletionType
 
@@ -122,6 +123,10 @@ struct TerminalCompletion: Identifiable, Equatable {
         case .cmd: return TarsyTheme.textPrimary
         }
     }
+
+    static func == (lhs: TerminalCompletion, rhs: TerminalCompletion) -> Bool {
+        lhs.name == rhs.name && lhs.type == rhs.type
+    }
 }
 
 // MARK: - Terminal Content View
@@ -130,11 +135,11 @@ struct TerminalContentView: View {
     let workspace: Workspace
     @ObservedObject var chatService: ChatService
     var onSendCommand: (String) -> Void
+    /// Called with the extracted partial word (not the full input)
     var onRequestCompletion: (String) -> Void
     var onClearCompletions: () -> Void
     var onInterrupt: () -> Void
     var completions: [TerminalCompletion]
-    var isCompletionLoading: Bool
 
     @State private var inputText = ""
     @State private var isKeyboardActive = false
@@ -146,23 +151,8 @@ struct TerminalContentView: View {
     @State private var historyIndex: Int = -1
     /// Saved input before entering history browse mode
     @State private var savedInput: String = ""
-
-    /// Terminal output split into lines for lazy rendering.
-    /// ANSI codes are already stripped at receive time in WorkspaceView.
-    private var terminalLines: [TerminalLine] {
-        var lines: [TerminalLine] = []
-        for (index, msg) in chatService.messages.enumerated() {
-            if msg.role == .user {
-                lines.append(TerminalLine(id: "u\(index)", text: "$ \(msg.content)", isCommand: true))
-            } else {
-                let msgLines = msg.content.components(separatedBy: "\n")
-                for (lineIdx, line) in msgLines.enumerated() {
-                    lines.append(TerminalLine(id: "o\(index)_\(lineIdx)", text: line, isCommand: false))
-                }
-            }
-        }
-        return lines
-    }
+    /// Cached terminal output lines (rebuilt only when messages change)
+    @State private var cachedLines: [TerminalLine] = []
 
     /// Last path component of the workspace for the prompt (e.g. "my-project")
     private var promptDirectory: String {
@@ -192,14 +182,22 @@ struct TerminalContentView: View {
             savedInput = inputText
         }
         let nextIndex = min(historyIndex + 1, history.count - 1)
-        guard nextIndex != historyIndex else { return }
+        if nextIndex == historyIndex {
+            // At boundary — give feedback
+            Haptics.light()
+            return
+        }
         historyIndex = nextIndex
-        isApplyingCompletion = true // prevent debounce from firing
+        isApplyingCompletion = true
         inputText = history[nextIndex]
     }
 
     private func historyDown() {
-        guard historyIndex >= 0 else { return }
+        if historyIndex < 0 {
+            // At boundary — give feedback
+            Haptics.light()
+            return
+        }
         let nextIndex = historyIndex - 1
         historyIndex = nextIndex
         isApplyingCompletion = true
@@ -210,14 +208,31 @@ struct TerminalContentView: View {
         }
     }
 
+    /// Rebuild cached terminal lines from messages
+    private func rebuildLines() {
+        var lines: [TerminalLine] = []
+        for (index, msg) in chatService.messages.enumerated() {
+            if msg.role == .user {
+                lines.append(TerminalLine(id: "u\(index)", text: "$ \(msg.content)", isCommand: true))
+            } else {
+                let msgLines = msg.content.components(separatedBy: "\n")
+                for (lineIdx, line) in msgLines.enumerated() {
+                    lines.append(TerminalLine(id: "o\(index)_\(lineIdx)", text: line, isCommand: false))
+                }
+            }
+        }
+        cachedLines = lines
+    }
+
     var body: some View {
         GeometryReader { geo in
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     // Push content to bottom when there's little output
-                    Spacer(minLength: 0)
-                        .frame(minHeight: geo.size.height * 0.6)
+                    // Uses flexible spacer that shrinks as content grows
+                    Color.clear
+                        .frame(height: max(0, geo.size.height - 80))
 
                     // Path header
                     Text(workspace.localPath)
@@ -227,8 +242,8 @@ struct TerminalContentView: View {
                         .padding(.top, 10)
                         .padding(.bottom, 6)
 
-                    // Terminal output lines (lazily rendered)
-                    ForEach(terminalLines) { line in
+                    // Terminal output lines (lazily rendered from cache)
+                    ForEach(cachedLines) { line in
                         Text(line.text)
                             .font(.system(size: 13, design: .monospaced))
                             .foregroundColor(line.isCommand ? TarsyTheme.textSecondary : TarsyTheme.textPrimary)
@@ -314,17 +329,13 @@ struct TerminalContentView: View {
             .scrollDismissesKeyboard(.interactively)
             .contentShape(Rectangle())
             .onTapGesture {
-                // Only activate if keyboard isn't already showing
                 if !isKeyboardActive {
                     isKeyboardActive = true
                 }
             }
+            // Single scroll trigger — updateCounter fires for both new messages and chunk appends
             .onChange(of: chatService.updateCounter) { _, _ in
-                withAnimation(.easeOut(duration: 0.1)) {
-                    proxy.scrollTo("terminal-bottom", anchor: .bottom)
-                }
-            }
-            .onChange(of: chatService.messages.count) { _, _ in
+                rebuildLines()
                 withAnimation(.easeOut(duration: 0.1)) {
                     proxy.scrollTo("terminal-bottom", anchor: .bottom)
                 }
@@ -346,6 +357,9 @@ struct TerminalContentView: View {
             .onChange(of: inputText) { _, newValue in
                 scheduleCompletion(for: newValue)
             }
+            .onAppear {
+                rebuildLines()
+            }
             .onDisappear {
                 isKeyboardActive = false
                 debounceTask?.cancel()
@@ -362,8 +376,9 @@ struct TerminalContentView: View {
         // If we just applied a completion (e.g. directory), request immediately for chaining
         if isApplyingCompletion {
             isApplyingCompletion = false
-            if !input.isEmpty {
-                onRequestCompletion(input)
+            let word = lastWord
+            if !word.isEmpty {
+                onRequestCompletion(word)
             }
             return
         }
@@ -376,10 +391,11 @@ struct TerminalContentView: View {
         }
 
         // Debounce: wait 300ms before requesting
+        let partial = word
         debounceTask = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
-            onRequestCompletion(input)
+            onRequestCompletion(partial)
         }
     }
 
@@ -422,7 +438,6 @@ struct TerminalContentView: View {
             completed += "/"
         }
 
-        // Flag so the next onChange triggers immediate re-completion (for directory chaining)
         isApplyingCompletion = true
 
         let word = lastWord

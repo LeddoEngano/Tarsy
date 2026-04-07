@@ -95,6 +95,8 @@ struct WorkspaceView: View {
     @State private var pendingTerminalCommands: [String: String] = [:]
     /// Autocomplete results for the terminal tab
     @State private var terminalCompletions: [TerminalCompletion] = []
+    /// Tracks which tab requested the current completions (discard stale responses)
+    @State private var completionRequestTabId: String = ""
 
     /// Returns true if the packet's sessionId matches the currently active tab
     private func isActiveTabSession(_ packet: WSPacket) -> Bool {
@@ -806,8 +808,8 @@ struct WorkspaceView: View {
                                 terminalCompletions = []
                                 sendTerminalCommand(command)
                             },
-                            onRequestCompletion: { input in
-                                requestTerminalCompletion(input)
+                            onRequestCompletion: { partial in
+                                sendTerminalCompletionRequest(partial)
                             },
                             onClearCompletions: {
                                 withAnimation(.easeOut(duration: 0.1)) {
@@ -817,8 +819,7 @@ struct WorkspaceView: View {
                             onInterrupt: {
                                 interruptTerminal()
                             },
-                            completions: terminalCompletions,
-                            isCompletionLoading: false
+                            completions: terminalCompletions
                         )
                     } else {
                         chatArea
@@ -924,8 +925,8 @@ struct WorkspaceView: View {
                                 terminalCompletions = []
                                 sendTerminalCommand(command)
                             },
-                            onRequestCompletion: { input in
-                                requestTerminalCompletion(input)
+                            onRequestCompletion: { partial in
+                                sendTerminalCompletionRequest(partial)
                             },
                             onClearCompletions: {
                                 withAnimation(.easeOut(duration: 0.1)) {
@@ -935,8 +936,7 @@ struct WorkspaceView: View {
                             onInterrupt: {
                                 interruptTerminal()
                             },
-                            completions: terminalCompletions,
-                            isCompletionLoading: false
+                            completions: terminalCompletions
                         )
                     } else {
                         chatArea
@@ -1603,18 +1603,11 @@ struct WorkspaceView: View {
         }
     }
 
-    private func requestTerminalCompletion(_ input: String) {
-        // Extract the last word being typed as the partial to complete
-        let trimmed = input.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        let partial: String
-        if let lastSpace = trimmed.lastIndex(of: " ") {
-            partial = String(trimmed[trimmed.index(after: lastSpace)...])
-        } else {
-            partial = trimmed
-        }
+    /// Send a completion request with an already-extracted partial word
+    private func sendTerminalCompletionRequest(_ partial: String) {
         guard !partial.isEmpty else { return }
-
+        // Tag the request with the current tab so we can discard stale responses
+        completionRequestTabId = currentTab.id
         connectionManager.send(WSPacket(
             action: .terminalComplete,
             payload: ["partial": partial, "path": workspace.localPath]
@@ -1622,11 +1615,15 @@ struct WorkspaceView: View {
     }
 
     private func interruptTerminal() {
-        guard let sessionId = currentTab.sessionId else { return }
-        connectionManager.send(WSPacket(
-            action: .terminalInterrupt,
-            payload: ["sessionId": sessionId]
-        ))
+        if let sessionId = currentTab.sessionId {
+            connectionManager.send(WSPacket(
+                action: .terminalInterrupt,
+                payload: ["sessionId": sessionId]
+            ))
+        } else {
+            // No session yet — clear any queued command so it doesn't run
+            pendingTerminalCommands.removeValue(forKey: currentTab.id)
+        }
     }
 
     private func interruptEngine() {
@@ -1944,6 +1941,8 @@ struct WorkspaceView: View {
                     }
 
                 case .terminalCompleteResult:
+                    // Discard if user switched tabs since the request was sent
+                    guard completionRequestTabId == currentTab.id else { break }
                     if let json = packet.payload?["completions"],
                        let data = json.data(using: .utf8),
                        let items = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
