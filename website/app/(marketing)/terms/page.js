@@ -1,4 +1,4 @@
-import styles from "../legal.module.css";
+import styles from "../../legal.module.css";
 
 export const metadata = {
   title: "Terms of Use - Tarsy",

@@ -1,6 +1,6 @@
-import ScrollReveal from "./components/ScrollReveal";
-import HeroDevices from "./components/HeroDevices";
-import FeatureGrid from "./components/FeatureGrid";
+import ScrollReveal from "../components/ScrollReveal";
+import HeroDevices from "../components/HeroDevices";
+import FeatureGrid from "../components/FeatureGrid";
 
 const steps = [
   {

@@ -50,3 +50,185 @@ body {
   --accent-terracotta: #e5716a;
   --accent-moss: #6bc77b;
 }
+
+/* ── Web App Theme (matches TarsyTheme.swift from iOS) ── */
+:root {
+  --app-bg: #131316;
+  --app-bg-secondary: #1c1c21;
+  --app-bg-tertiary: #2a2a30;
+  --app-text: #e4e4e7;
+  --app-text-secondary: #71717a;
+  --app-accent: #ffffff;
+  --app-accent-terracotta: #e5716a;
+  --app-accent-moss: #6bc77b;
+  --app-status-running: #6bc77b;
+  --app-status-starting: #e0a86a;
+  --app-status-idle: #52525b;
+  --app-status-error: #e5716a;
+}
+
+.app-shell {
+  min-height: 100dvh;
+  background-color: var(--app-bg);
+  color: var(--app-text);
+  font-family: var(--font-jetbrains, "JetBrains Mono"), monospace;
+}
+
+.app-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+.app-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-bottom: 0.25rem;
+}
+
+.app-subtitle {
+  font-size: 0.8125rem;
+  color: var(--app-text-secondary);
+}
+
+/* ── Auth Pages ── */
+
+.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: 2rem 1rem;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+}
+
+.auth-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.auth-subtitle {
+  font-size: 0.8125rem;
+  color: var(--app-text-secondary);
+  margin-bottom: 1.5rem;
+}
+
+.auth-oauth {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.auth-oauth-btn {
+  width: 100%;
+  padding: 0.625rem 1rem;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  color: var(--app-text);
+  background: var(--app-bg-secondary);
+  border: 1px solid var(--app-bg-tertiary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.auth-oauth-btn:hover {
+  border-color: var(--app-text-secondary);
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1.25rem 0;
+  font-size: 0.6875rem;
+  color: var(--app-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--app-bg-tertiary);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.auth-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  color: var(--app-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.auth-input {
+  font-family: inherit;
+  font-size: 0.875rem;
+  color: var(--app-text);
+  background: var(--app-bg-secondary);
+  border: 1px solid var(--app-bg-tertiary);
+  border-radius: 6px;
+  padding: 0.625rem 0.75rem;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.auth-input:focus {
+  border-color: var(--app-accent);
+}
+
+.auth-error {
+  font-size: 0.75rem;
+  color: var(--app-accent-terracotta);
+}
+
+.auth-submit {
+  width: 100%;
+  padding: 0.625rem 1rem;
+  font-family: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--app-bg);
+  background: var(--app-accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  margin-top: 0.25rem;
+}
+
+.auth-submit:hover {
+  opacity: 0.9;
+}
+
+.auth-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.auth-footer {
+  font-size: 0.75rem;
+  color: var(--app-text-secondary);
+  text-align: center;
+  margin-top: 1.5rem;
+}
+
+.auth-footer a {
+  color: var(--app-accent);
+}
