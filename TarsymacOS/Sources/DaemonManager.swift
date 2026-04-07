@@ -689,6 +689,10 @@ class DaemonManager: ObservableObject {
             await handleGitCheckout(clientId: clientId, packet: packet)
         case .gitPull:
             await handleGitPull(clientId: clientId, packet: packet)
+        case .gitStage:
+            await handleGitStage(clientId: clientId, packet: packet)
+        case .gitDiscard:
+            await handleGitDiscard(clientId: clientId, packet: packet)
         // HTTP Proxy
         case .proxyDetectPorts:
             guard let path = packet.payload?["path"] else { break }
@@ -3241,6 +3245,78 @@ class DaemonManager: ObservableObject {
                            success: result.success,
                            data: ["output": result.output],
                            error: result.success ? nil : result.output)
+    }
+
+    private func handleGitStage(clientId: String, packet: WSPacket) async {
+        guard let expandedPath = await validatedGitPath(from: packet, clientId: clientId, action: .gitStageResult) else { return }
+
+        let files = packet.payload?["files"] // comma-separated, or nil for all
+        let args: [String]
+        if let files = files, !files.isEmpty {
+            args = ["add", "--"] + files.components(separatedBy: ",")
+        } else {
+            args = ["add", "-A"]
+        }
+
+        let result = await runGitCommand(args, at: expandedPath)
+        await sendGitResult(action: .gitStageResult, clientId: clientId, packetId: packet.id,
+                           success: result.success, error: result.success ? nil : result.output)
+    }
+
+    private func handleGitDiscard(clientId: String, packet: WSPacket) async {
+        guard let expandedPath = await validatedGitPath(from: packet, clientId: clientId, action: .gitDiscardResult) else { return }
+
+        let files = packet.payload?["files"] // comma-separated, or nil for all
+        let staged = packet.payload?["staged"] == "true"
+
+        if let files = files, !files.isEmpty {
+            let fileList = files.components(separatedBy: ",")
+            if staged {
+                // Unstage: move from index back to working tree
+                let result = await runGitCommand(["reset", "HEAD", "--"] + fileList, at: expandedPath)
+                await sendGitResult(action: .gitDiscardResult, clientId: clientId, packetId: packet.id,
+                                   success: result.success, error: result.success ? nil : result.output)
+            } else {
+                // Discard working tree changes for tracked files
+                var success = true
+                var errorMsg: String?
+                for file in fileList {
+                    // Check if file is untracked
+                    let lsResult = await runGitCommand(["ls-files", "--error-unmatch", file], at: expandedPath)
+                    if lsResult.success {
+                        // Tracked file — restore
+                        let r = await runGitCommand(["checkout", "--", file], at: expandedPath)
+                        if !r.success { success = false; errorMsg = r.output }
+                    } else {
+                        // Untracked file — remove
+                        let r = await runGitCommand(["clean", "-fd", "--", file], at: expandedPath)
+                        if !r.success { success = false; errorMsg = r.output }
+                    }
+                }
+                await sendGitResult(action: .gitDiscardResult, clientId: clientId, packetId: packet.id,
+                                   success: success, error: errorMsg)
+            }
+        } else {
+            // Discard all
+            if staged {
+                let result = await runGitCommand(["reset", "HEAD"], at: expandedPath)
+                await sendGitResult(action: .gitDiscardResult, clientId: clientId, packetId: packet.id,
+                                   success: result.success, error: result.success ? nil : result.output)
+            } else {
+                // Restore tracked files
+                let r1 = await runGitCommand(["checkout", "--", "."], at: expandedPath)
+                // Only clean untracked files if explicitly requested
+                var success = r1.success
+                var errorOutput = r1.success ? "" : r1.output
+                if packet.payload?["includeUntracked"] == "true" {
+                    let r2 = await runGitCommand(["clean", "-fd", "--", "."], at: expandedPath)
+                    success = success && r2.success
+                    if !r2.success { errorOutput += r2.output }
+                }
+                await sendGitResult(action: .gitDiscardResult, clientId: clientId, packetId: packet.id,
+                                   success: success, error: success ? nil : errorOutput)
+            }
+        }
     }
 
     // MARK: - File Explorer

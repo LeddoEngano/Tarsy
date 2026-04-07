@@ -104,6 +104,10 @@ public enum WSAction: String, Codable, Sendable {
     case gitCheckoutResult = "git:checkout_result"
     case gitPull = "git:pull"
     case gitPullResult = "git:pull_result"
+    case gitStage = "git:stage"
+    case gitStageResult = "git:stage_result"
+    case gitDiscard = "git:discard"
+    case gitDiscardResult = "git:discard_result"
 
     // File Explorer
     case fileTree = "file:tree"

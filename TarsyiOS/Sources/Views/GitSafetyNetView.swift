@@ -15,6 +15,8 @@ struct GitSafetyNetView: View {
     @State private var showRollbackConfirm = false
     @State private var rollbackTarget: String?
     @State private var selectedFileDiff: FileDiffData?
+    @State private var showDiscardConfirm = false
+    @State private var discardTarget: String? // nil = discard all
 
     var body: some View {
         NavigationStack {
@@ -76,12 +78,36 @@ struct GitSafetyNetView: View {
         } message: {
             Text("This will discard all changes since this checkpoint. This cannot be undone.")
         }
+        .confirmationDialog(
+            "Discard changes to \(discardTarget ?? "all unstaged files")?",
+            isPresented: $showDiscardConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Discard", role: .destructive) {
+                if let file = discardTarget {
+                    discardFile(file)
+                } else {
+                    discardAll()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone.")
+        }
         .sheet(item: $selectedFileDiff) { diff in
             FileDiffView(diff: diff)
         }
     }
 
     // MARK: - Changes View
+
+    private var stagedFiles: [GitFileChange] {
+        changedFiles.filter { $0.isStaged }
+    }
+
+    private var unstagedFiles: [GitFileChange] {
+        changedFiles.filter { !$0.isStaged }
+    }
 
     private var changesView: some View {
         ScrollView {
@@ -96,35 +122,121 @@ struct GitSafetyNetView: View {
                 }
                 .padding(.top, 60)
             } else {
-                LazyVStack(alignment: .leading, spacing: 1) {
-                    ForEach(changedFiles) { file in
-                        Button(action: { requestFileDiff(file.path) }) {
-                            HStack(spacing: 8) {
-                                Text(file.status)
-                                    .font(TarsyTheme.font(size: 11))
-                                    .foregroundColor(file.statusColor)
-                                    .frame(width: 20)
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    // MARK: Staged Changes
+                    if !stagedFiles.isEmpty {
+                        changesSectionHeader(
+                            title: "Staged Changes",
+                            count: stagedFiles.count,
+                            actions: [
+                                ("minus", "Unstage All", { unstageAll() }),
+                            ]
+                        )
+                        ForEach(stagedFiles) { file in
+                            changeFileRow(file: file)
+                        }
+                    }
 
-                                Text(file.path)
-                                    .font(TarsyTheme.monoFontSmall)
-                                    .foregroundColor(TarsyTheme.textPrimary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-
-                                Spacer()
-
-                                Image(systemName: "chevron.right")
-                                    .font(TarsyTheme.font(size: 10))
-                                    .foregroundColor(TarsyTheme.textSecondary)
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 10)
-                            .background(TarsyTheme.backgroundSecondary)
+                    // MARK: Changes (unstaged)
+                    if !unstagedFiles.isEmpty {
+                        changesSectionHeader(
+                            title: "Changes",
+                            count: unstagedFiles.count,
+                            actions: [
+                                ("plus", "Stage All", { stageAll() }),
+                                ("arrow.uturn.backward", "Discard All", {
+                                    discardTarget = nil
+                                    showDiscardConfirm = true
+                                }),
+                            ]
+                        )
+                        ForEach(unstagedFiles) { file in
+                            changeFileRow(file: file)
                         }
                     }
                 }
                 .padding(.top, 8)
             }
+        }
+    }
+
+    private func changesSectionHeader(title: String, count: Int, actions: [(icon: String, label: String, action: () -> Void)]) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(TarsyTheme.font(size: 11, weight: .semibold))
+                .foregroundColor(TarsyTheme.textSecondary)
+                .textCase(.uppercase)
+
+            Text("\(count)")
+                .font(TarsyTheme.font(size: 10))
+                .foregroundColor(TarsyTheme.textSecondary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 1)
+                .background(TarsyTheme.backgroundTertiary)
+                .cornerRadius(4)
+
+            Spacer()
+
+            ForEach(Array(actions.enumerated()), id: \.offset) { _, item in
+                Button(action: item.action) {
+                    Image(systemName: item.icon)
+                        .font(TarsyTheme.font(size: 12))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .frame(width: 26, height: 26)
+                        .contentShape(Rectangle())
+                }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .padding(.top, 4)
+    }
+
+    private func changeFileRow(file: GitFileChange) -> some View {
+        Button(action: { requestFileDiff(file.path) }) {
+            HStack(spacing: 8) {
+                Text(file.statusLabel)
+                    .font(TarsyTheme.font(size: 11, weight: .medium))
+                    .foregroundColor(file.statusColor)
+                    .frame(width: 18)
+
+                Text(file.path)
+                    .font(TarsyTheme.monoFontSmall)
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer()
+
+                // Inline action buttons
+                if file.isStaged {
+                    Button(action: { unstageFile(file.path) }) {
+                        Image(systemName: "minus")
+                            .font(TarsyTheme.font(size: 11))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .frame(width: 24, height: 24)
+                    }
+                } else {
+                    Button(action: {
+                        discardTarget = file.path
+                        showDiscardConfirm = true
+                    }) {
+                        Image(systemName: "arrow.uturn.backward")
+                            .font(TarsyTheme.font(size: 11))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .frame(width: 24, height: 24)
+                    }
+                    Button(action: { stageFile(file.path) }) {
+                        Image(systemName: "plus")
+                            .font(TarsyTheme.font(size: 11))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                            .frame(width: 24, height: 24)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(TarsyTheme.backgroundSecondary)
         }
     }
 
@@ -266,7 +378,8 @@ struct GitSafetyNetView: View {
                        let parsed = try? JSONSerialization.jsonObject(with: data) as? [String] {
                         branches = parsed
                     }
-                case .gitCheckpointResult, .gitCheckoutResult, .gitPullResult:
+                case .gitCheckpointResult, .gitCheckoutResult, .gitPullResult, .gitStageResult, .gitDiscardResult:
+                    Haptics.medium()
                     loadData()
                 case .gitRollbackResult:
                     if packet.payload?["success"] == "true" {
@@ -304,14 +417,60 @@ struct GitSafetyNetView: View {
         connectionManager.send(WSPacket(action: .gitCheckout, payload: ["path": workspace.localPath, "branch": branch]))
     }
 
+    // MARK: - Stage / Discard
+
+    private func stageFile(_ file: String) {
+        Haptics.light()
+        connectionManager.send(WSPacket(action: .gitStage, payload: ["path": workspace.localPath, "files": file]))
+    }
+
+    private func stageAll() {
+        Haptics.light()
+        connectionManager.send(WSPacket(action: .gitStage, payload: ["path": workspace.localPath]))
+    }
+
+    private func unstageFile(_ file: String) {
+        Haptics.light()
+        connectionManager.send(WSPacket(action: .gitDiscard, payload: ["path": workspace.localPath, "files": file, "staged": "true"]))
+    }
+
+    private func unstageAll() {
+        Haptics.light()
+        connectionManager.send(WSPacket(action: .gitDiscard, payload: ["path": workspace.localPath, "staged": "true"]))
+    }
+
+    private func discardFile(_ file: String) {
+        Haptics.medium()
+        connectionManager.send(WSPacket(action: .gitDiscard, payload: ["path": workspace.localPath, "files": file]))
+    }
+
+    private func discardAll() {
+        Haptics.medium()
+        connectionManager.send(WSPacket(action: .gitDiscard, payload: ["path": workspace.localPath, "includeUntracked": "true"]))
+    }
+
     private func parseGitStatus(_ status: String) -> [GitFileChange] {
-        status.components(separatedBy: "\n")
-            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .map { line in
-                let statusChar = String(line.prefix(2)).trimmingCharacters(in: .whitespaces)
-                let path = String(line.dropFirst(3))
-                return GitFileChange(status: statusChar, path: path)
+        // git status --porcelain format: XY path
+        // X = index (staged), Y = working tree (unstaged)
+        // " " = unmodified, "?" = untracked
+        var files: [GitFileChange] = []
+        for line in status.components(separatedBy: "\n") where !line.trimmingCharacters(in: .whitespaces).isEmpty {
+            guard line.count >= 3 else { continue }
+            let x = line[line.startIndex] // staged status
+            let y = line[line.index(after: line.startIndex)] // unstaged status
+            let path = String(line.dropFirst(3))
+
+            // Staged change (X is not " " and not "?")
+            if x != " " && x != "?" {
+                files.append(GitFileChange(status: String(x), path: path, isStaged: true))
             }
+            // Unstaged change (Y is not " ") or untracked (??)
+            if y != " " || x == "?" {
+                let s = x == "?" ? "?" : String(y)
+                files.append(GitFileChange(status: s, path: path, isStaged: false))
+            }
+        }
+        return files
     }
 }
 
@@ -429,13 +588,26 @@ struct GitFileChange: Identifiable {
     let id = UUID()
     let status: String
     let path: String
+    let isStaged: Bool
 
     var statusColor: Color {
         switch status {
         case "M": return TarsyTheme.accentAmber
         case "A", "?": return TarsyTheme.accentMoss
         case "D": return TarsyTheme.accentTerracotta
+        case "R": return Color(red: 0.6, green: 0.6, blue: 0.9)
         default: return TarsyTheme.textSecondary
+        }
+    }
+
+    var statusLabel: String {
+        switch status {
+        case "M": return "M"
+        case "A": return "A"
+        case "?": return "U"
+        case "D": return "D"
+        case "R": return "R"
+        default: return status
         }
     }
 }
