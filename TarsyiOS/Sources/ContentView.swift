@@ -159,7 +159,15 @@ struct ContentView: View {
                 showPermissionOnboarding = false
             }
             if profile.displayName == nil || profile.displayName?.isEmpty == true {
-                showNameOnboarding = true
+                // Auto-populate from Apple Sign In metadata if available
+                Task {
+                    if let fullName = try? await supabase.auth.session.user.userMetadata["full_name"]?.value as? String,
+                       !fullName.isEmpty {
+                        await profileService.updateDisplayName(fullName)
+                    } else {
+                        showNameOnboarding = true
+                    }
+                }
             }
         }
     }
