@@ -76,7 +76,7 @@ export default function Privacy() {
       <ul>
         <li>Machine name, model, platform (e.g., macOS), and OS version</li>
         <li>CPU core count and memory size (in GB)</li>
-        <li>Local IP address and Tailscale IP address (for connectivity)</li>
+        <li>Local IP address (for connectivity)</li>
         <li>
           Heartbeat timestamps (to show online/offline status in the iOS app)
         </li>
