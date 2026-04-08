@@ -54,6 +54,25 @@ supabase/.temp/
 # App secrets (xcconfig with API keys)
 Secrets.xcconfig
 
-# Claude Code skills
+# Claude Code
 .agents/
 .claude/skills/
+.claude/agents/
+.claude/rules/
+.claude/app-store-review-agent/
+.claude/asc-skills/
+
+# Blitz (App Store Connect CLI)
+.blitz/
+
+# Codex CLI
+.codex/
+
+# OpenCode CLI
+opencode.json
+
+# TeenyBase / Blitz scaffolding
+backend/
+
+# MCP config (local)
+.mcp.json
