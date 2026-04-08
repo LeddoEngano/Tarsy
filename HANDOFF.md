@@ -32,121 +32,126 @@ The web client lives inside the existing `website/` Next.js project under the `(
 
 The C# project lives in `TarsyWindows/` at the repo root. It's a .NET 8 WinForms app (system tray only, no window).
 
-**1 commit (`0e69b04`), 12 files created:**
+**Phase 4 — 1 commit (`0e69b04`), 12 files created** (foundation: auth, relay, LAN server, heartbeat, sleep prevention)
 
-| File | Purpose |
+### Windows Companion Core — Phase 5 (W7-W13) ✅
+
+**13 new files created, all compiling successfully (`dotnet build` passes with 0 errors):**
+
+| File | Purpose | PRD Task |
+|------|---------|----------|
+| `Networking/WSProtocol.cs` | All 143+ WSAction constants ported from Swift | W2 |
+| `Services/FileService.cs` | `GetFileTree` (recursive enumeration, skip list), `ReadFile` (binary detection, 1MB limit) | W13 |
+| `Services/GitService.cs` | All git ops: checkpoint, diff, rollback, history, fileDiff, branches, checkout, pull, stage, discard via `git.exe` | W12 |
+| `Services/WorkspaceOrchestrator.cs` | Repo scanning (10 dirs), stack detection (15+ stacks), package manager detection, dev server extraction | W11 |
+| `Stream/ScreenCaptureService.cs` | GDI+ screen capture → ffmpeg H.264 encoding (with JPEG fallback), adaptive bitrate, screenshot support | W7 |
+| `Stream/RemoteInputService.cs` | `SendInput` P/Invoke: tap, double-tap, long-press, drag, scroll (H+V), keyboard (Unicode + VK), coordinate mapping | W8 |
+| `Terminal/TerminalSession.cs` | PowerShell process with redirected I/O, async output reading, interrupt, kill | W9 |
+| `Terminal/TerminalSessionManager.cs` | Session lifecycle management (create, input, interrupt, close, list) | W9 |
+| `Terminal/PathEnrichment.cs` | PATH enrichment: nvm, fnm, volta, cargo, bun, pnpm, go, python, pyenv, deno | W9 |
+| `Terminal/IAIEngine.cs` | `IAIEngine` interface (Start, SendMessage, RespondToQuestion, Interrupt, Terminate) | W10 |
+| `Terminal/ClaudeCodeSession.cs` | Dedicated Claude Code session: stream-json I/O, NDJSON parsing, token tracking, permission protocol | W10 |
+| `Terminal/GenericCLIEngine.cs` | Generic CLI wrapper for Gemini, Codex, Aider, and custom agents | W10 |
+| `Terminal/AgentDetector.cs` | Scans Windows-specific paths for installed agents, `where.exe` fallback, version detection | W10 |
+
+**Updated files:**
+| File | Changes |
 |------|---------|
-| `TarsyWindows.sln` | Solution file |
-| `TarsyWindows.csproj` | .NET 8, `net8.0-windows`, WinForms, single-file publish |
-| `Program.cs` | Entry point: single-instance mutex, NotifyIcon system tray, starts DaemonManager |
-| `Services/DaemonManager.cs` | Central orchestrator: auth → register machine → start LAN server → connect relay → heartbeat → token refresh → sleep prevention |
-| `Services/SleepPrevention.cs` | `SetThreadExecutionState` P/Invoke |
-| `Networking/WSProtocol.cs` | `WSPacket` record + `WSAction` constants (stub: only 6 actions, needs all 143) |
-| `Networking/SupabaseAuth.cs` | Email/password sign-in via Supabase REST API, token refresh |
-| `Networking/MachineService.cs` | Hardware UUID (WMI), hostname, local IP, machine registration, heartbeat |
-| `Networking/RelayClient.cs` | `ClientWebSocket` to `wss://tarsy-relay.fly.dev/ws`, auth, receive loop, exponential backoff reconnect |
-| `Networking/WebSocketServer.cs` | `HttpListener` on port 8642, `ConcurrentDictionary` of connected clients |
-| `Models/TarsyConfig.cs` | Constants: Supabase URL, anon key, relay URL, port |
-| `.gitignore` | bin/, obj/, .vs/ |
-
-**What works:** The project structure compiles and runs on Windows with `dotnet run`. It will:
-1. Sign in with a Supabase token (from env var `TARSY_TOKEN` or manual sign-in)
-2. Register the machine in Supabase
-3. Start a LAN WebSocket server on port 8642
-4. Connect to the relay as role `"machine"`
-5. Respond to ping/pong
-6. Send heartbeat every 30s
-7. Prevent sleep
-
-**What's stubbed (marked with TODO):**
-- DPAPI token storage (uses env var fallback)
-- Machine secret persistence (generates new each time)
-- Full WSAction enum (only 6 of 143 actions)
-- Auth timeout + rate limiting on LAN server
-- E2E encryption integration
-- Onboarding window (WebView2 for OAuth)
-- All packet handlers beyond ping/pong
+| `Services/DaemonManager.cs` | Full packet dispatch (30+ action handlers): stream, remote input, terminal, engine, claude, git, file, workspace, agents, devtools |
+| `Networking/RelayClient.cs` | Added `SendBinary` for H.264/screenshot binary frames |
+| `TarsyWindows.csproj` | Added `System.Management` package reference |
 
 ---
 
-## What's Next — Phases 5-6
+## Immediate Next Step: Fix Code Review Issues (before Phase 6)
 
-### Phase 5: Windows Companion Core (PRD tasks W7-W13)
+A `/verify` code review was run on Phase 5. These bugs must be fixed first:
 
-These need Win32 APIs and should be built/tested on Windows.
+### 🔴 Critical Bugs to Fix
 
-#### W7. Screen Capture & Encoding
-- **Capture:** `Windows.Graphics.Capture` API (`GraphicsCaptureItem` from HWND)
-- **Encode:** Media Foundation H.264 encoder (prefer hardware: NVENC/AMF/QSV, fallback software)
-- **Frame format:** Must match macOS exactly — byte 0 = keyframe flag (0x01/0x00), then Annex B NAL units with `00 00 00 01` start codes. SPS/PPS prepended on keyframes
-- **Adaptive bitrate:** min=target/5, max=target*3, ramp up +25% after 10 frames, ramp down -25% after 2 drops
-- **Params:** LAN: 30fps/6Mbps/scale 1.0. Relay: 24fps/3Mbps/scale 0.85
-- **Binary frame prefix:** `"H264"` (4 bytes) + frame data → sent as WebSocket binary message
-- **Screenshot:** capture single frame → JPEG quality 0.7 → `"SCRN"` prefix
+**1. Command injection in GitService** (`GitService.cs:236-238`)
+`RunGitAsync` joins args with `string.Join(' ')` + `QuoteArg()` — insufficient escaping. A malicious client can inject shell commands via `commitHash`, `filePath`, `branch` payloads.
+**Fix:** Replace `Arguments = string.Join(...)` with `ProcessStartInfo.ArgumentList.Add()` which handles escaping correctly. Remove `QuoteArg()` entirely.
 
-#### W8. Remote Input Injection
-- **Mouse:** `SendInput` with `MOUSEEVENTF_*` flags
-  - Tap: MOVE → 10ms → LEFTDOWN → 30ms → LEFTUP
-  - Double-tap: two clicks with 20ms between
-  - Long-press: RIGHTDOWN → 30ms → RIGHTUP
-  - Drag: LEFTDOWN → 10 interpolated MOVE steps (10ms each) → LEFTUP
-  - Scroll: `MOUSEEVENTF_WHEEL` (vertical) + `MOUSEEVENTF_HWHEEL` (horizontal), multiplied by 3
-- **Keyboard:** `KEYEVENTF_UNICODE` with UTF-16 code unit, 3ms between chars. Backspace=VK_BACK, Enter=VK_RETURN
-- **Coordinates:** relative (0-1) → absolute: `x = windowRect.Left + (width * relX)`
-- **Focus:** `SetForegroundWindow(hwnd)` before input
+**2. `async void` in DaemonManager** (`DaemonManager.cs:806,819`)
+`HandleFileTree` and `HandleFileRead` are `async void` — unhandled exceptions crash the process.
+**Fix:** Change both to `async Task` and add `await` at the call sites in the switch statement.
 
-#### W9. Terminal & Process Management
-- **ConPTY:** `CreatePseudoConsole()` via P/Invoke to `kernel32.dll`
-  - Create stdin/stdout pipes with `CreatePipe()`
-  - Spawn `powershell.exe` with `PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE`
-  - Async read with `Task.Run` + `ReadFile()`
-- **PATH enrichment** (prepend with `;` separator):
-  - `%USERPROFILE%\.local\bin`, `%USERPROFILE%\.bun\bin`, `%USERPROFILE%\.cargo\bin`
-  - `%APPDATA%\nvm\*`, `%LOCALAPPDATA%\fnm\node-versions\*\installation`
-  - `%USERPROFILE%\.volta\bin`, `%USERPROFILE%\go\bin`, `%APPDATA%\pnpm`
-  - `%LOCALAPPDATA%\Programs\Python\*`, `%USERPROFILE%\.pyenv\pyenv-win\shims`
-- **Signals:** Ctrl+C = `GenerateConsoleCtrlEvent(CTRL_C_EVENT)`, kill = `TerminateProcess()`
+**3. Adaptive bitrate logic is no-op** (`ScreenCaptureService.cs:312-322`)
+`Math.Max(target/5, target*0.75)` always picks 0.75x (no-op clamp). Same for increase.
+**Fix:** Store `_initialBitrate` in `Start()`, clamp against that: `Math.Max(_initialBitrate/5, target*0.75)` for decrease, `Math.Min(_initialBitrate*3, target*1.25)` for increase.
 
-#### W10. AI Engine Orchestration
-- **Interface:** `IAIEngine` (Start, SendMessage, RespondToQuestion, Interrupt, Terminate)
-- **ClaudeCodeSession:** find `claude.exe` in `%USERPROFILE%\.claude\bin\`, `%APPDATA%\npm\`, etc. Launch with `["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]`. Parse NDJSON from stdout. Token tracking. Permission protocol (`control_request`/`control_response` over stdin).
-- **AgentDetector:** scan Windows-specific paths for each engine. Fallback: `where.exe <binary>`. Version: `<agent> --version` with 5s timeout.
-- **Engines:** CodexSession, GeminiSession, GenericCLIEngine — same patterns.
+**4. GDI handle leak in CaptureScreen** (`ScreenCaptureService.cs:327-357`)
+If `BitBlt` or `Image.FromHbitmap` throws, `hDC`, `hMemDC`, `hBitmap` handles leak. At 24fps this exhausts GDI handles in minutes.
+**Fix:** Wrap in try/finally that always calls `DeleteObject`, `DeleteDC`, `ReleaseDC`.
 
-#### W11. Workspace Orchestration
-- Git clone, stack detection (same file markers), package manager detection (same lock files), dev server command extraction from `package.json`
-- **Repo scanning:** `%USERPROFILE%\Desktop`, `Documents`, `Projects`, `Developer`, `Code`, `repos`, `dev`, `work`, `src`
+**5. ProcessKill accepts arbitrary PIDs** (`DaemonManager.cs:946-976`)
+Any remote client can kill any process. Refuse system PIDs (0, 4) and the current process at minimum.
 
-#### W12. Git Operations
-- All execute `git.exe` with array-based arguments (find via PATH or `%ProgramFiles%\Git\bin\`)
-- Same commands as macOS: checkpoint, diff, rollback, history, fileDiff, branches, checkout, pull, stage, discard
+### 🟡 Should Fix
 
-#### W13. File Operations
-- `fileTree`: `Directory.EnumerateFileSystemEntries()`, skip `.git`, `node_modules`, etc.
-- `fileRead`: UTF-8 read with binary detection (null bytes)
+**6. GitService.RunProcess deadlock** (`GitService.cs:267-269`)
+Synchronous `ReadToEnd()` on stdout then stderr can deadlock if stderr buffer fills first.
+**Fix:** Read both concurrently with `ReadToEndAsync()`.
 
-### Phase 6: Windows Companion Complete (PRD tasks W14-W17)
+**7. `_streamClientId` not thread-safe** (`DaemonManager.cs:34`)
+Read on capture callback thread, written on WebSocket thread.
+**Fix:** Mark as `volatile`.
 
-#### W14. Port & Dev Server Monitoring
-- Port scanning: `netstat -ano` or `Get-NetTCPConnection`, map PID → process
-- Dev server start/stop with ConPTY, ready signal detection, port extraction
-- Process tree termination: `taskkill /F /T /PID`
+**8. AgentDetector rescans on every engine:create** (`DaemonManager.cs:493`)
+Full filesystem scan + `where.exe` on each call.
+**Fix:** Cache `_cachedAgents` at startup, refresh on demand.
 
-#### W15. Privilege Escalation (UAC)
-- Elevated helper service installed during onboarding
-- Named pipe communication (authenticated, local only)
-- Command whitelist: `npm`, `pip`, `choco`, `scoop`, `winget`, `icacls`, `taskkill`
+**9. TerminalSession Ctrl+C doesn't work via pipe** (`TerminalSession.cs:104`)
+Writing `\x03` to redirected stdin doesn't send SIGINT.
+**Fix:** Use `GenerateConsoleCtrlEvent` P/Invoke as specified in PRD W9.
 
-#### W16. Auxiliary Services
-- OpenClaw gateway client (port 18789)
-- UltraContext sync (output buffering, session file watcher on `%USERPROFILE%\.claude\projects\**\*.jsonl`)
-- Windows Toast Notifications
-- MCP health check
+**10. FileService reads file twice** (`FileService.cs:121-131`)
+Reads 8KB for binary check, then full file for content.
+**Fix:** `File.ReadAllBytes()` once, check for nulls, then decode.
 
-#### W17. System Integration
-- Sleep/wake: `SystemEvents.PowerModeChanged`
-- Onboarding window: WebView2 for OAuth sign-in + QR/code display
-- Token refresh timer (45 min)
+**11. `.svg` in BinaryExtensions** (`FileService.cs:27`)
+SVG is text/XML, should be readable.
+
+**12. EncoderParameters not disposed** (`ScreenCaptureService.cs:127`)
+Needs `using` on `EncoderParameters`.
+
+---
+
+### Windows Companion — Phase 6 (W14-W17) ✅
+
+**7 new files created, all compiling successfully (`dotnet build` passes with 0 errors):**
+
+| File | Purpose | PRD Task |
+|------|---------|----------|
+| `Services/PortMonitorService.cs` | Port scanning (netstat parsing), dev server start/stop with ready-signal detection, process tree termination via taskkill | W14 |
+| `Services/PrivilegeManager.cs` | Command whitelist validation, dangerous pattern detection, UAC elevation via runas verb, sudo:request handler | W15 |
+| `Services/OpenClawService.cs` | OpenClaw gateway client (port 18789), health check, SSE streaming response parsing, binary discovery | W16.1 |
+| `Services/UltraContextSync.cs` | Output buffering (3s flush, 16KB limit), session file watcher on `.claude/projects/**/*.jsonl`, Supabase proxy | W16.2 |
+| `Services/NotificationService.cs` | Local Windows Toast (via PowerShell WinRT), remote push via Supabase `push_notifications` table | W16.3 |
+| `Services/McpHealthService.cs` | MCP server config discovery (Claude Code, VS Code, Cursor), HTTP/stdio health checks | W16.4 |
+| `Services/SystemIntegration.cs` | Sleep/wake via `SystemEvents.PowerModeChanged`, auto-reconnect relay + refresh token on wake | W17.1 |
+
+**Updated files:**
+| File | Changes |
+|------|---------|
+| `Services/DaemonManager.cs` | Added 5 new service fields, initialization in Start(), cleanup in Stop(), 11 new packet handlers (devserver, sudo, openclaw, ultracontext, mcp) |
+
+### W6: E2E Encryption ✅
+
+**1 new file, 2 updated files:**
+
+| File | Purpose |
+|------|---------|
+| `Networking/E2ECrypto.cs` | ECDH P-256 key exchange, HKDF-SHA256 (salt "tarsy-e2e-v1"), AES-GCM 256-bit encrypt/decrypt, packet-level and binary encryption |
+| `Networking/RelayClient.cs` | E2E integration: sends public key in auth, auto-encrypts outgoing packets/binary, decrypts incoming |
+| `Networking/WebSocketServer.cs` | Per-client E2E instances, key exchange handshake, encrypted send/receive, binary send support |
+
+**What's still stubbed:**
+- DPAPI token storage (uses env var fallback)
+- Machine secret persistence (generates new each time)
+- Auth timeout + rate limiting on LAN server
+- Onboarding window (WebView2 for OAuth — W17.2)
 
 ---
 
@@ -157,20 +162,40 @@ Tarsy/
 ├── TarsymacOS/          # macOS companion (Swift) ✅ production
 ├── TarsyiOS/            # iOS client (Swift) ✅ production
 ├── TarsyShared/         # Swift Package (shared models, networking)
-├── TarsyWindows/        # Windows companion (C#) 🔲 Phase 4 done
+├── TarsyWindows/        # Windows companion (C#) ✅ Phase 6 complete
 │   ├── Models/
 │   │   └── TarsyConfig.cs
 │   ├── Networking/
+│   │   ├── E2ECrypto.cs         # W6: ECDH + HKDF + AES-GCM
 │   │   ├── MachineService.cs
-│   │   ├── RelayClient.cs
+│   │   ├── RelayClient.cs       # + E2E integration + SendBinary
 │   │   ├── SupabaseAuth.cs
-│   │   ├── WebSocketServer.cs
-│   │   └── WSProtocol.cs      # ⚠️ Only 6 of 143 actions — needs full enum
+│   │   ├── WebSocketServer.cs   # + per-client E2E + SendBinary
+│   │   └── WSProtocol.cs        # ✅ All 143+ actions ported from Swift
 │   ├── Services/
-│   │   ├── DaemonManager.cs   # Central orchestrator — add handlers here
-│   │   └── SleepPrevention.cs
-│   ├── Stream/                # Empty — W7 screen capture goes here
-│   ├── Terminal/              # Empty — W9 ConPTY goes here
+│   │   ├── DaemonManager.cs     # ✅ Full packet dispatch (40+ handlers)
+│   │   ├── FileService.cs       # W13: file tree + file read
+│   │   ├── GitService.cs        # W12: all git operations
+│   │   ├── McpHealthService.cs  # W16.4: MCP discovery + health
+│   │   ├── NotificationService.cs   # W16.3: Toast + remote push
+│   │   ├── OpenClawService.cs   # W16.1: OpenClaw gateway client
+│   │   ├── PortMonitorService.cs    # W14: port scan, dev server lifecycle
+│   │   ├── PrivilegeManager.cs  # W15: UAC/whitelist/elevation
+│   │   ├── SleepPrevention.cs
+│   │   ├── SystemIntegration.cs # W17: sleep/wake power events
+│   │   ├── UltraContextSync.cs  # W16.2: output buffering + file watcher
+│   │   └── WorkspaceOrchestrator.cs  # W11: repo scan, stack detect
+│   ├── Stream/
+│   │   ├── RemoteInputService.cs    # W8: SendInput P/Invoke
+│   │   └── ScreenCaptureService.cs  # W7: GDI+ → ffmpeg H.264
+│   ├── Terminal/
+│   │   ├── AgentDetector.cs         # W10: scan for installed agents
+│   │   ├── ClaudeCodeSession.cs     # W10: stream-json Claude Code
+│   │   ├── GenericCLIEngine.cs      # W10: Gemini/Codex/Aider wrapper
+│   │   ├── IAIEngine.cs            # W10: engine interface
+│   │   ├── PathEnrichment.cs        # W9: PATH enrichment for terminals
+│   │   ├── TerminalSession.cs       # W9: PowerShell process session
+│   │   └── TerminalSessionManager.cs # W9: session lifecycle
 │   ├── Program.cs
 │   ├── TarsyWindows.csproj
 │   └── TarsyWindows.sln
@@ -206,36 +231,25 @@ Tarsy/
 
 ### 1. Prerequisites
 ```powershell
-# Install .NET 8 SDK
-winget install Microsoft.DotNet.SDK.8
-
-# Verify
-dotnet --version
+# .NET 8 SDK is already installed
+dotnet --version  # should show 8.0.405
 ```
 
 ### 2. Build & Run
 ```powershell
 cd TarsyWindows
-dotnet build
+dotnet build     # should pass with 0 errors, 4 warnings
 dotnet run
 ```
 
-### 3. First task: Complete WSProtocol.cs
+### 3. First task: Fix critical bugs from code review
 
-The WSAction class only has 6 constants. Copy all 143 from `TarsyShared/Sources/TarsyShared/Networking/WSProtocol.swift` — each `case foo = "bar:baz"` becomes `public const string Foo = "bar:baz";`.
+Start by fixing the 5 critical issues listed in "Immediate Next Step" above. The most impactful:
+- **GitService command injection** — switch to `ArgumentList.Add()` 
+- **async void** — change `HandleFileTree`/`HandleFileRead` to `async Task`
+- **GDI handle leak** — add try/finally to `CaptureScreen()`
 
-### 4. Add packet handlers to DaemonManager.cs
-
-The `HandlePacket` method has a TODO list of all actions to implement. Start with terminal (W9) since it's the simplest to test end-to-end with the web client:
-
-```csharp
-case WSAction.TerminalCreate:
-    // Create ConPTY session, return sessionId
-    break;
-case WSAction.TerminalInput:
-    // Write to ConPTY stdin
-    break;
-```
+### 4. Then proceed to Phase 6 (W14-W17)
 
 ### 5. Test with the web client
 
@@ -295,6 +309,7 @@ file:tree, file:read
 workspace:scan_repos, workspace:create
 sudo:request, sudo:response
 agents:detected
+devtools:process_list, devtools:ports_list, devtools:system_resources, devtools:process_kill
 ```
 
 ---
