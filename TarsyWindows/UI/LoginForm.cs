@@ -2,8 +2,8 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
-using System.Reflection;
 using System.Windows.Forms;
+using TarsyWindows.Assets;
 
 namespace TarsyWindows.UI;
 
@@ -53,6 +53,7 @@ public class LoginForm : Form
     public string Email => _emailBox.Text.Trim();
     public string Password => _passwordBox.Text;
     public event EventHandler? SignInClicked;
+    public event EventHandler? GitHubSignInClicked;
 
     public LoginForm()
     {
@@ -63,20 +64,14 @@ public class LoginForm : Form
 
     private void LoadAssets()
     {
-        var asm = Assembly.GetExecutingAssembly();
-        try
-        {
-            using var s = asm.GetManifestResourceStream("TarsyWindows.Assets.Icons.tarsy-logo.png");
-            if (s != null) _logoImage = Image.FromStream(s);
-        }
-        catch { }
+        _logoImage = IconLoader.TarsyLogo;
 
         try
         {
-            using var s = asm.GetManifestResourceStream("TarsyWindows.Assets.Icons.app-icon.png");
-            if (s != null)
+            var appIcon = IconLoader.AppIcon;
+            if (appIcon != null)
             {
-                using var bmp = new Bitmap(s);
+                using var bmp = new Bitmap(appIcon);
                 Icon = Icon.FromHandle(bmp.GetHicon());
             }
         }
@@ -135,21 +130,14 @@ public class LoginForm : Form
             BackColor = Color.Transparent,
         };
 
-        // ── OAuth panel (3 buttons × 42px + 2 gaps × 12px = 150px) ──
-        int oauthH = 3 * BtnH + 2 * BtnGap;
+        // ── OAuth panel (2 buttons × 42px + 1 gap × 12px = 96px) ──
+        int oauthH = 2 * BtnH + BtnGap;
         _oauthPanel = new Panel { Size = new Size(BtnW, oauthH), BackColor = BgPrimary, Visible = true };
 
-        var appleBtn = MakeOAuthButton("Sign in with Apple", 0, null, DrawAppleIcon);
-        var githubBtn = MakeOAuthButton("Sign in with GitHub", BtnH + BtnGap, null, DrawGitHubIcon);
-        var emailBtn = MakeOAuthButton("Sign in with Email", 2 * (BtnH + BtnGap), () => ShowEmailForm(), DrawEmailIcon);
+        var githubBtn = MakeOAuthButton("Sign in with GitHub", 0, () => GitHubSignInClicked?.Invoke(this, EventArgs.Empty), DrawGitHubIcon);
+        var emailBtn = MakeOAuthButton("Sign in with Email", BtnH + BtnGap, () => ShowEmailForm(), DrawEmailIcon);
 
-        // Apple & GitHub disabled until WebView2
-        appleBtn.Enabled = false;
-        githubBtn.Enabled = false;
-        foreach (Control c in appleBtn.Controls) c.ForeColor = TextMuted;
-        foreach (Control c in githubBtn.Controls) c.ForeColor = TextMuted;
-
-        _oauthPanel.Controls.AddRange(new Control[] { appleBtn, githubBtn, emailBtn });
+        _oauthPanel.Controls.AddRange(new Control[] { githubBtn, emailBtn });
 
         // ── Email form panel ──
         // back(24) + 10 + email(46) + 14 + password(46) + 20 + status(18) + 8 + button(42) = 228
@@ -373,64 +361,31 @@ public class LoginForm : Form
     //  ICON RENDERERS
     // ═══════════════════════════════════════════
 
-    private static void DrawAppleIcon(Graphics g, Rectangle r, bool enabled)
-    {
-        // Apple logo — SVG path scaled to rect
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        var c = enabled ? AccentWhite : TextMuted;
-        float s = r.Width / 18f;
-        float ox = r.X + r.Width / 2f;
-        float oy = r.Y + r.Height / 2f;
-
-        using var body = new GraphicsPath();
-        // Left half of apple
-        body.AddArc(ox - 7.5f * s, oy - 2 * s, 8 * s, 12 * s, 150, 210);
-        // Right half
-        body.AddArc(ox - 0.5f * s, oy - 2 * s, 8 * s, 12 * s, 180, 210);
-        body.CloseFigure();
-
-        // Leaf
-        using var leaf = new GraphicsPath();
-        leaf.AddBezier(
-            ox + 0.5f * s, oy - 5 * s,
-            ox + 2 * s, oy - 9 * s,
-            ox + 5 * s, oy - 9 * s,
-            ox + 3 * s, oy - 6 * s
-        );
-
-        using var brush = new SolidBrush(c);
-        g.FillPath(brush, body);
-        using var leafPen = new Pen(c, 1.6f * s);
-        g.DrawPath(leafPen, leaf);
-    }
-
     private static void DrawGitHubIcon(Graphics g, Rectangle r, bool enabled)
     {
-        // GitHub mark — filled circle with cat silhouette
+        var img = IconLoader.GitHub;
+        if (img != null)
+        {
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            if (!enabled)
+            {
+                // Draw dimmed
+                using var attrs = new System.Drawing.Imaging.ImageAttributes();
+                var cm = new System.Drawing.Imaging.ColorMatrix { Matrix33 = 0.4f };
+                attrs.SetColorMatrix(cm);
+                g.DrawImage(img, r, 0, 0, img.Width, img.Height, GraphicsUnit.Pixel, attrs);
+            }
+            else
+            {
+                g.DrawImage(img, r);
+            }
+            return;
+        }
+
+        // Fallback: simple circle
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        var c = enabled ? AccentWhite : TextMuted;
-        float s = r.Width / 24f;
-        float ox = r.X;
-        float oy = r.Y;
-
-        // Circle
-        using var circle = new GraphicsPath();
-        circle.AddEllipse(ox, oy, r.Width, r.Height);
-        using var brush = new SolidBrush(c);
-        g.FillPath(brush, circle);
-
-        // Inner features (negative space)
-        using var inner = new SolidBrush(BgCard);
-        // Forehead
-        g.FillEllipse(inner, ox + 5 * s, oy + 3 * s, 14 * s, 10 * s);
-        // Left ear
-        PointF[] leftEar = { new(ox + 5 * s, oy + 7 * s), new(ox + 7 * s, oy + 3 * s), new(ox + 9 * s, oy + 7 * s) };
-        g.FillPolygon(inner, leftEar);
-        // Right ear
-        PointF[] rightEar = { new(ox + 15 * s, oy + 7 * s), new(ox + 17 * s, oy + 3 * s), new(ox + 19 * s, oy + 7 * s) };
-        g.FillPolygon(inner, rightEar);
-        // Body/belly
-        g.FillEllipse(inner, ox + 7 * s, oy + 9 * s, 10 * s, 9 * s);
+        using var brush = new SolidBrush(enabled ? AccentWhite : TextMuted);
+        g.FillEllipse(brush, r);
     }
 
     private static void DrawEmailIcon(Graphics g, Rectangle r, bool enabled)

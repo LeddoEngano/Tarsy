@@ -42,6 +42,32 @@ static class Program
     {
         var loginForm = new LoginForm();
 
+        // GitHub OAuth
+        loginForm.GitHubSignInClicked += async (_, _) =>
+        {
+            loginForm.SetLoading(true);
+            loginForm.SetStatus("opening browser...");
+
+            try
+            {
+                var error = await daemon.SignInWithGitHub();
+                if (error != null)
+                {
+                    loginForm.SetError(error);
+                    loginForm.SetLoading(false);
+                    return;
+                }
+
+                CompleteLogin(loginForm, daemon);
+            }
+            catch (Exception ex)
+            {
+                loginForm.SetError($"error: {ex.Message}");
+                loginForm.SetLoading(false);
+            }
+        };
+
+        // Email/password
         loginForm.SignInClicked += async (_, _) =>
         {
             if (string.IsNullOrWhiteSpace(loginForm.Email) || string.IsNullOrEmpty(loginForm.Password))
@@ -63,14 +89,7 @@ static class Program
                     return;
                 }
 
-                loginForm.SetStatus("authenticated — starting tarsy...");
-                loginForm.Hide();
-
-                // Switch to tray mode
-                RunWithTray(daemon);
-
-                // Close login form and end its message loop
-                loginForm.Close();
+                CompleteLogin(loginForm, daemon);
             }
             catch (Exception ex)
             {
@@ -81,6 +100,14 @@ static class Program
 
         // Run the login form as the main message loop
         Application.Run(loginForm);
+    }
+
+    private static void CompleteLogin(LoginForm loginForm, DaemonManager daemon)
+    {
+        loginForm.SetStatus("authenticated — starting tarsy...");
+        loginForm.Hide();
+        RunWithTray(daemon);
+        loginForm.Close();
     }
 
     private static void RunWithTray(DaemonManager daemon)
