@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Windows.Forms;
 using TarsyWindows.Services;
+using TarsyWindows.UI;
 
 namespace TarsyWindows;
 
@@ -14,11 +15,7 @@ static class Program
     {
         // Single-instance enforcement
         using var mutex = new Mutex(true, MutexName, out bool createdNew);
-        if (!createdNew)
-        {
-            // Another instance is already running
-            return;
-        }
+        if (!createdNew) return;
 
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
@@ -26,12 +23,72 @@ static class Program
 
         var daemon = new DaemonManager();
 
-        // System tray icon
-        using var trayIcon = new NotifyIcon
+        // Check for existing session synchronously before entering message loop
+        bool hasSession = daemon.HasSession().GetAwaiter().GetResult();
+
+        if (hasSession)
+        {
+            // Already authenticated — go straight to tray
+            RunWithTray(daemon);
+        }
+        else
+        {
+            // Show login form first
+            RunWithLogin(daemon);
+        }
+    }
+
+    private static void RunWithLogin(DaemonManager daemon)
+    {
+        var loginForm = new LoginForm();
+
+        loginForm.SignInClicked += async (_, _) =>
+        {
+            if (string.IsNullOrWhiteSpace(loginForm.Email) || string.IsNullOrEmpty(loginForm.Password))
+            {
+                loginForm.SetError("enter email and password");
+                return;
+            }
+
+            loginForm.SetLoading(true);
+            loginForm.SetStatus("connecting...");
+
+            try
+            {
+                var error = await daemon.SignIn(loginForm.Email, loginForm.Password);
+                if (error != null)
+                {
+                    loginForm.SetError(error);
+                    loginForm.SetLoading(false);
+                    return;
+                }
+
+                loginForm.SetStatus("authenticated — starting tarsy...");
+                loginForm.Hide();
+
+                // Switch to tray mode
+                RunWithTray(daemon);
+
+                // Close login form and end its message loop
+                loginForm.Close();
+            }
+            catch (Exception ex)
+            {
+                loginForm.SetError($"error: {ex.Message}");
+                loginForm.SetLoading(false);
+            }
+        };
+
+        // Run the login form as the main message loop
+        Application.Run(loginForm);
+    }
+
+    private static void RunWithTray(DaemonManager daemon)
+    {
+        var trayIcon = new NotifyIcon
         {
             Text = "Tarsy",
             Visible = true,
-            // Icon will be loaded from embedded resource in production
         };
 
         var contextMenu = new ContextMenuStrip();
@@ -45,15 +102,13 @@ static class Program
             trayIcon.Visible = false;
             Application.Exit();
         });
-
         trayIcon.ContextMenuStrip = contextMenu;
 
-        // Start daemon
+        // Start daemon in background
         _ = Task.Run(async () =>
         {
             await daemon.Start();
 
-            // Marshal UI update to STA thread
             contextMenu.Invoke(() =>
             {
                 trayIcon.Text = "Tarsy — Running";
@@ -63,7 +118,5 @@ static class Program
                 }
             });
         });
-
-        Application.Run();
     }
 }
