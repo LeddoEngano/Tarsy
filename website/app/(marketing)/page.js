@@ -63,12 +63,12 @@ export default function Home() {
               <ScrollReveal delay={0.3}>
                 <div className="flex flex-wrap gap-3 mt-10">
                   <a
-                    href="https://testflight.apple.com/join/vDUvPDPe"
+                    href="https://apps.apple.com/us/app/tarsy/id6761079923"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-block w-[260px] text-center bg-amber/10 text-amber text-sm font-semibold py-3.5 rounded-xl no-underline border border-amber/30 transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
                   >
-                    iPhone — TestFlight Beta
+                    Download for iPhone
                   </a>
                   <a
                     href="/download/macos"
@@ -78,7 +78,7 @@ export default function Home() {
                   </a>
                 </div>
                 <p className="text-[11px] text-taupe/50 mt-4 tracking-wide">
-                  Beta — limited TestFlight spots available
+                  Available on the App Store
                 </p>
                 <p className="text-[11px] text-taupe/40 mt-2 tracking-wide">
                   macOS 14+ &middot; Apple Silicon &amp; Intel
@@ -240,12 +240,12 @@ export default function Home() {
             </p>
             <div className="flex flex-wrap justify-center gap-3 mt-8">
               <a
-                href="https://testflight.apple.com/join/vDUvPDPe"
+                href="https://apps.apple.com/us/app/tarsy/id6761079923"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-block w-[260px] text-center bg-amber/10 text-amber text-sm font-semibold py-3.5 rounded-xl no-underline border border-amber/30 transition-all duration-200 hover:opacity-100 hover:-translate-y-0.5 hover:bg-amber/[0.07] hover:border-amber/50 active:translate-y-0 active:scale-[0.98]"
               >
-                iPhone — TestFlight Beta
+                Download for iPhone
               </a>
               <a
                 href="/download/macos"
@@ -255,7 +255,7 @@ export default function Home() {
               </a>
             </div>
             <p className="text-[11px] text-taupe/50 mt-4 tracking-wide">
-              Beta — vagas limitadas no TestFlight
+              Available on the App Store
             </p>
           </ScrollReveal>
         </div>
