@@ -60,6 +60,17 @@ public class DaemonManager
         return null;
     }
 
+    /// <summary>
+    /// Sign in with GitHub OAuth. Returns null on success, error message on failure.
+    /// </summary>
+    public async Task<string?> SignInWithGitHub()
+    {
+        var token = await _auth.SignInWithGitHub();
+        if (string.IsNullOrEmpty(token))
+            return "github authentication failed";
+        return null;
+    }
+
     public async Task Start()
     {
         _cts = new CancellationTokenSource();

@@ -87,6 +87,45 @@ public class SupabaseAuth
     }
 
     /// <summary>
+    /// Sign in with GitHub OAuth via browser redirect.
+    /// </summary>
+    public async Task<string?> SignInWithGitHub()
+    {
+        using var oauth = new OAuthServer();
+        var result = await oauth.StartGitHubOAuth();
+
+        if (string.IsNullOrEmpty(result.AccessToken)) return null;
+
+        _accessToken = result.AccessToken;
+        _refreshTokenValue = result.RefreshToken;
+
+        // Fetch user ID from the token
+        await FetchUserId();
+
+        SaveSession();
+        return _accessToken;
+    }
+
+    private async Task FetchUserId()
+    {
+        if (string.IsNullOrEmpty(_accessToken)) return;
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, $"{TarsyConfig.SupabaseUrl}/auth/v1/user");
+            request.Headers.Add("apikey", TarsyConfig.SupabaseAnonKey);
+            request.Headers.Add("Authorization", $"Bearer {_accessToken}");
+
+            var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return;
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            UserId = doc.RootElement.GetProperty("id").GetString();
+        }
+        catch { }
+    }
+
+    /// <summary>
     /// Refresh the access token using the refresh token.
     /// </summary>
     public async Task<string?> RefreshToken()
