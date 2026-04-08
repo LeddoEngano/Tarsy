@@ -21,6 +21,10 @@ public class RelayClient
     private int _reconnectAttempts;
     private bool _intentionalDisconnect;
 
+    // E2E encryption
+    private E2ECrypto _e2e = new();
+    public E2ECrypto E2E => _e2e;
+
     public bool IsConnected => _ws?.State == WebSocketState.Open;
 
     public RelayClient(
@@ -59,9 +63,50 @@ public class RelayClient
     {
         if (_ws?.State != WebSocketState.Open) return;
 
+        // Encrypt if E2E is ready and not a system packet
+        if (_e2e.IsReady && !IsSystemAction(packet.Action))
+        {
+            var encrypted = _e2e.EncryptPacket(packet);
+            if (encrypted != null)
+            {
+                var encJson = encrypted.Encode();
+                var encBytes = Encoding.UTF8.GetBytes(encJson);
+                await _ws.SendAsync(encBytes, WebSocketMessageType.Text, true, CancellationToken.None);
+                return;
+            }
+        }
+
         var json = packet.Encode();
         var bytes = Encoding.UTF8.GetBytes(json);
         await _ws.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
+    }
+
+    public async Task SendBinary(byte[] data)
+    {
+        if (_ws?.State != WebSocketState.Open) return;
+
+        // Encrypt binary if E2E is ready
+        if (_e2e.IsReady)
+        {
+            var encrypted = _e2e.EncryptBinary(data);
+            if (encrypted != null)
+            {
+                await _ws.SendAsync(encrypted, WebSocketMessageType.Binary, true, CancellationToken.None);
+                return;
+            }
+        }
+
+        await _ws.SendAsync(data, WebSocketMessageType.Binary, true, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// System actions that must NOT be encrypted (auth, ping/pong, e2e key exchange).
+    /// </summary>
+    private static bool IsSystemAction(string action)
+    {
+        return action is WSAction.Auth or WSAction.AuthSuccess or WSAction.AuthFail
+            or WSAction.Ping or WSAction.Pong
+            or WSAction.E2eKeyExchange or WSAction.E2eKeyExchangeResponse or WSAction.E2eEncrypted;
     }
 
     private async Task OpenWebSocket()
@@ -74,12 +119,16 @@ public class RelayClient
         {
             await _ws.ConnectAsync(new Uri(Models.TarsyConfig.RelayUrl), _cts!.Token);
 
-            // Send auth
+            // Reset E2E for new connection
+            _e2e.Reset();
+
+            // Send auth with E2E public key
             var authPacket = WSPacket.Create(WSAction.Auth, new()
             {
                 ["token"] = _token,
                 ["role"] = "machine",
                 ["machineSecret"] = _machineSecret ?? "",
+                ["publicKey"] = _e2e.PublicKeyBase64,
             });
             await Send(authPacket);
 
@@ -116,13 +165,49 @@ public class RelayClient
                     try
                     {
                         var packet = WSPacket.Decode(json);
+
+                        // Handle E2E key exchange
+                        if (packet.Action == WSAction.E2eKeyExchangeResponse)
+                        {
+                            var remoteKey = packet.Payload?.GetValueOrDefault("publicKey", "");
+                            if (!string.IsNullOrEmpty(remoteKey))
+                            {
+                                var ok = _e2e.CompleteKeyExchange(remoteKey);
+                                Console.WriteLine($"[Relay] E2E key exchange: {(ok ? "success" : "failed")}");
+                            }
+                            continue;
+                        }
+
+                        // Decrypt E2E encrypted packets
+                        if (packet.Action == WSAction.E2eEncrypted && _e2e.IsReady)
+                        {
+                            var inner = _e2e.DecryptPacket(packet);
+                            if (inner != null)
+                            {
+                                await _onPacket(inner, "relay");
+                                continue;
+                            }
+                        }
+
                         await _onPacket(packet, "relay");
                     }
                     catch { /* malformed packet */ }
                 }
                 else if (result.MessageType == WebSocketMessageType.Binary)
                 {
-                    // TODO: Handle binary frames (H.264, screenshots)
+                    // Decrypt binary if E2E is ready
+                    if (_e2e.IsReady)
+                    {
+                        var data = new byte[result.Count];
+                        Buffer.BlockCopy(buffer, 0, data, 0, result.Count);
+                        var decrypted = _e2e.DecryptBinary(data);
+                        if (decrypted != null)
+                        {
+                            // Pass decrypted binary frame upstream
+                            // (binary frames are sent from client→machine for input,
+                            //  not typically received on the machine side)
+                        }
+                    }
                 }
             }
         }

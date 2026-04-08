@@ -1,5 +1,6 @@
 using System;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -8,8 +9,7 @@ using TarsyWindows.Models;
 namespace TarsyWindows.Networking;
 
 /// <summary>
-/// Supabase auth client — email/password sign-in with DPAPI token storage.
-/// Stub — full implementation in W3 task.
+/// Supabase auth client with Windows Credential Manager persistence.
 /// </summary>
 public class SupabaseAuth
 {
@@ -17,17 +17,44 @@ public class SupabaseAuth
     private string? _accessToken;
     private string? _refreshTokenValue;
 
+    private const string CredentialTarget = "Tarsy/SupabaseSession";
+
     public string? AccessToken => _accessToken;
     public string? UserId { get; private set; }
 
     /// <summary>
-    /// Load existing session from DPAPI-protected storage.
-    /// Returns access token or null if not signed in.
+    /// Load existing session from Windows Credential Manager.
+    /// Falls back to TARSY_TOKEN env var.
     /// </summary>
     public async Task<string?> LoadSession()
     {
-        // TODO: Load from Windows Credential Manager (DPAPI)
-        // For now, check environment variable as fallback
+        // Try Credential Manager first
+        var stored = CredentialStore.Read(CredentialTarget);
+        if (stored != null)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(stored);
+                _accessToken = doc.RootElement.GetProperty("access_token").GetString();
+                _refreshTokenValue = doc.RootElement.GetProperty("refresh_token").GetString();
+                UserId = doc.RootElement.GetProperty("user_id").GetString();
+
+                // Try refreshing the token to ensure it's still valid
+                if (!string.IsNullOrEmpty(_refreshTokenValue))
+                {
+                    var refreshed = await RefreshToken();
+                    if (refreshed != null) return refreshed;
+                }
+
+                if (!string.IsNullOrEmpty(_accessToken)) return _accessToken;
+            }
+            catch
+            {
+                // Corrupted credential — ignore and fall through
+            }
+        }
+
+        // Fallback: env var
         _accessToken = Environment.GetEnvironmentVariable("TARSY_TOKEN");
         return _accessToken;
     }
@@ -53,7 +80,9 @@ public class SupabaseAuth
         _refreshTokenValue = doc.RootElement.GetProperty("refresh_token").GetString();
         UserId = doc.RootElement.GetProperty("user").GetProperty("id").GetString();
 
-        // TODO: Store in Windows Credential Manager
+        // Persist to Credential Manager
+        SaveSession();
+
         return _accessToken;
     }
 
@@ -79,6 +108,111 @@ public class SupabaseAuth
         _accessToken = doc.RootElement.GetProperty("access_token").GetString();
         _refreshTokenValue = doc.RootElement.GetProperty("refresh_token").GetString();
 
+        // Update stored credentials
+        SaveSession();
+
         return _accessToken;
+    }
+
+    /// <summary>
+    /// Clear stored session (sign out).
+    /// </summary>
+    public void SignOut()
+    {
+        _accessToken = null;
+        _refreshTokenValue = null;
+        UserId = null;
+        CredentialStore.Delete(CredentialTarget);
+    }
+
+    private void SaveSession()
+    {
+        if (_accessToken == null) return;
+        var data = JsonSerializer.Serialize(new
+        {
+            access_token = _accessToken,
+            refresh_token = _refreshTokenValue ?? "",
+            user_id = UserId ?? "",
+        });
+        CredentialStore.Write(CredentialTarget, data);
+    }
+}
+
+/// <summary>
+/// Thin wrapper around Windows Credential Manager (DPAPI-protected).
+/// </summary>
+internal static class CredentialStore
+{
+    public static string? Read(string target)
+    {
+        bool ok = CredRead(target, 1 /* CRED_TYPE_GENERIC */, 0, out IntPtr credPtr);
+        if (!ok) return null;
+        try
+        {
+            var cred = Marshal.PtrToStructure<CREDENTIAL>(credPtr);
+            if (cred.CredentialBlobSize == 0 || cred.CredentialBlob == IntPtr.Zero) return null;
+            return Marshal.PtrToStringUni(cred.CredentialBlob, (int)cred.CredentialBlobSize / 2);
+        }
+        finally
+        {
+            CredFree(credPtr);
+        }
+    }
+
+    public static void Write(string target, string data)
+    {
+        var bytes = Encoding.Unicode.GetBytes(data);
+        var cred = new CREDENTIAL
+        {
+            Type = 1, // CRED_TYPE_GENERIC
+            TargetName = target,
+            CredentialBlobSize = (uint)bytes.Length,
+            CredentialBlob = Marshal.AllocHGlobal(bytes.Length),
+            Persist = 2, // CRED_PERSIST_LOCAL_MACHINE
+            UserName = "TarsyWindows",
+        };
+        try
+        {
+            Marshal.Copy(bytes, 0, cred.CredentialBlob, bytes.Length);
+            CredWrite(ref cred, 0);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(cred.CredentialBlob);
+        }
+    }
+
+    public static void Delete(string target)
+    {
+        CredDelete(target, 1, 0);
+    }
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool CredRead(string target, int type, int reserved, out IntPtr credential);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool CredWrite(ref CREDENTIAL credential, int flags);
+
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool CredDelete(string target, int type, int flags);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern void CredFree(IntPtr credential);
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct CREDENTIAL
+    {
+        public int Flags;
+        public int Type;
+        public string TargetName;
+        public string Comment;
+        public long LastWritten;
+        public uint CredentialBlobSize;
+        public IntPtr CredentialBlob;
+        public uint Persist;
+        public int AttributeCount;
+        public IntPtr Attributes;
+        public string TargetAlias;
+        public string UserName;
     }
 }
