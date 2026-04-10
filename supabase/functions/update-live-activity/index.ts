@@ -185,16 +185,16 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Look up activity push tokens for this user + workspace
+    // Look up activity push tokens for this user + workspace via service-role RPC.
     // Lowercase UUIDs: Swift sends uppercase, Supabase stores lowercase
     const userId = body.user_id.toLowerCase();
     const workspaceId = body.workspace_id.toLowerCase();
 
     const { data: tokens, error: tokensError } = await supabase
-      .from("live_activity_tokens")
-      .select("activity_token")
-      .eq("user_id", userId)
-      .eq("workspace_id", workspaceId);
+      .rpc("get_decrypted_live_activity_tokens", {
+        p_user_id: userId,
+        p_workspace_id: workspaceId,
+      });
 
     console.log(`[LA] Token lookup: user=${userId.substring(0, 8)} ws=${workspaceId.substring(0, 8)} found=${tokens?.length ?? 0} error=${tokensError?.message ?? 'none'}`);
 

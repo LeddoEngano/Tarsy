@@ -312,17 +312,16 @@ class LiveActivityManager: ObservableObject {
 
     private func storeLiveActivityToken(_ token: String, workspaceId: String) async {
         do {
-            let userId = try await supabase.auth.session.user.id.uuidString
+            // Uses register_live_activity_token RPC — encrypts server-side
+            // via the key from Supabase Vault. Trigger handles legacy clients
+            // still writing plaintext.
             try await supabase
-                .from("live_activity_tokens")
-                .upsert(
-                    [
-                        "user_id": userId,
-                        "workspace_id": workspaceId,
-                        "activity_token": token,
-                        "updated_at": ISO8601DateFormatter().string(from: Date())
-                    ],
-                    onConflict: "activity_token"
+                .rpc(
+                    "register_live_activity_token",
+                    params: [
+                        "p_workspace_id": workspaceId,
+                        "p_token": token
+                    ]
                 )
                 .execute()
         } catch {

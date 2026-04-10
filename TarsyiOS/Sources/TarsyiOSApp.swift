@@ -45,16 +45,13 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
     static func savePushTokenIfNeeded() async {
         guard let token = pendingPushToken else { return }
         do {
-            let userId = try await supabase.auth.session.user.id.uuidString
+            // Goes through the register_push_token RPC, which encrypts the
+            // token server-side with the key from Supabase Vault before
+            // storing it in push_tokens.device_token_enc. The old plaintext
+            // upsert path still works via a BEFORE INSERT trigger, but
+            // this is the canonical way.
             try await supabase
-                .from("push_tokens")
-                .upsert(
-                    [
-                        "user_id": userId,
-                        "device_token": token
-                    ],
-                    onConflict: "device_token"
-                )
+                .rpc("register_push_token", params: ["p_token": token])
                 .execute()
             pendingPushToken = nil
         } catch {

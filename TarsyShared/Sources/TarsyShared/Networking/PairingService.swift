@@ -16,51 +16,48 @@ public class PairingService: ObservableObject {
 
     // MARK: - macOS: Generate Pairing Token
 
+    /// Response from the create_machine_pairing RPC. Dates come back as
+    /// ISO8601 strings (Postgres jsonb_build_object format) and are parsed
+    /// manually — Supabase's default decoder doesn't handle them as Date.
+    private struct PairingResponse: Decodable {
+        let pairing_token: String
+        let connection_code: String
+        let expires_at: String
+    }
+
     /// Generates a new pairing token and connection code for the given machine.
-    /// Inserts into `machine_pairings` table. Returns the QR payload URL.
+    /// The token/code are generated server-side by the create_machine_pairing
+    /// RPC; only HMACs are persisted in machine_pairings (plaintext values are
+    /// returned once to the caller and never stored). Returns the QR payload URL.
     public func generatePairingToken(machineId: UUID) async throws -> String {
-        let token = generateRandomHex(bytes: 32)
-        let code = generateConnectionCode()
-        let expiry = Date().addingTimeInterval(300) // 5 minutes
+        print("[PairingService] Requesting pairing token for machine \(machineId)")
 
-        let expiresAtString: String = {
-            let f = ISO8601DateFormatter()
-            f.timeZone = TimeZone(identifier: "UTC")
-            return f.string(from: expiry)
-        }()
-
-        print("[PairingService] Generating pairing token for machine \(machineId), expires_at: \(expiresAtString)")
-
-        let row: [String: String] = [
-            "machine_id": machineId.uuidString,
-            "pairing_token": token,
-            "connection_code": code,
-            "expires_at": expiresAtString
-        ]
-
-        try await supabase
-            .from("machine_pairings")
-            .insert(row)
+        let response: PairingResponse = try await supabase
+            .rpc("create_machine_pairing", params: ["p_machine_id": machineId.uuidString])
             .execute()
+            .value
 
-        currentToken = token
-        currentConnectionCode = code
-        expiresAt = expiry
+        let isoWithFraction = ISO8601DateFormatter()
+        isoWithFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoPlain = ISO8601DateFormatter()
+        isoPlain.formatOptions = [.withInternetDateTime]
+        let parsedExpiry = isoWithFraction.date(from: response.expires_at)
+            ?? isoPlain.date(from: response.expires_at)
+            ?? Date().addingTimeInterval(300)
 
-        let qrURL = "tarsy://pair?m=\(machineId.uuidString)&t=\(token)"
-        print("[PairingService] QR URL generated for machine \(machineId)")
+        currentToken = response.pairing_token
+        currentConnectionCode = response.connection_code
+        expiresAt = parsedExpiry
+
+        let qrURL = "tarsy://pair?m=\(machineId.uuidString)&t=\(response.pairing_token)"
+        print("[PairingService] QR URL generated for machine \(machineId), expires \(parsedExpiry)")
         return qrURL
     }
 
-    /// Deletes any existing pairing tokens for the machine before generating new ones.
+    /// Generates a fresh pairing token, replacing any previous one for the machine.
+    /// The create_machine_pairing RPC already deletes prior rows for the machine,
+    /// so this is equivalent to calling `generatePairingToken` directly.
     public func refreshPairingToken(machineId: UUID) async throws -> String {
-        // Clean up old tokens
-        _ = try? await supabase
-            .from("machine_pairings")
-            .delete()
-            .eq("machine_id", value: machineId.uuidString)
-            .execute()
-
         return try await generatePairingToken(machineId: machineId)
     }
 
@@ -170,20 +167,9 @@ public class PairingService: ObservableObject {
         return "\(clean[clean.startIndex..<idx1])-\(clean[idx1..<idx2])-\(clean[idx2...])"
     }
 
-    // MARK: - Private
-
-    private func generateRandomHex(bytes: Int) -> String {
-        var data = [UInt8](repeating: 0, count: bytes)
-        _ = SecRandomCopyBytes(kSecRandomDefault, bytes, &data)
-        return data.map { String(format: "%02x", $0) }.joined()
-    }
-
-    private func generateConnectionCode() -> String {
-        // 6 random bytes = 12 hex chars → format as XXXX-XXXX-XXXX
-        var data = [UInt8](repeating: 0, count: 6)
-        _ = SecRandomCopyBytes(kSecRandomDefault, 6, &data)
-        return data.map { String(format: "%02X", $0) }.joined()
-    }
+    // Token + connection code generation moved to the create_machine_pairing
+    // RPC (Postgres gen_random_bytes) so all secret material originates in the
+    // server and the client never sees a plaintext that hasn't been HMACed.
 }
 
 // MARK: - Models

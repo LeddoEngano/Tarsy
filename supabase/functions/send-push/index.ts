@@ -172,11 +172,10 @@ serve(async (req) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Get device tokens for this user
+    // Get decrypted device tokens via service-role RPC (ciphertext lives in
+    // push_tokens.device_token_enc; the RPC decrypts with the key from vault).
     const { data: tokens, error: tokensError } = await supabase
-      .from("push_tokens")
-      .select("device_token")
-      .eq("user_id", record.user_id);
+      .rpc("get_decrypted_push_tokens", { p_user_id: record.user_id });
 
     if (tokensError || !tokens?.length) {
       console.log(`No tokens found for user ${record.user_id}`);

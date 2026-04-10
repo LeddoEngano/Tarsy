@@ -36,54 +36,56 @@ serve(async (req) => {
       );
     }
 
-    let pairing;
+    // Pairings are stored as HMAC(pepper, token). Use the service-role RPC
+    // which computes the HMAC server-side and returns the matching row id
+    // (or null if no match / expired).
+    let targetMachineId: string | null = null;
 
     if (connection_code) {
-      // Manual code entry: look up by connection_code
-      const code = connection_code.replace(/-/g, "").toUpperCase();
-      const { data, error } = await supabase
-        .from("machine_pairings")
-        .select("*")
-        .eq("connection_code", code)
-        .gt("expires_at", new Date().toISOString())
-        .limit(1)
-        .single();
-
-      if (error || !data) {
+      const { data: pairingId, error } = await supabase
+        .rpc("claim_pairing_by_code", { p_code: connection_code });
+      if (error || !pairingId) {
         return new Response(
           JSON.stringify({ error: "Invalid or expired connection code" }),
           { status: 400 }
         );
       }
-      pairing = data;
+      // claim_pairing_by_code returns machine_pairings.id, but we need the
+      // machine_id to transfer ownership. Fetch it.
+      const { data: row } = await supabase
+        .from("machine_pairings")
+        .select("machine_id")
+        .eq("id", pairingId)
+        .single();
+      targetMachineId = row?.machine_id ?? null;
     } else {
-      // QR code: look up by machine_id + pairing_token
       if (!pairing_token) {
         return new Response(
           JSON.stringify({ error: "pairing_token is required with machine_id" }),
           { status: 400 }
         );
       }
-
-      const { data, error } = await supabase
-        .from("machine_pairings")
-        .select("*")
-        .eq("machine_id", machine_id)
-        .eq("pairing_token", pairing_token)
-        .gt("expires_at", new Date().toISOString())
-        .limit(1)
-        .single();
-
-      if (error || !data) {
+      const { data: pairingId, error } = await supabase
+        .rpc("claim_pairing_by_token", {
+          p_machine_id: machine_id,
+          p_token: pairing_token,
+        });
+      if (error || !pairingId) {
         return new Response(
           JSON.stringify({ error: "Invalid or expired pairing code" }),
           { status: 400 }
         );
       }
-      pairing = data;
+      // The RPC already confirmed machine_id matches, so we can reuse it.
+      targetMachineId = machine_id;
     }
 
-    const targetMachineId = pairing.machine_id;
+    if (!targetMachineId) {
+      return new Response(
+        JSON.stringify({ error: "Invalid or expired pairing code" }),
+        { status: 400 }
+      );
+    }
 
     // Transfer machine ownership to the iOS user
     const { error: updateError } = await supabase
