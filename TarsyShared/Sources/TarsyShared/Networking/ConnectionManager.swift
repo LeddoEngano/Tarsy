@@ -67,6 +67,40 @@ public class ConnectionManager: ObservableObject {
         packetListeners.removeValue(forKey: id)
     }
 
+    /// True when `send()` will actually transmit data packets, not just
+    /// control/auth packets.
+    ///
+    /// On LAN this is equivalent to `isConnected` — the socket is up and
+    /// the TLS channel protects the wire, so data packets go out directly.
+    ///
+    /// On relay, `send()` silently drops non-control packets until the E2E
+    /// key exchange with the macOS daemon has completed (see the guard in
+    /// `send()` at the `!e2e.isReady` branch). Callers that fire a
+    /// workspace/terminal/scan request on view appear must either wait on
+    /// this flag or they'll hit a "first attempt hangs until 25s timeout,
+    /// second attempt works" pattern.
+    public var canSendData: Bool {
+        guard isConnected else { return false }
+        if connectionMode == .relay {
+            return e2e.isReady
+        }
+        return true
+    }
+
+    /// Polls `canSendData` until it becomes true or the timeout elapses.
+    /// Returns the final value of `canSendData`.
+    ///
+    /// Use this from views that need to send a data packet right after
+    /// appearing, to ride out cold-launch connect + E2E handshake races.
+    public func waitUntilReadyToSendData(timeout: TimeInterval) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if canSendData { return true }
+            try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+        }
+        return canSendData
+    }
+
     // MARK: - LAN Connection (existing behavior)
 
     public func connect(to host: String, port: UInt16, token: String) {

@@ -349,18 +349,17 @@ struct NewWorkspaceView: View {
 
     @MainActor
     private func performScan() async {
-        // Wait for the WebSocket to the Mac to finish connecting. On a cold
-        // app launch the view appears before `smartConnect()` completes (~3s),
-        // and `ConnectionManager.send()` silently drops packets while
-        // `connection` is nil — so without this wait the listener never fires
-        // and the spinner hangs until the 25s scan timeout, making it feel
-        // like the screen is permanently stuck.
-        let connectDeadline = Date().addingTimeInterval(10)
-        while !connectionManager.isConnected && Date() < connectDeadline {
-            try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms
-        }
-
-        guard connectionManager.isConnected else {
+        // Wait for the WebSocket to the Mac to be ready for data packets.
+        // On a cold app launch the view appears before smartConnect finishes
+        // (~3s) AND before the relay E2E key exchange completes — and
+        // ConnectionManager.send() silently drops data packets in both
+        // situations (nil `connection` on LAN pre-ready, `!e2e.isReady`
+        // drop on relay). Without this wait the listener never fires and
+        // the spinner hangs until the 25s scan timeout, making it feel
+        // permanently stuck — but only on the first attempt, because by
+        // the time the user retries the handshake is usually complete.
+        let ready = await connectionManager.waitUntilReadyToSendData(timeout: 12)
+        guard ready else {
             isScanning = false
             error = "mac unreachable — make sure tarsy is running on your mac"
             return
