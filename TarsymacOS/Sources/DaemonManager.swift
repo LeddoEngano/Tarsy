@@ -1746,7 +1746,14 @@ class DaemonManager: ObservableObject {
 
     private func handleStreamStart(clientId: String, packet: WSPacket) async {
         let stack = packet.payload?["stack"] ?? "web"
-        let streamUrl = packet.payload?["streamUrl"]
+        // Stream URL only applies to web/fullstack workspaces. Mobile streams
+        // the iOS Simulator window directly; backend has no UI. Ignore any
+        // stray streamUrl for those stacks to avoid accidentally opening a
+        // browser when the user expects to see the simulator.
+        let streamUrl: String? = {
+            guard stack == "web" || stack == "fullstack" else { return nil }
+            return packet.payload?["streamUrl"]
+        }()
         let quality = packet.payload?["quality"]
         let isOpenClaw = packet.payload?["workspaceType"] == "openclaw"
 

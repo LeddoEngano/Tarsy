@@ -62,11 +62,15 @@ struct WorkspaceSettingsView: View {
                     }
 
                     fieldSection("dev server command") {
-                        tarsyTextField("npm run dev", text: $devServerCommand)
+                        tarsyTextField(devCommandPlaceholder, text: $devServerCommand)
                     }
 
-                    fieldSection("stream url") {
-                        tarsyTextField("http://localhost:3000", text: $streamUrl)
+                    // Stream URL only applies to web/fullstack. Mobile streams the
+                    // simulator window directly, backend has no UI to stream.
+                    if stack == .web || stack == .fullstack {
+                        fieldSection("stream url") {
+                            tarsyTextField("http://localhost:3000", text: $streamUrl)
+                        }
                     }
 
                     // Save button
@@ -118,10 +122,21 @@ struct WorkspaceSettingsView: View {
         req.localPath = localPath
         req.stack = stack.rawValue
         req.devServerCommand = devServerCommand.isEmpty ? nil : devServerCommand
-        req.streamUrl = streamUrl.isEmpty ? nil : streamUrl
+        // Mobile/backend workspaces never have a stream URL — force it to nil
+        // regardless of what the user had previously stored.
+        let stackSupportsStreamUrl = (stack == .web || stack == .fullstack)
+        req.streamUrl = (stackSupportsStreamUrl && !streamUrl.isEmpty) ? streamUrl : nil
         try? await workspaceService.updateWorkspace(id: workspace.id, req)
         isSaving = false
         dismiss()
+    }
+
+    private var devCommandPlaceholder: String {
+        switch stack {
+        case .web, .fullstack: return "npm run dev"
+        case .mobile: return "npx expo start"
+        case .backend: return "npm start"
+        }
     }
 
     @ViewBuilder
