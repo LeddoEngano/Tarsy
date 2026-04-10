@@ -15,6 +15,15 @@ struct AIContextEditorView: View {
         _context = State(initialValue: workspace.aiContext ?? "")
     }
 
+    // Mirrors the CHECK constraint in supabase/migrations/032_ai_context_secret_guard.sql.
+    // Keep in sync with that file. Returns the human-readable name of the first
+    // matching provider, or nil if the context is clean.
+    private var detectedSecret: String? {
+        AIContextSecretScanner.firstMatch(in: context)
+    }
+
+    private var isValid: Bool { detectedSecret == nil }
+
     var body: some View {
         ZStack {
             TarsyTheme.backgroundPrimary
@@ -32,6 +41,26 @@ struct AIContextEditorView: View {
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(TarsyTheme.accentAmber.opacity(0.1))
+
+                // Secret detected banner (only when matched)
+                if let provider = detectedSecret {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.shield.fill")
+                            .foregroundColor(.red)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("possible \(provider) credential detected")
+                                .font(TarsyTheme.monoFontSmall)
+                                .foregroundColor(.red)
+                            Text("remove it before saving — api keys must never be stored in ai context")
+                                .font(TarsyTheme.monoFontSmall)
+                                .foregroundColor(TarsyTheme.textSecondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.red.opacity(0.12))
+                }
 
                 // Editor
                 TextEditor(text: $context)
@@ -63,10 +92,10 @@ struct AIContextEditorView: View {
                         .foregroundColor(TarsyTheme.backgroundPrimary)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(TarsyTheme.accentAmber)
+                        .background(isValid ? TarsyTheme.accentAmber : TarsyTheme.accentAmber.opacity(0.35))
                         .cornerRadius(8)
                     }
-                    .disabled(isSaving)
+                    .disabled(isSaving || !isValid)
                 }
                 .padding(12)
                 .background(TarsyTheme.backgroundSecondary)
