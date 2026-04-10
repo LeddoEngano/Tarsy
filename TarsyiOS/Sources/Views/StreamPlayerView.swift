@@ -548,25 +548,33 @@ struct StreamPlayerView: View {
     }
 
     private func checkDevServerStatus() {
-        guard connectionManager.isConnected else { return }
+        // Wait for ConnectionManager to be ready to send data packets
+        // (covers both the initial LAN/relay connect and the relay E2E
+        // handshake). Without this, a cold workspace open silently drops
+        // this packet and `isDevServerRunning` stays false, cascading into
+        // a spurious dev-server start in `startStreamWithAutoSetup`.
+        Task { @MainActor in
+            let ready = await connectionManager.waitUntilReadyToSendData(timeout: 12)
+            guard ready else { return }
 
-        var payload: [String: String] = ["path": workspace.localPath]
-        if let url = workspace.streamUrl, !url.isEmpty {
-            payload["streamUrl"] = url
-        }
+            var payload: [String: String] = ["path": workspace.localPath]
+            if let url = workspace.streamUrl, !url.isEmpty {
+                payload["streamUrl"] = url
+            }
 
-        connectionManager.send(WSPacket(action: .devServerStatus, payload: payload))
+            connectionManager.send(WSPacket(action: .devServerStatus, payload: payload))
 
-        connectionManager.addListener("devserver-status") { packet in
-            if packet.action == .devServerStatus {
-                let running = packet.payload?["running"] == "true"
-                DispatchQueue.main.async {
-                    isDevServerRunning = running
-                    if running, let portStr = packet.payload?["port"], let port = Int(portStr) {
-                        UserDefaults.standard.set(port, forKey: "devport_\(workspace.id)")
+            connectionManager.addListener("devserver-status") { packet in
+                if packet.action == .devServerStatus {
+                    let running = packet.payload?["running"] == "true"
+                    DispatchQueue.main.async {
+                        isDevServerRunning = running
+                        if running, let portStr = packet.payload?["port"], let port = Int(portStr) {
+                            UserDefaults.standard.set(port, forKey: "devport_\(workspace.id)")
+                        }
                     }
+                    connectionManager.removeListener("devserver-status")
                 }
-                connectionManager.removeListener("devserver-status")
             }
         }
     }
@@ -578,34 +586,57 @@ struct StreamPlayerView: View {
         isActive = true
         isStartingStream = true
 
-        let needsDevServer = isWebMode && !isDevServerRunning && workspace.devServerCommand != nil && !workspace.devServerCommand!.isEmpty
-
-        let afterDevServer = {
-            // Only proceed with stream if dev server is confirmed running
-            if self.isWebMode && !self.isDevServerRunning {
-                // Dev server failed to start — retry once before giving up
-                self.startDevServer {
-                    if self.isWebMode {
-                        self.openBrowserOnMac()
-                    }
-                    self.startStream()
-                    self.isStartingStream = false
-                }
+        // Gate the whole flow behind the connection+E2E handshake. Without
+        // this, on a cold workspace open the streamStart packet is silently
+        // dropped (relay pre-E2E) and the user sees "connecting to stream..."
+        // hang forever on the first attempt. Retrying the open works only
+        // because by then the handshake has completed.
+        Task { @MainActor in
+            let ready = await connectionManager.waitUntilReadyToSendData(timeout: 12)
+            guard ready else {
+                isStartingStream = false
                 return
             }
-            // Open browser on Mac for web projects
-            if self.isWebMode {
-                self.openBrowserOnMac()
-            }
-            // Start the actual stream
-            self.startStream()
-            self.isStartingStream = false
-        }
 
-        if needsDevServer {
-            startDevServer(completion: afterDevServer)
-        } else {
-            afterDevServer()
+            // Re-query the dev server status now that we can actually reach
+            // the Mac — the earlier checkDevServerStatus() may have been
+            // fired before the handshake completed.
+            if isWebMode && !isDevServerRunning {
+                checkDevServerStatus()
+                // Give the status check a moment to land before deciding
+                // whether to boot the dev server ourselves.
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+
+            let needsDevServer = isWebMode && !isDevServerRunning && workspace.devServerCommand != nil && !workspace.devServerCommand!.isEmpty
+
+            let afterDevServer = {
+                // Only proceed with stream if dev server is confirmed running
+                if self.isWebMode && !self.isDevServerRunning {
+                    // Dev server failed to start — retry once before giving up
+                    self.startDevServer {
+                        if self.isWebMode {
+                            self.openBrowserOnMac()
+                        }
+                        self.startStream()
+                        self.isStartingStream = false
+                    }
+                    return
+                }
+                // Open browser on Mac for web projects
+                if self.isWebMode {
+                    self.openBrowserOnMac()
+                }
+                // Start the actual stream
+                self.startStream()
+                self.isStartingStream = false
+            }
+
+            if needsDevServer {
+                startDevServer(completion: afterDevServer)
+            } else {
+                afterDevServer()
+            }
         }
     }
 
@@ -686,21 +717,29 @@ struct StreamPlayerView: View {
     }
 
     private func detectPorts() {
-        connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.localPath]))
+        // Same connection-readiness gate as the other onAppear flows — see
+        // startStreamWithAutoSetup for the full explanation of the cold-
+        // launch race this works around.
+        Task { @MainActor in
+            let ready = await connectionManager.waitUntilReadyToSendData(timeout: 12)
+            guard ready else { return }
 
-        connectionManager.addListener("stream-ports-\(workspace.id)") { packet in
-            if packet.action == .proxyDetectPortsResult {
-                if let json = packet.payload?["ports"],
-                   let data = json.data(using: .utf8),
-                   let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
-                    DispatchQueue.main.async {
-                        detectedPorts = parsed.map { PortInfo(from: $0) }
-                        if selectedPort == nil, let first = detectedPorts.first {
-                            selectedPort = first.port
+            connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.localPath]))
+
+            connectionManager.addListener("stream-ports-\(workspace.id)") { packet in
+                if packet.action == .proxyDetectPortsResult {
+                    if let json = packet.payload?["ports"],
+                       let data = json.data(using: .utf8),
+                       let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: String]] {
+                        DispatchQueue.main.async {
+                            detectedPorts = parsed.map { PortInfo(from: $0) }
+                            if selectedPort == nil, let first = detectedPorts.first {
+                                selectedPort = first.port
+                            }
                         }
                     }
+                    connectionManager.removeListener("stream-ports-\(workspace.id)")
                 }
-                connectionManager.removeListener("stream-ports-\(workspace.id)")
             }
         }
     }
