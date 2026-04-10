@@ -61,6 +61,10 @@ class DaemonManager: ObservableObject {
 
     let profileService = ProfileService()
     private var machineSecret: String?
+    /// Phase 3: P-256 keypair identity for signed-timestamp relay auth.
+    /// Created lazily on first relay connect; key material lives in Secure
+    /// Enclave (or Keychain fallback). Never logged.
+    private var machineKeyStore: MachineKeyStore?
 
     // MARK: - Machine Secret Keychain
 
@@ -432,8 +436,35 @@ class DaemonManager: ObservableObject {
             }
         )
 
-        await relayClient.connect(token: session.accessToken, machineSecret: machineSecret)
-        log("Connected to relay for remote access")
+        // Phase 3: build the keypair-based identity (signed timestamp) if we
+        // have one. The relay supports both this and the legacy machineSecret
+        // at the same time; both are sent and the relay picks the signature
+        // path when `signature` is present.
+        let identity: MachineAuthIdentity?
+        if let store = machineKeyStore, let mId = machineId {
+            let pub = store.publicKeyDER
+            identity = MachineAuthIdentity(
+                machineId: mId.uuidString.lowercased(),
+                userId: session.user.id.uuidString.lowercased(),
+                publicKeyDER: pub,
+                signer: { [weak store] message in
+                    guard let store else {
+                        throw NSError(domain: "DaemonManager", code: -1,
+                                      userInfo: [NSLocalizedDescriptionKey: "key store deallocated"])
+                    }
+                    return try await store.sign(message: message)
+                }
+            )
+        } else {
+            identity = nil
+        }
+
+        await relayClient.connect(
+            token: session.accessToken,
+            machineSecret: machineSecret,
+            machineIdentity: identity
+        )
+        log("Connected to relay for remote access (identity: \(identity == nil ? "legacy-only" : "signed"))")
     }
 
     // Forward response to relay when clientId is "relay"
@@ -2195,11 +2226,70 @@ class DaemonManager: ObservableObject {
             }
             lastError = nil
 
-            // Ensure machine has a relay secret (for role verification)
+            // Ensure machine has a relay secret (for role verification).
+            // Legacy flow — still required during the Phase 3 transition until
+            // migration 036 drops the column.
             await ensureMachineSecret(userId: session.user.id, machineId: machineId!)
+            // Phase 3 — also ensure a P-256 keypair exists and its public key
+            // is registered in machine_tokens. The relay prefers this flow
+            // over the legacy secret when both are available.
+            await ensureMachinePublicKey(userId: session.user.id, machineId: machineId!)
         } catch {
             log("registerMachine: FAILED — \(error)")
             lastError = "Register failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Creates (or loads) the Secure Enclave / Keychain P-256 key for this
+    /// machine and uploads the public key to machine_tokens via the
+    /// register_machine_public_key RPC. Idempotent: if the public key in the
+    /// DB already matches the local key, this is a no-op.
+    private func ensureMachinePublicKey(userId: UUID, machineId: UUID) async {
+        do {
+            let store: MachineKeyStore
+            if let existing = self.machineKeyStore {
+                store = existing
+            } else {
+                store = try MachineKeyStore()
+                self.machineKeyStore = store
+                log("ensureMachinePublicKey: created MachineKeyStore (backend=\(store.backend))")
+            }
+
+            let localPub = store.publicKeyDER
+            // PostgREST represents bytea as a PostgreSQL escape string:
+            // "\x<hex>". Build the same format for both comparison and upload
+            // so we can avoid a round-trip through Data.
+            let localPubHex = "\\x" + localPub.map { String(format: "%02x", $0) }.joined()
+
+            // Compare against what's in the DB (if any) — we only upload when
+            // different, so reboots don't bump `rotated_at` needlessly.
+            struct MachineTokenRow: Decodable {
+                let public_key: String?
+            }
+            let existing: [MachineTokenRow] = try await supabase
+                .from("machine_tokens")
+                .select("public_key")
+                .eq("machine_id", value: machineId.uuidString)
+                .execute()
+                .value
+
+            if let dbPubHex = existing.first?.public_key,
+               dbPubHex.caseInsensitiveCompare(localPubHex) == .orderedSame {
+                log("ensureMachinePublicKey: already up-to-date")
+                return
+            }
+
+            // Upload via RPC — SECURITY DEFINER validates ownership and
+            // enforces length bounds. PostgREST decodes "\x<hex>" to bytea.
+            try await supabase
+                .rpc("register_machine_public_key", params: [
+                    "p_machine_id": machineId.uuidString,
+                    "p_public_key": localPubHex
+                ])
+                .execute()
+            log("ensureMachinePublicKey: uploaded public key (\(localPub.count) bytes) to Supabase")
+        } catch {
+            log("ensureMachinePublicKey: FAILED — \(error)")
         }
     }
 

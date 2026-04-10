@@ -14,6 +14,11 @@ actor RelayClient {
 
     private var authToken: String?
     private var machineSecret: String?
+    /// Phase 3: signed-timestamp machine auth identity. When set, connect()
+    /// will populate `machine_id`, `timestamp`, `signature`, and `publicKey`
+    /// in the auth payload alongside the legacy `machineSecret` field. The
+    /// relay prefers the signature flow when both are present.
+    private var machineIdentity: MachineAuthIdentity?
     private var isReconnecting = false
     private var pingTask: Task<Void, Never>?
     private var isIntentionalDisconnect = false
@@ -31,9 +36,14 @@ actor RelayClient {
 
     var connected: Bool { isConnected }
 
-    func connect(token: String, machineSecret: String? = nil) async {
+    func connect(
+        token: String,
+        machineSecret: String? = nil,
+        machineIdentity: MachineAuthIdentity? = nil
+    ) async {
         self.authToken = token
         if let machineSecret { self.machineSecret = machineSecret }
+        if let machineIdentity { self.machineIdentity = machineIdentity }
         isIntentionalDisconnect = false
         // Only reset reconnect attempts on explicit connect (not reconnect)
         if !isReconnecting {
@@ -41,10 +51,10 @@ actor RelayClient {
         }
         isReconnecting = false
 
-        performConnect(token: token)
+        await performConnect(token: token)
     }
 
-    private func performConnect(token: String) {
+    private func performConnect(token: String) async {
         let baseURL = TarsyConfig.relayURL
 
         guard let url = URL(string: baseURL) else { return }
@@ -65,9 +75,33 @@ actor RelayClient {
         self.webSocket = ws
         ws.resume()
 
-        // Send auth as first message (token not in URL, machineSecret for role verification)
-        var auth: [String: String] = ["action": "auth", "token": token, "role": "machine"]
+        // Build auth payload. During the Phase 3 transition we send BOTH the
+        // legacy `machineSecret` (if we have one) and the new signed-timestamp
+        // fields (if we have an identity). The relay prefers the signature
+        // flow when `signature` is present and falls back to `machineSecret`
+        // otherwise — belt and suspenders while the rollout happens.
+        var auth: [String: Any] = ["action": "auth", "token": token, "role": "machine"]
         if let secret = machineSecret { auth["machineSecret"] = secret }
+        if let identity = machineIdentity {
+            // Fresh timestamp on every (re)connect — freshness window is ±60s
+            // on the relay side. Milliseconds to match Date.now() in JS.
+            let timestamp = Int(Date().timeIntervalSince1970 * 1000)
+            let canonical = "\(identity.machineId):\(timestamp):\(identity.userId)"
+            if let canonicalData = canonical.data(using: .utf8) {
+                do {
+                    let signature = try await identity.signer(canonicalData)
+                    auth["machine_id"] = identity.machineId
+                    auth["timestamp"] = timestamp
+                    auth["signature"] = signature.base64EncodedString()
+                    auth["machinePublicKey"] = identity.publicKeyDER.base64EncodedString()
+                } catch {
+                    #if DEBUG
+                    print("[RelayClient] signing failed: \(error) — falling back to legacy secret only")
+                    #endif
+                }
+            }
+        }
+
         if let data = try? JSONSerialization.data(withJSONObject: auth),
            let str = String(data: data, encoding: .utf8) {
             ws.send(.string(str)) { _ in }
@@ -233,12 +267,12 @@ actor RelayClient {
                 let token = refreshed.accessToken
                 self.authToken = token
                 self.isReconnecting = true
-                self.performConnect(token: token)
+                await self.performConnect(token: token)
             } catch {
                 // Token refresh failed — retry with existing token if we have one
                 if let existingToken = self.authToken {
                     self.isReconnecting = true
-                    self.performConnect(token: existingToken)
+                    await self.performConnect(token: existingToken)
                 } else {
                     // No token at all — keep trying
                     scheduleReconnect()
@@ -263,10 +297,10 @@ actor RelayClient {
             let refreshed = try await supabase.auth.refreshSession()
             let token = refreshed.accessToken
             self.authToken = token
-            performConnect(token: token)
+            await performConnect(token: token)
         } catch {
             if let token = authToken {
-                performConnect(token: token)
+                await performConnect(token: token)
                 return
             }
             scheduleReconnect()

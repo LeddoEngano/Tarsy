@@ -3,6 +3,7 @@ using System.Net.WebSockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using TarsyWindows.Security;
 
 namespace TarsyWindows.Networking;
 
@@ -14,7 +15,9 @@ public class RelayClient
 {
     private ClientWebSocket? _ws;
     private string _token;
-    private readonly string? _machineSecret;
+    private readonly MachineKeyStore _keyStore;
+    private readonly string _machineId;
+    private readonly string _userId;
     private readonly Func<WSPacket, string, Task> _onPacket;
     private readonly Func<Task<string?>> _tokenRefresher;
     private CancellationTokenSource? _cts;
@@ -29,12 +32,16 @@ public class RelayClient
 
     public RelayClient(
         string token,
-        string? machineSecret,
+        MachineKeyStore keyStore,
+        string machineId,
+        string userId,
         Func<WSPacket, string, Task> onPacket,
         Func<Task<string?>> tokenRefresher)
     {
         _token = token;
-        _machineSecret = machineSecret;
+        _keyStore = keyStore;
+        _machineId = machineId;
+        _userId = userId;
         _onPacket = onPacket;
         _tokenRefresher = tokenRefresher;
     }
@@ -119,17 +126,30 @@ public class RelayClient
         {
             await _ws.ConnectAsync(new Uri(Models.TarsyConfig.RelayUrl), _cts!.Token);
 
-            // Reset E2E for new connection
+            // Reset E2E for new connection (E2E key exchange happens via a
+            // separate `e2e:key_exchange` packet later — not in the auth message).
             _e2e.Reset();
 
-            // Send auth with E2E public key
-            var authPacket = WSPacket.Create(WSAction.Auth, new()
+            // Phase 3 machine auth: sign a canonical string
+            //   "<machine_id>:<timestamp_ms>:<user_id>"
+            // with the P-256 private key in the TPM/software store. The relay
+            // fetches our public key from machine_tokens.public_key and
+            // verifies the signature. No shared secret is transmitted.
+            var timestampMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            var canonical = $"{_machineId}:{timestampMs}:{_userId}";
+            var canonicalBytes = Encoding.UTF8.GetBytes(canonical);
+            var signatureDer = _keyStore.Sign(canonicalBytes);
+
+            var authPayload = new System.Collections.Generic.Dictionary<string, string>
             {
                 ["token"] = _token,
                 ["role"] = "machine",
-                ["machineSecret"] = _machineSecret ?? "",
-                ["publicKey"] = _e2e.PublicKeyBase64,
-            });
+                ["machine_id"] = _machineId,
+                ["timestamp"] = timestampMs.ToString(),
+                ["signature"] = Convert.ToBase64String(signatureDer),
+                ["machinePublicKey"] = Convert.ToBase64String(_keyStore.PublicKeyDer),
+            };
+            var authPacket = WSPacket.Create(WSAction.Auth, authPayload);
             await Send(authPacket);
 
             _reconnectAttempts = 0;

@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { createPublicKey, verify as cryptoVerify } from "node:crypto";
 
 // Bun auto-loads .env files
 const SUPABASE_URL = process.env.SUPABASE_URL!;
@@ -266,7 +267,7 @@ function registerConnection(ws: WebSocket, userId: string, role: "machine" | "cl
 const server = Bun.serve({
   port: PORT,
 
-  fetch(req, server) {
+  async fetch(req, server) {
     const url = new URL(req.url);
 
     // Health check
@@ -406,7 +407,20 @@ const server = Bun.serve({
       if (!info) {
         try {
           const text = typeof message === "string" ? message : new TextDecoder().decode(message as ArrayBuffer);
-          const auth = JSON.parse(text) as { action?: string; token?: string; role?: string; machineSecret?: string };
+          const auth = JSON.parse(text) as {
+            action?: string;
+            token?: string;
+            role?: string;
+            // Legacy auth (Phase 2 and earlier)
+            machineSecret?: string;
+            // Public-key auth (Phase 3+). Note: `publicKey` (without the
+            // `machine` prefix) is reserved for the per-session E2E encryption
+            // key and is intentionally distinct from the identity key below.
+            machine_id?: string;
+            timestamp?: number;
+            signature?: string;           // base64(DER ECDSA P-256)
+            machinePublicKey?: string;    // base64(DER SPKI P-256) — sanity check vs DB
+          };
 
           if (auth.action !== "auth" || !auth.token || !auth.role || !["machine", "client"].includes(auth.role)) {
             console.log(`[Relay] Invalid auth message`);
@@ -424,29 +438,122 @@ const server = Bun.serve({
             return;
           }
 
-          // Verify machine secret for machine role (prevents impersonation)
+          // Verify machine identity for machine role (prevents impersonation).
+          // Two flows supported during the Phase 3 migration:
+          //   1) Public-key: sign ${machine_id}:${timestamp}:${userId} with a
+          //      P-256 ECDSA key whose public counterpart was uploaded via
+          //      register_machine_public_key(). Private key lives in Secure
+          //      Enclave / TPM; relay never sees it.
+          //   2) Legacy machineSecret: plaintext shared secret in machine_tokens.
+          //      Kept working until Migration 036 so existing DMG installs
+          //      don't break. When both fields are present, the new flow wins.
           if (auth.role === "machine") {
-            if (!auth.machineSecret) {
-              console.log(`[Relay] Machine auth rejected: no machineSecret (${userId.slice(0, 8)})`);
-              ws.close(4003, "Machine secret required");
-              return;
-            }
-            const client = supabaseAdmin || supabase;
-            const { data: tokenRow } = await client
-              .from("machine_tokens")
-              .select("machine_secret")
-              .eq("user_id", userId)
-              .single();
-            const secretsMatch = tokenRow?.machine_secret && auth.machineSecret &&
-              tokenRow.machine_secret.length === auth.machineSecret.length &&
-              crypto.timingSafeEqual(
-                Buffer.from(tokenRow.machine_secret),
-                Buffer.from(auth.machineSecret)
-              );
-            if (!tokenRow || !secretsMatch) {
-              console.log(`[Relay] Machine auth rejected: invalid secret (${userId.slice(0, 8)})`);
-              ws.close(4003, "Invalid machine credentials");
-              return;
+            const dbClient = supabaseAdmin || supabase;
+            const useSignatureFlow = !!(auth.signature && auth.timestamp && auth.machine_id);
+
+            if (useSignatureFlow) {
+              // 1. Freshness
+              const now = Date.now();
+              const skew = Math.abs(now - (auth.timestamp ?? 0));
+              if (skew > 60_000) {
+                console.log(`[Relay] Machine auth rejected: stale timestamp (skew=${skew}ms, ${userId.slice(0, 8)})`);
+                ws.close(4003, "Stale timestamp");
+                return;
+              }
+
+              // 2. Fetch public key for this (user_id, machine_id)
+              const { data: tokenRow, error: fetchErr } = await dbClient
+                .from("machine_tokens")
+                .select("public_key, key_algorithm")
+                .eq("user_id", userId)
+                .eq("machine_id", auth.machine_id)
+                .maybeSingle();
+              if (fetchErr || !tokenRow?.public_key) {
+                console.log(`[Relay] Machine auth rejected: no public_key on file (${userId.slice(0, 8)} / ${String(auth.machine_id).slice(0, 8)})`);
+                ws.close(4003, "Public key not registered");
+                return;
+              }
+              if (tokenRow.key_algorithm && tokenRow.key_algorithm !== "p256-ecdsa") {
+                console.log(`[Relay] Machine auth rejected: unsupported key algorithm ${tokenRow.key_algorithm}`);
+                ws.close(4003, "Unsupported key algorithm");
+                return;
+              }
+
+              // 3. Decode stored public key. Supabase returns bytea as a
+              // "\\x..." hex string through PostgREST.
+              let storedPublicKeyDer: Buffer;
+              try {
+                const raw = tokenRow.public_key as unknown as string;
+                storedPublicKeyDer = raw.startsWith("\\x")
+                  ? Buffer.from(raw.slice(2), "hex")
+                  : Buffer.from(raw, "base64");
+              } catch (e) {
+                console.log(`[Relay] Machine auth rejected: public_key decode failed`);
+                ws.close(4003, "Invalid stored public key");
+                return;
+              }
+
+              // 4. Optional sanity check: client-presented public key matches DB
+              if (auth.machinePublicKey) {
+                const clientPubDer = Buffer.from(auth.machinePublicKey, "base64");
+                if (clientPubDer.length !== storedPublicKeyDer.length ||
+                    !crypto.timingSafeEqual(clientPubDer, storedPublicKeyDer)) {
+                  console.log(`[Relay] Machine auth rejected: public_key mismatch (${userId.slice(0, 8)})`);
+                  ws.close(4003, "Public key mismatch");
+                  return;
+                }
+              }
+
+              // 5. Verify ECDSA signature over canonical string
+              const canonical = `${auth.machine_id}:${auth.timestamp}:${userId}`;
+              let verified = false;
+              try {
+                const pubKey = createPublicKey({
+                  key: storedPublicKeyDer,
+                  format: "der",
+                  type: "spki",
+                });
+                const sigBuf = Buffer.from(auth.signature!, "base64");
+                verified = cryptoVerify(
+                  "sha256",
+                  Buffer.from(canonical, "utf8"),
+                  { key: pubKey, dsaEncoding: "der" },
+                  sigBuf,
+                );
+              } catch (e) {
+                console.log(`[Relay] Machine auth rejected: verify threw ${e}`);
+                ws.close(4003, "Signature verification failed");
+                return;
+              }
+              if (!verified) {
+                console.log(`[Relay] Machine auth rejected: bad signature (${userId.slice(0, 8)} / ${String(auth.machine_id).slice(0, 8)})`);
+                ws.close(4003, "Invalid signature");
+                return;
+              }
+              // Fall through to register connection
+            } else {
+              // Legacy machineSecret flow
+              if (!auth.machineSecret) {
+                console.log(`[Relay] Machine auth rejected: no credentials (${userId.slice(0, 8)})`);
+                ws.close(4003, "Machine credentials required");
+                return;
+              }
+              const { data: tokenRow } = await dbClient
+                .from("machine_tokens")
+                .select("machine_secret")
+                .eq("user_id", userId)
+                .single();
+              const secretsMatch = tokenRow?.machine_secret && auth.machineSecret &&
+                tokenRow.machine_secret.length === auth.machineSecret.length &&
+                crypto.timingSafeEqual(
+                  Buffer.from(tokenRow.machine_secret),
+                  Buffer.from(auth.machineSecret)
+                );
+              if (!tokenRow || !secretsMatch) {
+                console.log(`[Relay] Machine auth rejected: invalid secret (${userId.slice(0, 8)})`);
+                ws.close(4003, "Invalid machine credentials");
+                return;
+              }
             }
           }
 

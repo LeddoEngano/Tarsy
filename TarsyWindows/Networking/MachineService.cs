@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using TarsyWindows.Models;
+using TarsyWindows.Security;
 
 namespace TarsyWindows.Networking;
 
@@ -17,7 +18,14 @@ namespace TarsyWindows.Networking;
 public class MachineService
 {
     public string? MachineId { get; private set; }
-    public string? Secret { get; private set; }
+
+    /// <summary>
+    /// P-256 keypair identity used for relay auth (Phase 3). The private key
+    /// lives in the Windows TPM (Microsoft Platform Crypto Provider) when
+    /// available, otherwise in the software key storage provider. Either
+    /// way, it's non-exportable from the process.
+    /// </summary>
+    public MachineKeyStore? KeyStore { get; private set; }
 
     private static readonly HttpClient Http = new();
 
@@ -48,7 +56,7 @@ public class MachineService
             MachineId = await CreateMachine(auth, hwUuid, hostname, localIp, model);
         }
 
-        Secret = await EnsureSecret(auth);
+        await EnsureMachineKey(auth);
 
         Console.WriteLine($"[Machine] Registered: {MachineId} ({hostname})");
     }
@@ -224,11 +232,78 @@ public class MachineService
         await Http.SendAsync(request);
     }
 
-    private async Task<string?> EnsureSecret(SupabaseAuth auth)
+    /// <summary>
+    /// Loads (or creates) the machine's P-256 identity keypair and uploads
+    /// the public key to machine_tokens via the register_machine_public_key
+    /// RPC. Idempotent — if the DB already has the matching public key, this
+    /// is a no-op. Called once during Register().
+    /// </summary>
+    private async Task EnsureMachineKey(SupabaseAuth auth)
     {
-        // TODO: Store/retrieve from Windows Credential Manager (DPAPI)
-        // For now, generate and upsert
-        var secret = Guid.NewGuid().ToString();
-        return secret;
+        if (string.IsNullOrEmpty(MachineId) || string.IsNullOrEmpty(auth.AccessToken))
+            return;
+
+        try
+        {
+            KeyStore = MachineKeyStore.LoadOrCreate();
+            var localHex = @"\x" + Convert.ToHexString(KeyStore.PublicKeyDer).ToLowerInvariant();
+
+            // Fetch current DB value (avoid bumping rotated_at on every boot)
+            var getUrl = $"{TarsyConfig.SupabaseUrl}/rest/v1/machine_tokens?machine_id=eq.{MachineId}&select=public_key";
+            using var getReq = new HttpRequestMessage(HttpMethod.Get, getUrl);
+            getReq.Headers.Add("apikey", TarsyConfig.SupabaseAnonKey);
+            getReq.Headers.Add("Authorization", $"Bearer {auth.AccessToken}");
+            var getResp = await Http.SendAsync(getReq);
+
+            bool needsUpload = true;
+            if (getResp.IsSuccessStatusCode)
+            {
+                var getJson = await getResp.Content.ReadAsStringAsync();
+                using var getDoc = JsonDocument.Parse(getJson);
+                if (getDoc.RootElement.ValueKind == JsonValueKind.Array && getDoc.RootElement.GetArrayLength() > 0)
+                {
+                    var row = getDoc.RootElement[0];
+                    if (row.TryGetProperty("public_key", out var pk) && pk.ValueKind == JsonValueKind.String)
+                    {
+                        var dbHex = pk.GetString();
+                        if (string.Equals(dbHex, localHex, StringComparison.OrdinalIgnoreCase))
+                        {
+                            needsUpload = false;
+                            Console.WriteLine($"[Machine] EnsureMachineKey: already up-to-date (backend={KeyStore.Backend})");
+                        }
+                    }
+                }
+            }
+
+            if (needsUpload)
+            {
+                var rpcUrl = $"{TarsyConfig.SupabaseUrl}/rest/v1/rpc/register_machine_public_key";
+                var body = JsonSerializer.Serialize(new
+                {
+                    p_machine_id = MachineId,
+                    p_public_key = localHex,
+                });
+                using var rpcReq = new HttpRequestMessage(HttpMethod.Post, rpcUrl);
+                rpcReq.Content = new StringContent(body, Encoding.UTF8, "application/json");
+                rpcReq.Headers.Add("apikey", TarsyConfig.SupabaseAnonKey);
+                rpcReq.Headers.Add("Authorization", $"Bearer {auth.AccessToken}");
+                var rpcResp = await Http.SendAsync(rpcReq);
+                if (rpcResp.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"[Machine] EnsureMachineKey: uploaded public key ({KeyStore.PublicKeyDer.Length} bytes, backend={KeyStore.Backend})");
+                }
+                else
+                {
+                    var err = await rpcResp.Content.ReadAsStringAsync();
+                    Console.WriteLine($"[Machine] EnsureMachineKey: upload failed {rpcResp.StatusCode}: {err}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Machine] EnsureMachineKey error: {ex.Message}");
+            // Don't crash — legacy machineSecret path still works if the relay hasn't
+            // been updated yet, and the relay supports both flows during transition.
+        }
     }
 }

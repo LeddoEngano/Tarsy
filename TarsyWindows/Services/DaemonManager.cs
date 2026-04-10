@@ -189,14 +189,23 @@ public class DaemonManager
         _lanServer = new WebSocketServer(HandlePacket);
         _ = _lanServer.Start(_cts.Token);
 
-        // 6. Connect to relay
-        _relay = new RelayClient(
-            token: token,
-            machineSecret: _machine.Secret,
-            onPacket: HandlePacket,
-            tokenRefresher: _auth.RefreshToken
-        );
-        await _relay.Connect();
+        // 6. Connect to relay (Phase 3 signed-timestamp auth)
+        if (_machine.KeyStore == null || string.IsNullOrEmpty(_machine.MachineId) || string.IsNullOrEmpty(_auth.UserId))
+        {
+            Console.WriteLine("[Daemon] Machine registration incomplete — cannot connect to relay");
+        }
+        else
+        {
+            _relay = new RelayClient(
+                token: token,
+                keyStore: _machine.KeyStore,
+                machineId: _machine.MachineId,
+                userId: _auth.UserId,
+                onPacket: HandlePacket,
+                tokenRefresher: _auth.RefreshToken
+            );
+            await _relay.Connect();
+        }
 
         // 7. Start heartbeat (30s)
         _heartbeatTimer = new System.Threading.Timer(
