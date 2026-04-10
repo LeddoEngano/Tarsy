@@ -9,20 +9,30 @@ struct ScannedRepo: Codable {
     let stack: String?
 }
 
+struct DetectedSubProject: Codable, Identifiable, Hashable {
+    var id: String { path }
+    let name: String
+    let path: String
+    let stack: String?
+    let framework: String?
+    let language: String?
+    let suggestedCommand: String?
+}
+
 struct NewWorkspaceView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var workspaceService: WorkspaceService
     @EnvironmentObject var machineService: MachineService
     @EnvironmentObject var connectionManager: ConnectionManager
-    @EnvironmentObject var subscriptionManager: SubscriptionManager
-
-    @State private var showPaywall = false
 
     @State private var name = ""
     @State private var repoUrl = ""
     @State private var localPath = ""
+    // `stack` is still tracked because it's sent to the backend and drives
+    // streaming / icon behavior, but the user no longer picks it manually —
+    // it's auto-detected by RepoAnalyzer or set via the monorepo sub-project
+    // picker below.
     @State private var stack: Workspace.WorkspaceStack = .web
-    @State private var workspaceType: Workspace.WorkspaceType = .standard
     @State private var devServerCommand = ""
     @State private var isCreating = false
     @State private var error: String?
@@ -35,6 +45,12 @@ struct NewWorkspaceView: View {
     @State private var isAnalyzing = false
     @State private var detectedLanguage: String?
     @State private var detectedFramework: String?
+
+    // Monorepo support: if the analyzed repo contains multiple sub-projects,
+    // show a picker so the user can scope the dev server command to the
+    // project they actually want to run.
+    @State private var detectedProjects: [DetectedSubProject] = []
+    @State private var selectedProjectPath: String? = nil
 
     private var filteredRepos: [ScannedRepo] {
         if searchText.isEmpty { return scannedRepos }
@@ -82,10 +98,6 @@ struct NewWorkspaceView: View {
             }
         }
         .onAppear { scanRepos() }
-        .sheet(isPresented: $showPaywall) {
-            PaywallView()
-                .environmentObject(subscriptionManager)
-        }
     }
 
     // MARK: - Repo Suggestions
@@ -254,64 +266,13 @@ struct NewWorkspaceView: View {
                 tarsyTextField("~/Projects/my-app", text: $localPath)
             }
 
-            fieldSection("stack") {
-                HStack(spacing: 8) {
-                    ForEach([Workspace.WorkspaceStack.web, .mobile, .backend, .fullstack], id: \.rawValue) { s in
-                        stackChip(s)
-                    }
-                }
-            }
-
-            fieldSection("workspace type") {
-                HStack(spacing: 8) {
-                    Button(action: { workspaceType = .standard }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "macwindow")
-                                .font(TarsyTheme.font(size: 10))
-                            Text("standard")
-                                .font(TarsyTheme.monoFontSmall)
-                        }
-                        .foregroundColor(workspaceType == .standard ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(workspaceType == .standard ? TarsyTheme.accentAmber : TarsyTheme.backgroundSecondary)
-                        .cornerRadius(8)
-                    }
-                    Button(action: {
-                        if subscriptionManager.isPro {
-                            workspaceType = .openClaw
-                        } else {
-                            showPaywall = true
-                        }
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "display")
-                                .font(TarsyTheme.font(size: 10))
-                            Text("openclaw")
-                                .font(TarsyTheme.monoFontSmall)
-                            if !subscriptionManager.isPro {
-                                Image(systemName: "lock.fill")
-                                    .font(TarsyTheme.font(size: 8))
-                            }
-                        }
-                        .foregroundColor(workspaceType == .openClaw ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(workspaceType == .openClaw ? TarsyTheme.accentAmber : TarsyTheme.backgroundSecondary)
-                        .cornerRadius(8)
-                    }
-                }
-
-                if workspaceType == .openClaw {
-                    Text("streams the full desktop instead of a single window. designed for watching OpenClaw work.")
-                        .font(TarsyTheme.font(size: 10))
-                        .foregroundColor(TarsyTheme.textSecondary)
-                }
+            if !detectedProjects.isEmpty {
+                monorepoSubProjectPicker
             }
 
             fieldSection("dev server command (optional)") {
                 VStack(alignment: .leading, spacing: 4) {
-                    tarsyTextField("npm run dev", text: $devServerCommand)
+                    tarsyTextField(devCommandPlaceholder, text: $devServerCommand)
                     if isAnalyzing {
                         HStack(spacing: 4) {
                             ProgressView().controlSize(.mini).tint(TarsyTheme.accentAmber)
@@ -383,7 +344,29 @@ struct NewWorkspaceView: View {
         isScanning = true
         error = nil
 
-        // Register listener BEFORE sending to avoid race condition
+        Task { await performScan() }
+    }
+
+    @MainActor
+    private func performScan() async {
+        // Wait for the WebSocket to the Mac to finish connecting. On a cold
+        // app launch the view appears before `smartConnect()` completes (~3s),
+        // and `ConnectionManager.send()` silently drops packets while
+        // `connection` is nil — so without this wait the listener never fires
+        // and the spinner hangs until the 25s scan timeout, making it feel
+        // like the screen is permanently stuck.
+        let connectDeadline = Date().addingTimeInterval(10)
+        while !connectionManager.isConnected && Date() < connectDeadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)  // 100ms
+        }
+
+        guard connectionManager.isConnected else {
+            isScanning = false
+            error = "mac unreachable — make sure tarsy is running on your mac"
+            return
+        }
+
+        // Register listener BEFORE sending to avoid race condition.
         connectionManager.addListener("scan_repos") { packet in
             guard packet.action == .workspaceScanResult else { return }
 
@@ -405,7 +388,8 @@ struct NewWorkspaceView: View {
 
         connectionManager.send(WSPacket(action: .workspaceScanRepos))
 
-        // Timeout — generous to allow concurrent git enrichment on macOS
+        // Timeout for the scan response itself — generous to allow concurrent
+        // git enrichment on macOS.
         Task {
             try? await Task.sleep(nanoseconds: 25_000_000_000)
             await MainActor.run {
@@ -425,6 +409,13 @@ struct NewWorkspaceView: View {
         if let s = repo.stack, let ws = Workspace.WorkspaceStack(rawValue: s) {
             stack = ws
         }
+        // Reset any previous analysis state so the picker doesn't linger
+        // between repo selections.
+        detectedProjects = []
+        selectedProjectPath = nil
+        detectedLanguage = nil
+        detectedFramework = nil
+        devServerCommand = ""
         withAnimation { showRepoList = false }
         analyzeRepo(path: repo.path)
     }
@@ -447,6 +438,8 @@ struct NewWorkspaceView: View {
                     let framework: String?
                     let stack: String?
                     let suggestedCommand: String?
+                    let isMonorepo: Bool?
+                    let projects: [DetectedSubProject]?
                 }
 
                 guard let analysis = try? JSONDecoder().decode(Analysis.self, from: data) else {
@@ -454,18 +447,30 @@ struct NewWorkspaceView: View {
                     return
                 }
 
-                // Auto-fill dev server command if empty
-                if self.devServerCommand.isEmpty, let cmd = analysis.suggestedCommand {
-                    self.devServerCommand = cmd
-                }
+                // Monorepo path: surface the sub-project picker and auto-pick
+                // the first one so the form has sensible defaults.
+                if let projects = analysis.projects, !projects.isEmpty {
+                    self.detectedProjects = projects
+                    if let first = projects.first {
+                        self.applySubProject(first)
+                    }
+                } else {
+                    self.detectedProjects = []
+                    self.selectedProjectPath = nil
 
-                // Update stack if detected
-                if let s = analysis.stack, let ws = Workspace.WorkspaceStack(rawValue: s) {
-                    self.stack = ws
-                }
+                    // Single-project repo: auto-fill dev server command if empty
+                    if self.devServerCommand.isEmpty, let cmd = analysis.suggestedCommand {
+                        self.devServerCommand = cmd
+                    }
 
-                self.detectedLanguage = analysis.language
-                self.detectedFramework = analysis.framework
+                    // Update stack if detected
+                    if let s = analysis.stack, let ws = Workspace.WorkspaceStack(rawValue: s) {
+                        self.stack = ws
+                    }
+
+                    self.detectedLanguage = analysis.language
+                    self.detectedFramework = analysis.framework
+                }
             }
         }
 
@@ -499,7 +504,9 @@ struct NewWorkspaceView: View {
                 repoUrl: repoUrl.isEmpty ? nil : repoUrl,
                 localPath: localPath.isEmpty ? "~/Projects/\(name.lowercased())" : localPath,
                 stack: stack.rawValue,
-                workspaceType: workspaceType.rawValue,
+                // OpenClaw is temporarily disabled in the UI until the feature
+                // is fully implemented — always create standard workspaces.
+                workspaceType: Workspace.WorkspaceType.standard.rawValue,
                 devServerCommand: devServerCommand.isEmpty ? nil : devServerCommand,
                 streamUrl: nil,
                 aiContext: nil
@@ -512,7 +519,97 @@ struct NewWorkspaceView: View {
         isCreating = false
     }
 
+    // MARK: - Monorepo sub-project picker
+
+    private var monorepoSubProjectPicker: some View {
+        fieldSection("monorepo sub-project") {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("this repo contains multiple projects — pick the one you want tarsy to run")
+                    .font(TarsyTheme.font(size: 10))
+                    .foregroundColor(TarsyTheme.textSecondary)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(detectedProjects) { project in
+                            subProjectChip(project)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func subProjectChip(_ project: DetectedSubProject) -> some View {
+        let isSelected = selectedProjectPath == project.path
+        Button(action: { applySubProject(project) }) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Image(systemName: iconForStack(project.stack))
+                        .font(TarsyTheme.font(size: 9))
+                    Text(project.name)
+                        .font(TarsyTheme.monoFontSmall)
+                        .fontWeight(.medium)
+                }
+                HStack(spacing: 4) {
+                    if let fw = project.framework {
+                        Text(fw)
+                            .font(TarsyTheme.font(size: 9))
+                    } else if let lang = project.language {
+                        Text(lang)
+                            .font(TarsyTheme.font(size: 9))
+                    }
+                    if let s = project.stack {
+                        Text(s)
+                            .font(TarsyTheme.font(size: 9))
+                            .opacity(0.7)
+                    }
+                }
+            }
+            .foregroundColor(isSelected ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(isSelected ? TarsyTheme.accentAmber : TarsyTheme.backgroundSecondary)
+            .cornerRadius(8)
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.clear : TarsyTheme.backgroundTertiary, lineWidth: 1)
+            )
+        }
+    }
+
+    private func iconForStack(_ stack: String?) -> String {
+        switch stack {
+        case "mobile": return "iphone"
+        case "web": return "globe"
+        case "backend": return "server.rack"
+        case "fullstack": return "square.stack.3d.up"
+        default: return "folder"
+        }
+    }
+
+    private func applySubProject(_ project: DetectedSubProject) {
+        selectedProjectPath = project.path
+        detectedLanguage = project.language
+        detectedFramework = project.framework
+
+        if let s = project.stack, let ws = Workspace.WorkspaceStack(rawValue: s) {
+            stack = ws
+        }
+        // Always replace the command on sub-project change — the old one
+        // belonged to the previous selection and would be wrong now.
+        devServerCommand = project.suggestedCommand ?? ""
+    }
+
     // MARK: - Helpers
+
+    private var devCommandPlaceholder: String {
+        switch stack {
+        case .web, .fullstack: return "npm run dev"
+        case .mobile: return "npx expo start"
+        case .backend: return "npm start"
+        }
+    }
 
     @ViewBuilder
     private func fieldSection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
@@ -535,19 +632,6 @@ struct NewWorkspaceView: View {
             .cornerRadius(10)
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
-    }
-
-    @ViewBuilder
-    private func stackChip(_ s: Workspace.WorkspaceStack) -> some View {
-        Button(action: { stack = s }) {
-            Text(s.rawValue)
-                .font(TarsyTheme.monoFontSmall)
-                .foregroundColor(stack == s ? TarsyTheme.backgroundPrimary : TarsyTheme.textSecondary)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(stack == s ? TarsyTheme.accentAmber : TarsyTheme.backgroundSecondary)
-                .cornerRadius(8)
-        }
     }
 }
 

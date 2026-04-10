@@ -516,4 +516,4 @@ Features used to control the companion. The web client must reimplement these.
 | File watcher | DispatchSource | FileSystemWatcher | — | — |
 
 
-*Generated on 2026-04-10 17:35:02 by `scripts/generate-features.sh`*
+*Generated on 2026-04-10 17:35:31 by `scripts/generate-features.sh`*
