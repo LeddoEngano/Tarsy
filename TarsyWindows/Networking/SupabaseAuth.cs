@@ -109,20 +109,29 @@ public class SupabaseAuth
     private async Task FetchUserId()
     {
         if (string.IsNullOrEmpty(_accessToken)) return;
-        try
+
+        // Retry once — UserId is required for session persistence
+        for (int attempt = 0; attempt < 2; attempt++)
         {
-            var request = new HttpRequestMessage(HttpMethod.Get, $"{TarsyConfig.SupabaseUrl}/auth/v1/user");
-            request.Headers.Add("apikey", TarsyConfig.SupabaseAnonKey);
-            request.Headers.Add("Authorization", $"Bearer {_accessToken}");
+            try
+            {
+                var request = new HttpRequestMessage(HttpMethod.Get, $"{TarsyConfig.SupabaseUrl}/auth/v1/user");
+                request.Headers.Add("apikey", TarsyConfig.SupabaseAnonKey);
+                request.Headers.Add("Authorization", $"Bearer {_accessToken}");
 
-            var response = await Http.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return;
+                var response = await Http.SendAsync(request);
+                if (!response.IsSuccessStatusCode) continue;
 
-            var json = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(json);
-            UserId = doc.RootElement.GetProperty("id").GetString();
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                UserId = doc.RootElement.GetProperty("id").GetString();
+                if (!string.IsNullOrEmpty(UserId)) return;
+            }
+            catch
+            {
+                if (attempt == 0) await Task.Delay(500);
+            }
         }
-        catch { }
     }
 
     /// <summary>

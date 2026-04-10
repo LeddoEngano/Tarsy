@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Assets\Icons\*.png" />
+    <EmbeddedResource Include="Assets\lucide.ttf" />
   </ItemGroup>
 
 </Project>

@@ -268,11 +268,20 @@ public class DaemonManager
         Console.WriteLine("[Daemon] Stopped");
     }
 
-    public void ShowOnboarding()
+    /// <summary>
+    /// Sign out — stops all services and clears stored credentials.
+    /// </summary>
+    public async Task SignOut()
     {
-        // TODO: Open onboarding window (WebView2 for OAuth)
-        Console.WriteLine("[Daemon] Onboarding requested");
+        await Stop();
+        _auth.SignOut();
+        Console.WriteLine("[Daemon] Signed out");
     }
+
+    /// <summary>
+    /// Whether the daemon is currently running (relay connected, services active).
+    /// </summary>
+    public bool IsRunning => _relay != null && _cts is { IsCancellationRequested: false };
 
     // ── Packet Dispatch ──
 

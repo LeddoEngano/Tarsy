@@ -56,6 +56,7 @@ Secrets.xcconfig
 
 # Claude Code
 .agents/
+.claude/settings.local.json
 .claude/skills/
 .claude/agents/
 .claude/rules/

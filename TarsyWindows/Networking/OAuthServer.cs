@@ -37,10 +37,28 @@ public class OAuthServer : IDisposable
         var redirectUrl = $"http://localhost:{_port}/callback";
         var oauthUrl = $"{TarsyConfig.SupabaseUrl}/auth/v1/authorize?provider=github&redirect_to={Uri.EscapeDataString(redirectUrl)}";
 
-        // Start listener
+        // Start listener (retry with new port if race condition occurs)
         _listener = new HttpListener();
         _listener.Prefixes.Add($"http://localhost:{_port}/");
-        _listener.Start();
+        try
+        {
+            _listener.Start();
+        }
+        catch (HttpListenerException)
+        {
+            // Port was taken between discovery and bind — find another
+            using var sock = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            sock.Start();
+            var newPort = ((IPEndPoint)sock.LocalEndpoint).Port;
+            sock.Stop();
+
+            redirectUrl = $"http://localhost:{newPort}/callback";
+            oauthUrl = $"{TarsyConfig.SupabaseUrl}/auth/v1/authorize?provider=github&redirect_to={Uri.EscapeDataString(redirectUrl)}";
+
+            _listener = new HttpListener();
+            _listener.Prefixes.Add($"http://localhost:{newPort}/");
+            _listener.Start();
+        }
 
         // Open browser
         Process.Start(new ProcessStartInfo(oauthUrl) { UseShellExecute = true });
@@ -176,8 +194,10 @@ public class OAuthServer : IDisposable
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data),
-                }).then(() => {
-                    // Page will be replaced by success response
+                }).then(r => r.text()).then(html => {
+                    document.open();
+                    document.write(html);
+                    document.close();
                 }).catch(() => {
                     document.querySelector('p').textContent = 'error — close this tab and try again';
                 });
@@ -218,6 +238,7 @@ public class OAuthServer : IDisposable
 
     public void Dispose()
     {
+        _tcs.TrySetCanceled();
         try { _listener?.Stop(); _listener?.Close(); } catch { }
     }
 }

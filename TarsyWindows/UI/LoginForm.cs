@@ -8,8 +8,8 @@ using TarsyWindows.Assets;
 namespace TarsyWindows.UI;
 
 /// <summary>
-/// Dark-themed login form matching TarsymacOS OnboardingWindow design.
-/// All layout is owner-drawn with precise pixel positioning.
+/// Dark-themed login form matching Tarsy design system.
+/// All layout is owner-drawn with precise pixel positioning on an 8px grid.
 /// </summary>
 public class LoginForm : Form
 {
@@ -23,9 +23,13 @@ public class LoginForm : Form
     private Panel _backButton = null!;
     private Panel _contentPanel = null!;
 
-    // ── Theme (matches TarsymacOS OnboardingWindow.swift) ──
-    private static readonly Color BgPrimary = ColorTranslator.FromHtml("#131316");
-    private static readonly Color BgCard = ColorTranslator.FromHtml("#1c1c21");
+    // Track OAuth button panels for SetLoading
+    private Panel _githubBtn = null!;
+    private Panel _emailBtn = null!;
+
+    // ── Theme ──
+    private static readonly Color BgPrimary = ColorTranslator.FromHtml("#0a0a0a");
+    private static readonly Color BgCard = ColorTranslator.FromHtml("#141417");
     private static readonly Color BgInput = ColorTranslator.FromHtml("#18181c");
     private static readonly Color BorderColor = ColorTranslator.FromHtml("#2a2a30");
     private static readonly Color TextPrimary = ColorTranslator.FromHtml("#e4e4e7");
@@ -34,22 +38,32 @@ public class LoginForm : Form
     private static readonly Color AccentWhite = ColorTranslator.FromHtml("#ffffff");
     private static readonly Color ErrorColor = ColorTranslator.FromHtml("#e5716a");
 
-    // ── Layout constants ──
-    private const int FormW = 500;
-    private const int FormH = 560;
-    private const int HeaderH = 56;
+    // Hover step colors
+    private static readonly Color BgCardHover = ColorTranslator.FromHtml("#1c1c20");
+    private static readonly Color BgInputFocus = ColorTranslator.FromHtml("#1e1e24");
+
+    // ── Layout constants (8px grid) ──
+    private const int FormW = 460;
+    private const int FormH = 540;
+    private const int HeaderH = 52;
+    private const int PagePad = 32;
+    private const int CardPad = 24;
     private const int BtnW = 320;
-    private const int BtnH = 42;
-    private const int BtnGap = 12;
-    private const int InputH = 46;
-    private const int InputGap = 14;
+    private const int BtnH = 40;
+    private const int BtnRadius = 8;
+    private const int InputH = 40;
+    private const int InputRadius = 6;
+    private const int ElementGap = 16;
     private const int LogoSize = 48;
+    private const int HeaderLogoSize = 24;
 
     private Image? _logoImage;
+    private AnimatedLogo? _animatedLogo;
 
     private static Font Mono(float size, FontStyle style = FontStyle.Regular)
         => new("Cascadia Code", size, style);
 
+    // ── Public API ──
     public string Email => _emailBox.Text.Trim();
     public string Password => _passwordBox.Text;
     public event EventHandler? SignInClicked;
@@ -81,13 +95,22 @@ public class LoginForm : Form
     private void InitializeForm()
     {
         Text = "Tarsy";
-        ClientSize = new Size(FormW, FormH);
-        FormBorderStyle = FormBorderStyle.FixedSingle;
+        ClientSize = new Size(FormW, FormH + 32); // +32 for custom title bar
+        FormBorderStyle = FormBorderStyle.None;
         MaximizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
         BackColor = BgPrimary;
         ForeColor = TextPrimary;
         DoubleBuffered = true;
+
+        // Custom title bar replaces native chrome
+        Controls.Add(new CustomTitleBar(this, "tarsy"));
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        _animatedLogo?.Play();
     }
 
     // ═══════════════════════════════════════════
@@ -96,204 +119,163 @@ public class LoginForm : Form
 
     private void BuildUI()
     {
-        // ── Header ──
-        var header = new Panel { Dock = DockStyle.Top, Height = HeaderH, BackColor = BgPrimary };
-        header.Paint += PaintHeader;
-
-        // ── Content ──
-        _contentPanel = new Panel { Dock = DockStyle.Fill, BackColor = BgPrimary };
-
-        // Logo
-        var logo = new PictureBox
+        // ── Content positioned below the custom title bar (32px) ──
+        _contentPanel = new Panel
         {
-            Size = new Size(LogoSize, LogoSize),
-            SizeMode = PictureBoxSizeMode.Zoom,
-            BackColor = Color.Transparent,
-            Image = _logoImage,
+            BackColor = BgPrimary,
+            Location = new Point(0, 32),
+            Size = new Size(FormW, FormH),
         };
 
-        // Heading + subheading
+        // Logo (48x48) — animated entrance
+        var logo = new AnimatedLogo(_logoImage, LogoSize);
+        _animatedLogo = logo;
+
+        // "welcome to tarsy" — 20px Bold
         var heading = new Label
         {
             Text = "welcome to tarsy",
-            Font = Mono(16f, FontStyle.Bold),
+            Font = Mono(15f, FontStyle.Bold), // 15pt ~= 20px
             ForeColor = TextPrimary,
             AutoSize = true,
             BackColor = Color.Transparent,
         };
+
+        // "sign in to connect your devices" — 12px Regular
         var subheading = new Label
         {
             Text = "sign in to connect your devices",
-            Font = Mono(10f),
+            Font = Mono(9f), // 9pt ~= 12px
             ForeColor = TextSecondary,
             AutoSize = true,
             BackColor = Color.Transparent,
         };
 
-        // ── OAuth panel (2 buttons × 42px + 1 gap × 12px = 96px) ──
-        int oauthH = 2 * BtnH + BtnGap;
+        // ── OAuth panel (2 buttons x 40px + 12px gap = 92px) ──
+        int oauthH = 2 * BtnH + 12;
         _oauthPanel = new Panel { Size = new Size(BtnW, oauthH), BackColor = BgPrimary, Visible = true };
 
-        var githubBtn = MakeOAuthButton("Sign in with GitHub", 0, () => GitHubSignInClicked?.Invoke(this, EventArgs.Empty), DrawGitHubIcon);
-        var emailBtn = MakeOAuthButton("Sign in with Email", BtnH + BtnGap, () => ShowEmailForm(), DrawEmailIcon);
+        _githubBtn = MakeOAuthButton("Sign in with GitHub", 0,
+            () => GitHubSignInClicked?.Invoke(this, EventArgs.Empty), DrawGitHubIcon);
+        _emailBtn = MakeOAuthButton("Sign in with Email", BtnH + 12,
+            () => ShowEmailForm(), DrawEmailIcon);
 
-        _oauthPanel.Controls.AddRange(new Control[] { githubBtn, emailBtn });
+        _oauthPanel.Controls.AddRange(new Control[] { _githubBtn, _emailBtn });
 
         // ── Email form panel ──
-        // back(24) + 10 + email(46) + 14 + password(46) + 20 + status(18) + 8 + button(42) = 228
-        int emailH = 24 + 10 + InputH + InputGap + InputH + 20 + 18 + 8 + BtnH;
+        // back(20) + 6 + email(40) + 12 + password(40) + 10 + status(14) + 10 + button(40) = 192
+        int emailH = 20 + 6 + InputH + 12 + InputH + 10 + 14 + 10 + BtnH;
         _emailFormPanel = new Panel { Size = new Size(BtnW, emailH), BackColor = BgPrimary, Visible = false };
 
         int ey = 0;
         _backButton = MakeBackButton();
         _backButton.Location = new Point(0, ey);
-        ey += 24 + 10;
+        ey += 20 + 6;
 
         var emailField = MakeInputField("email", false, out _emailBox);
         emailField.Location = new Point(0, ey);
-        ey += InputH + InputGap;
+        ey += InputH + 12;
 
         var passField = MakeInputField("password", true, out _passwordBox);
         passField.Location = new Point(0, ey);
-        ey += InputH + 20;
+        ey += InputH + 10;
 
         _statusLabel = new Label
         {
-            Size = new Size(BtnW, 18),
+            Size = new Size(BtnW, 14),
             Location = new Point(0, ey),
-            Font = Mono(9f),
+            Font = Mono(8.25f), // 11px caption
             ForeColor = TextSecondary,
             TextAlign = ContentAlignment.MiddleCenter,
             BackColor = BgPrimary,
         };
-        ey += 18 + 8;
+        ey += 14 + 10;
 
-        _signInButton = new Panel { Size = new Size(BtnW, BtnH), Location = new Point(0, ey), BackColor = BgPrimary, Cursor = Cursors.Hand };
-        _signInLabel = new Label
+        _signInButton = new Panel
         {
-            Text = "sign in",
-            Font = Mono(11f, FontStyle.Bold),
-            Dock = DockStyle.Fill,
-            TextAlign = ContentAlignment.MiddleCenter,
-            ForeColor = BgPrimary,
+            Size = new Size(BtnW, BtnH),
+            Location = new Point(0, ey),
+            BackColor = BgPrimary,
             Cursor = Cursors.Hand,
         };
-        _signInButton.Controls.Add(_signInLabel);
-        _signInButton.Paint += PaintButton;
-        _signInButton.Click += (_, _) => OnSignIn();
-        _signInLabel.Click += (_, _) => OnSignIn();
+        // Hidden label kept ONLY so SetLoading can change its Text — text is drawn in Paint
+        _signInLabel = new Label { Text = "sign in", Visible = false };
 
-        _emailFormPanel.Controls.AddRange(new Control[] { _backButton, emailField, passField, _statusLabel, _signInButton });
+        bool signInHover = false;
+        _signInButton.Paint += (_, e) => PaintPrimaryButton(e.Graphics, _signInButton, signInHover);
+        _signInButton.Click += (_, _) => OnSignIn();
+        _signInButton.MouseEnter += (_, _) => { signInHover = true; _signInButton.Invalidate(); };
+        _signInButton.MouseLeave += (_, _) => { signInHover = false; _signInButton.Invalidate(); };
+
+        _emailFormPanel.Controls.AddRange(new Control[]
+            { _backButton, emailField, passField, _statusLabel, _signInButton });
 
         // Key shortcuts
-        _passwordBox.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; OnSignIn(); } };
-        _emailBox.KeyDown += (_, e) => { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; _passwordBox.Focus(); } };
+        _passwordBox.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; OnSignIn(); }
+        };
+        _emailBox.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; _passwordBox.Focus(); }
+        };
 
         // ── Footer ──
         var footer = MakeFooter();
 
         // ── Add to content ──
-        _contentPanel.Controls.AddRange(new Control[] { logo, heading, subheading, _oauthPanel, _emailFormPanel, footer });
+        _contentPanel.Controls.AddRange(new Control[]
+            { logo, heading, subheading, _oauthPanel, _emailFormPanel, footer });
 
         // Layout handler
         _contentPanel.Resize += (_, _) => DoLayout(logo, heading, subheading, footer);
         _contentPanel.Layout += (_, _) => DoLayout(logo, heading, subheading, footer);
 
-        // Add to form (header must be added last to dock on top)
+        // Add to form (header added last so Dock.Top works)
         Controls.Add(_contentPanel);
-        Controls.Add(header);
     }
 
     // ═══════════════════════════════════════════
-    //  LAYOUT — pixel-perfect centering
+    //  LAYOUT
     // ═══════════════════════════════════════════
 
-    private void DoLayout(PictureBox logo, Label heading, Label subheading, Control footer)
+    private void DoLayout(Control logo, Label heading, Label subheading, Control footer)
     {
         int cw = _contentPanel.ClientSize.Width;
         int ch = _contentPanel.ClientSize.Height;
-        int cx = cw / 2; // horizontal center
+        int cx = cw / 2;
 
-        // Active panel height
         var activePanel = _oauthPanel.Visible ? _oauthPanel : _emailFormPanel;
         int panelH = activePanel.Height;
 
-        // Total content block height
-        //   logo(48) + gap(20) + heading + gap(8) + subheading + gap(36) + panel
-        int totalH = LogoSize + 20 + heading.Height + 8 + subheading.Height + 36 + panelH;
 
-        // Center vertically in available space (leave 40px for footer)
+        // logo(48) + 24 + heading + 8 + subheading + 32 + panel
+        int totalH = LogoSize + 24 + heading.Height + 8 + subheading.Height + 32 + panelH;
+
+        // Center vertically, reserving 40px for footer
         int startY = Math.Max(16, (ch - 40 - totalH) / 2);
 
-        // Place each element
         int y = startY;
 
         logo.Location = new Point(cx - LogoSize / 2, y);
-        y += LogoSize + 20;
+        y += LogoSize + 24;
 
         heading.Location = new Point(cx - heading.Width / 2, y);
         y += heading.Height + 8;
 
         subheading.Location = new Point(cx - subheading.Width / 2, y);
-        y += subheading.Height + 36;
+        y += subheading.Height + 32;
 
         _oauthPanel.Location = new Point(cx - BtnW / 2, y);
         _emailFormPanel.Location = new Point(cx - BtnW / 2, y);
 
         // Footer pinned to bottom
-        footer.Location = new Point(cx - footer.Width / 2, ch - 32);
+        footer.Location = new Point(cx - footer.Width / 2, ch - 28);
     }
 
     // ═══════════════════════════════════════════
     //  HEADER
     // ═══════════════════════════════════════════
-
-    private void PaintHeader(object? sender, PaintEventArgs e)
-    {
-        var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = TextRenderingHint.AntiAlias;
-        int w = ((Panel)sender!).Width;
-
-        // Divider at bottom
-        using var divPen = new Pen(BorderColor);
-        g.DrawLine(divPen, 0, HeaderH - 1, w, HeaderH - 1);
-
-        // Measure "tarsy" to center logo+text as a unit
-        using var titleFont = Mono(14f, FontStyle.Bold);
-        var textSize = g.MeasureString("tarsy", titleFont);
-        int logoSz = 24;
-        int gap = 10;
-        int unitW = logoSz + gap + (int)Math.Ceiling(textSize.Width);
-        int startX = (w - unitW) / 2;
-        int logoY = (HeaderH - 1 - logoSz) / 2;
-
-        // Logo
-        if (_logoImage != null)
-        {
-            var lr = new Rectangle(startX, logoY, logoSz, logoSz);
-            var clip = RoundedRect(lr, 5);
-            g.SetClip(clip);
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.DrawImage(_logoImage, lr);
-            g.ResetClip();
-        }
-        else
-        {
-            var lr = new Rectangle(startX, logoY, logoSz, logoSz);
-            using var b = new SolidBrush(AccentWhite);
-            g.FillPath(b, RoundedRect(lr, 5));
-            using var f = Mono(11f, FontStyle.Bold);
-            using var tb = new SolidBrush(BgPrimary);
-            var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-            g.DrawString("T", f, tb, lr, sf);
-        }
-
-        // "tarsy"
-        int textY = (HeaderH - 1 - (int)textSize.Height) / 2;
-        using var titleBrush = new SolidBrush(TextPrimary);
-        g.DrawString("tarsy", titleFont, titleBrush, startX + logoSz + gap, textY);
-    }
 
     // ═══════════════════════════════════════════
     //  OAUTH BUTTONS
@@ -312,16 +294,14 @@ public class LoginForm : Form
         var lbl = new Label
         {
             Text = text,
-            Font = Mono(11f, FontStyle.Bold),
+            Font = Mono(10f, FontStyle.Bold), // 13px SemiBold
             ForeColor = AccentWhite,
             BackColor = Color.Transparent,
             Cursor = Cursors.Hand,
-            // Text area: starts after icon area, centered in remaining space
             Location = new Point(0, 0),
             Size = new Size(BtnW, BtnH),
             TextAlign = ContentAlignment.MiddleCenter,
-            // Shift text right by half icon area to optically center icon+text
-            Padding = new Padding(20, 0, 0, 0),
+            Padding = new Padding(18, 0, 0, 0), // offset for icon
         };
 
         bool hover = false;
@@ -330,17 +310,21 @@ public class LoginForm : Form
         {
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             var r = new Rectangle(0, 0, BtnW - 1, BtnH - 1);
-            var path = RoundedRect(r, 8);
+            var path = RoundedRect(r, BtnRadius);
 
-            using var bg = new SolidBrush(BgCard);
+            // Fill
+            using var bg = new SolidBrush(hover && btn.Enabled ? BgCardHover : BgCard);
             g.FillPath(bg, path);
 
-            int alpha = hover && btn.Enabled ? 128 : 38;
-            using var border = new Pen(Color.FromArgb(alpha, 255, 255, 255));
+            // Border
+            using var border = new Pen(hover && btn.Enabled
+                ? Color.FromArgb(100, 255, 255, 255)
+                : BorderColor);
             g.DrawPath(border, path);
 
-            // Icon: 18x18, vertically centered, 16px from left edge
+            // Icon: 18x18, vertically centered, 16px from left
             var iconR = new Rectangle(16, (BtnH - 18) / 2, 18, 18);
             drawIcon(g, iconR, btn.Enabled);
         };
@@ -350,8 +334,8 @@ public class LoginForm : Form
         btn.MouseLeave += (_, _) => SetH(false);
         lbl.MouseEnter += (_, _) => SetH(true);
         lbl.MouseLeave += (_, _) => SetH(false);
-        btn.Click += (_, _) => onClick?.Invoke();
-        lbl.Click += (_, _) => onClick?.Invoke();
+        btn.Click += (_, _) => { if (btn.Enabled) onClick?.Invoke(); };
+        lbl.Click += (_, _) => { if (btn.Enabled) onClick?.Invoke(); };
 
         btn.Controls.Add(lbl);
         return btn;
@@ -369,7 +353,6 @@ public class LoginForm : Form
             g.InterpolationMode = InterpolationMode.HighQualityBicubic;
             if (!enabled)
             {
-                // Draw dimmed
                 using var attrs = new System.Drawing.Imaging.ImageAttributes();
                 var cm = new System.Drawing.Imaging.ColorMatrix { Matrix33 = 0.4f };
                 attrs.SetColorMatrix(cm);
@@ -382,7 +365,7 @@ public class LoginForm : Form
             return;
         }
 
-        // Fallback: simple circle
+        // Fallback: circle
         g.SmoothingMode = SmoothingMode.AntiAlias;
         using var brush = new SolidBrush(enabled ? AccentWhite : TextMuted);
         g.FillEllipse(brush, r);
@@ -390,18 +373,36 @@ public class LoginForm : Form
 
     private static void DrawEmailIcon(Graphics g, Rectangle r, bool enabled)
     {
-        g.SmoothingMode = SmoothingMode.AntiAlias;
         var c = enabled ? AccentWhite : TextMuted;
+        LucideIcons.Draw(g, "mail", r, c);
+    }
 
-        // Envelope
-        int pad = 2;
-        var env = new Rectangle(r.X + pad, r.Y + pad + 2, r.Width - pad * 2, r.Height - pad * 2 - 4);
-        using var pen = new Pen(c, 1.5f) { LineJoin = LineJoin.Round };
+    // ═══════════════════════════════════════════
+    //  PRIMARY BUTTON PAINTER
+    // ═══════════════════════════════════════════
 
-        g.DrawPath(pen, RoundedRect(env, 2));
-        // Flap
-        g.DrawLine(pen, env.Left + 2, env.Top + 2, env.Left + env.Width / 2, env.Top + env.Height / 2 - 1);
-        g.DrawLine(pen, env.Left + env.Width / 2, env.Top + env.Height / 2 - 1, env.Right - 2, env.Top + 2);
+    private void PaintPrimaryButton(Graphics g, Panel btn, bool hover)
+    {
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+        var r = new Rectangle(0, 0, BtnW - 1, BtnH - 1);
+
+        // Background
+        Color fill = btn.Enabled
+            ? (hover ? Color.FromArgb(230, 230, 230) : AccentWhite)
+            : TextMuted;
+        using (var brush = new SolidBrush(fill))
+            g.FillPath(brush, RoundedRect(r, BtnRadius));
+
+        // Text drawn directly on the panel (label is hidden, used only for text storage)
+        using var font = Mono(10f, FontStyle.Bold);
+        using var textBrush = new SolidBrush(BgPrimary);
+        var sf = new StringFormat
+        {
+            Alignment = StringAlignment.Center,
+            LineAlignment = StringAlignment.Center,
+        };
+        g.DrawString(_signInLabel.Text, font, textBrush, new RectangleF(0, 0, BtnW, BtnH), sf);
     }
 
     // ═══════════════════════════════════════════
@@ -416,76 +417,110 @@ public class LoginForm : Form
             BackColor = BgPrimary,
         };
 
+        bool focused = false;
+
+        // Background + border paint
         container.Paint += (_, e) =>
         {
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            var g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             var r = new Rectangle(0, 0, BtnW - 1, InputH - 1);
-            using var bg = new SolidBrush(BgInput);
-            e.Graphics.FillPath(bg, RoundedRect(r, 8));
-            using var border = new Pen(BorderColor);
-            e.Graphics.DrawPath(border, RoundedRect(r, 8));
-        };
 
-        // Draw icon via paint instead of emoji label
-        container.Paint += (_, e) =>
-        {
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using var pen = new Pen(TextMuted, 1.2f) { LineJoin = LineJoin.Round };
-            int ix = 14, iy = (InputH - 14) / 2, isz = 14;
+            using var bg = new SolidBrush(focused ? BgInputFocus : BgInput);
+            g.FillPath(bg, RoundedRect(r, InputRadius));
 
-            if (isPassword)
+            // Border: 2px accent on focus, 1px border normally
+            if (focused)
             {
-                // Lock icon
-                var bodyR = new Rectangle(ix, iy + 5, isz, isz - 5);
-                e.Graphics.DrawPath(pen, RoundedRect(bodyR, 2));
-                e.Graphics.DrawArc(pen, ix + 2, iy, isz - 4, 10, 180, 180);
+                using var border = new Pen(AccentWhite, 2f);
+                g.DrawPath(border, RoundedRect(r, InputRadius));
             }
             else
             {
-                // Envelope icon (small)
-                var envR = new Rectangle(ix, iy + 2, isz, isz - 4);
-                e.Graphics.DrawRectangle(pen, envR);
-                e.Graphics.DrawLine(pen, envR.Left + 1, envR.Top + 1, envR.Left + envR.Width / 2, envR.Top + envR.Height / 2);
-                e.Graphics.DrawLine(pen, envR.Left + envR.Width / 2, envR.Top + envR.Height / 2, envR.Right - 1, envR.Top + 1);
+                using var border = new Pen(BorderColor);
+                g.DrawPath(border, RoundedRect(r, InputRadius));
             }
         };
 
+        // Icon paint (Lucide font)
+        container.Paint += (_, e) =>
+        {
+            var iconRect = new Rectangle(12, (InputH - 18) / 2, 18, 18);
+            LucideIcons.Draw(e.Graphics, isPassword ? "lock" : "mail", iconRect, TextMuted);
+        };
+
+        // Reserve room on the right for the eye toggle button when this is a password field
+        int rightPad = isPassword ? 44 : 14;
+
         textBox = new TextBox
         {
-            Font = Mono(10.5f),
+            Font = Mono(10f), // 13px
             ForeColor = TextPrimary,
             BackColor = BgInput,
             BorderStyle = BorderStyle.None,
-            Size = new Size(BtnW - 52, 20),
-            Location = new Point(38, (InputH - 20) / 2),
+            Size = new Size(BtnW - 38 - rightPad, 18),
+            Location = new Point(38, (InputH - 18) / 2),
             UseSystemPasswordChar = isPassword,
+            PlaceholderText = placeholder,
         };
 
-        // Placeholder
         var tb = textBox;
-        bool hasPlaceholder = true;
-        tb.Text = placeholder;
-        tb.ForeColor = TextMuted;
-        if (isPassword) tb.UseSystemPasswordChar = false;
-
         tb.GotFocus += (_, _) =>
         {
-            if (!hasPlaceholder) return;
-            tb.Text = "";
-            tb.ForeColor = TextPrimary;
-            if (isPassword) tb.UseSystemPasswordChar = true;
-            hasPlaceholder = false;
+            focused = true;
+            tb.BackColor = BgInputFocus;
+            container.Invalidate();
         };
         tb.LostFocus += (_, _) =>
         {
-            if (!string.IsNullOrEmpty(tb.Text)) return;
-            hasPlaceholder = true;
-            if (isPassword) tb.UseSystemPasswordChar = false;
-            tb.Text = placeholder;
-            tb.ForeColor = TextMuted;
+            focused = false;
+            tb.BackColor = BgInput;
+            container.Invalidate();
         };
 
         container.Controls.Add(tb);
+        // Click container to focus textbox
+        container.Click += (_, _) => tb.Focus();
+
+        // Show/hide password toggle (eye icon button)
+        if (isPassword)
+        {
+            var toggleBtn = new Panel
+            {
+                Size = new Size(32, InputH - 8),
+                Location = new Point(BtnW - 36, 4),
+                BackColor = BgInput,
+                Cursor = Cursors.Hand,
+            };
+
+            bool showing = false;
+            bool hover = false;
+
+            toggleBtn.Paint += (_, e) =>
+            {
+                var color = hover ? TextPrimary : TextMuted;
+                int iconSize = 16;
+                int ix = (toggleBtn.Width - iconSize) / 2;
+                int iy = (toggleBtn.Height - iconSize) / 2;
+                LucideIcons.Draw(e.Graphics, showing ? "eye-off" : "eye",
+                    new Rectangle(ix, iy, iconSize, iconSize), color);
+            };
+
+            toggleBtn.MouseEnter += (_, _) => { hover = true; toggleBtn.Invalidate(); };
+            toggleBtn.MouseLeave += (_, _) => { hover = false; toggleBtn.Invalidate(); };
+            toggleBtn.Click += (_, _) =>
+            {
+                showing = !showing;
+                tb.UseSystemPasswordChar = !showing;
+                toggleBtn.Invalidate();
+                tb.Focus();
+            };
+
+            container.Controls.Add(toggleBtn);
+            toggleBtn.BringToFront();
+        }
+
         return container;
     }
 
@@ -495,24 +530,35 @@ public class LoginForm : Form
 
     private Panel MakeBackButton()
     {
-        var btn = new Panel { Size = new Size(70, 24), BackColor = BgPrimary, Cursor = Cursors.Hand };
+        var btn = new Panel { Size = new Size(80, 22), BackColor = BgPrimary, Cursor = Cursors.Hand };
+        var lbl = new Label
+        {
+            Text = "back",
+            Font = Mono(8.25f), // 11px
+            ForeColor = TextMuted,
+            AutoSize = true,
+            BackColor = Color.Transparent,
+            Cursor = Cursors.Hand,
+            Location = new Point(20, 4),
+        };
+
+        bool hover = false;
+        void SetH(bool h) { hover = h; lbl.ForeColor = h ? TextSecondary : TextMuted; btn.Invalidate(); }
+        btn.MouseEnter += (_, _) => SetH(true);
+        btn.MouseLeave += (_, _) => SetH(false);
+        lbl.MouseEnter += (_, _) => SetH(true);
+        lbl.MouseLeave += (_, _) => SetH(false);
+        btn.Click += (_, _) => ShowOAuthPanel();
+        lbl.Click += (_, _) => ShowOAuthPanel();
+
         btn.Paint += (_, e) =>
         {
-            e.Graphics.TextRenderingHint = TextRenderingHint.AntiAlias;
-            using var f = Mono(9f);
-            using var b = new SolidBrush(TextMuted);
-            e.Graphics.DrawString("\u2190 back", f, b, 0, 5);
+            var color = hover ? TextSecondary : TextMuted;
+            LucideIcons.Draw(e.Graphics, "arrow-left", new Rectangle(0, 3, 16, 16), color);
         };
-        btn.Click += (_, _) => ShowOAuthPanel();
-        return btn;
-    }
 
-    private void PaintButton(object? sender, PaintEventArgs e)
-    {
-        e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-        var r = new Rectangle(0, 0, BtnW - 1, BtnH - 1);
-        using var brush = new SolidBrush(_signInButton.Enabled ? AccentWhite : TextMuted);
-        e.Graphics.FillPath(brush, RoundedRect(r, 8));
+        btn.Controls.Add(lbl);
+        return btn;
     }
 
     private static Control MakeFooter()
@@ -537,7 +583,7 @@ public class LoginForm : Form
     private static Label FooterText(string text) => new()
     {
         Text = text,
-        Font = Mono(8f),
+        Font = Mono(7.5f), // 10px
         ForeColor = TextMuted,
         AutoSize = true,
         BackColor = BgPrimary,
@@ -550,7 +596,7 @@ public class LoginForm : Form
         var link = new LinkLabel
         {
             Text = text,
-            Font = Mono(8f),
+            Font = Mono(7.5f), // 10px
             LinkColor = TextSecondary,
             ActiveLinkColor = AccentWhite,
             VisitedLinkColor = TextSecondary,
@@ -563,7 +609,11 @@ public class LoginForm : Form
         };
         link.LinkClicked += (_, _) =>
         {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); }
+            try
+            {
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+            }
             catch { }
         };
         return link;
@@ -611,12 +661,32 @@ public class LoginForm : Form
     public void SetLoading(bool loading)
     {
         if (InvokeRequired) { Invoke(() => SetLoading(loading)); return; }
+
+        // Sign-in button
         _signInButton.Enabled = !loading;
         _signInLabel.Text = loading ? "signing in..." : "sign in";
         _signInButton.Invalidate();
+
+        // Input fields
         _emailBox.Enabled = !loading;
         _passwordBox.Enabled = !loading;
+
+        // Back button
         _backButton.Enabled = !loading;
+        foreach (Control c in _backButton.Controls)
+            c.Cursor = loading ? Cursors.Default : Cursors.Hand;
+        _backButton.Cursor = loading ? Cursors.Default : Cursors.Hand;
+
+        // Disable ALL OAuth buttons
+        foreach (Control c in _oauthPanel.Controls)
+        {
+            c.Enabled = !loading;
+            c.Cursor = loading ? Cursors.Default : Cursors.Hand;
+            // Also update child label cursors
+            foreach (Control child in c.Controls)
+                child.Cursor = loading ? Cursors.Default : Cursors.Hand;
+            c.Invalidate();
+        }
     }
 
     // ═══════════════════════════════════════════
