@@ -69,62 +69,18 @@ actor WorkspaceOrchestrator {
     }
 
     // MARK: - Detection
+    //
+    // Stack and dev-command detection is delegated to `RepoAnalyzer` so that
+    // cold-start, workspace setup, and the iOS repo-analyze flow all return
+    // the exact same answer. When adding a new framework/stack, update
+    // RepoAnalyzer — NOT this file.
 
     private func detectStack(at path: String) -> String? {
-        let fm = FileManager.default
-
-        if fm.fileExists(atPath: "\(path)/package.json") {
-            // Check for mobile frameworks
-            if fm.fileExists(atPath: "\(path)/ios") || fm.fileExists(atPath: "\(path)/app.json") {
-                return "mobile"
-            }
-            // Check for Next.js, Vite, etc.
-            if fm.fileExists(atPath: "\(path)/next.config.js") ||
-               fm.fileExists(atPath: "\(path)/next.config.mjs") ||
-               fm.fileExists(atPath: "\(path)/next.config.ts") ||
-               fm.fileExists(atPath: "\(path)/vite.config.ts") ||
-               fm.fileExists(atPath: "\(path)/vite.config.js") {
-                return "web"
-            }
-            return "web"
-        }
-
-        if fm.fileExists(atPath: "\(path)/Package.swift") {
-            return fm.fileExists(atPath: "\(path)/Sources") ? "backend" : "mobile"
-        }
-
-        if fm.fileExists(atPath: "\(path)/requirements.txt") || fm.fileExists(atPath: "\(path)/pyproject.toml") {
-            return "backend"
-        }
-
-        if fm.fileExists(atPath: "\(path)/go.mod") {
-            return "backend"
-        }
-
-        if fm.fileExists(atPath: "\(path)/Cargo.toml") {
-            return "backend"
-        }
-
-        return nil
+        return RepoAnalyzer().analyze(at: path).stack
     }
 
     private func detectDevCommand(at path: String, stack: String?) -> String? {
-        let fm = FileManager.default
-
-        if fm.fileExists(atPath: "\(path)/package.json") {
-            if let data = fm.contents(atPath: "\(path)/package.json"),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let scripts = json["scripts"] as? [String: String] {
-                if scripts["dev"] != nil { return detectPackageRunner(at: path) + " run dev" }
-                if scripts["start"] != nil { return detectPackageRunner(at: path) + " run start" }
-            }
-        }
-
-        if fm.fileExists(atPath: "\(path)/manage.py") {
-            return "python manage.py runserver"
-        }
-
-        return nil
+        return RepoAnalyzer().analyze(at: path).suggestedCommand
     }
 
     private func detectInstallCommand(at path: String, stack: String?) -> String? {
@@ -133,19 +89,14 @@ actor WorkspaceOrchestrator {
         if fm.fileExists(atPath: "\(path)/package-lock.json") { return "npm install" }
         if fm.fileExists(atPath: "\(path)/yarn.lock") { return "yarn install" }
         if fm.fileExists(atPath: "\(path)/pnpm-lock.yaml") { return "pnpm install" }
-        if fm.fileExists(atPath: "\(path)/bun.lockb") { return "bun install" }
+        if fm.fileExists(atPath: "\(path)/bun.lockb") || fm.fileExists(atPath: "\(path)/bun.lock") { return "bun install" }
         if fm.fileExists(atPath: "\(path)/requirements.txt") { return "pip install -r requirements.txt" }
         if fm.fileExists(atPath: "\(path)/Gemfile") { return "bundle install" }
+        if fm.fileExists(atPath: "\(path)/pubspec.yaml") { return "flutter pub get" }
+        if fm.fileExists(atPath: "\(path)/Cargo.toml") { return "cargo fetch" }
+        if fm.fileExists(atPath: "\(path)/go.mod") { return "go mod download" }
 
         return nil
-    }
-
-    private func detectPackageRunner(at path: String) -> String {
-        let fm = FileManager.default
-        if fm.fileExists(atPath: "\(path)/bun.lockb") { return "bun" }
-        if fm.fileExists(atPath: "\(path)/pnpm-lock.yaml") { return "pnpm" }
-        if fm.fileExists(atPath: "\(path)/yarn.lock") { return "yarn" }
-        return "npm"
     }
 
     // MARK: - Process Execution (safe — no shell interpolation)
