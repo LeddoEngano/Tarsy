@@ -134,6 +134,10 @@ struct TerminalCompletion: Identifiable, Equatable {
 struct TerminalContentView: View {
     let workspace: Workspace
     @ObservedObject var chatService: ChatService
+    @Binding var isKeyboardActive: Bool
+    /// Absolute path of the current working directory for this terminal tab.
+    /// Driven by the parent so it stays in sync as the user issues `cd` commands.
+    var currentDirectory: String
     var onSendCommand: (String) -> Void
     /// Called with the extracted partial word (not the full input)
     var onRequestCompletion: (String) -> Void
@@ -142,7 +146,6 @@ struct TerminalContentView: View {
     var completions: [TerminalCompletion]
 
     @State private var inputText = ""
-    @State private var isKeyboardActive = false
     /// Debounce task for auto-completion requests
     @State private var debounceTask: Task<Void, Never>?
     /// Set to true when applying a completion to skip the debounce cycle
@@ -154,9 +157,9 @@ struct TerminalContentView: View {
     /// Cached terminal output lines (rebuilt only when messages change)
     @State private var cachedLines: [TerminalLine] = []
 
-    /// Last path component of the workspace for the prompt (e.g. "my-project")
+    /// Last path component of the current working directory for the prompt (e.g. "mobile")
     private var promptDirectory: String {
-        (workspace.localPath as NSString).lastPathComponent
+        (currentDirectory as NSString).lastPathComponent
     }
 
     /// Extracts the last word from the input for completion context
@@ -235,7 +238,7 @@ struct TerminalContentView: View {
                         .frame(height: max(0, geo.size.height - 80))
 
                     // Path header
-                    Text(workspace.localPath)
+                    Text(currentDirectory)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
                         .padding(.horizontal, 12)

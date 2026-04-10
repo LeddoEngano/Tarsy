@@ -73,6 +73,7 @@ struct WorkspaceView: View {
     @State private var isFullscreenBrowser = false
     @State private var keyboardHeight: CGFloat = 0
     @State private var keyboardAnimation: Animation = .easeInOut(duration: 0.25)
+    @State private var isTerminalInputActive = false
 
     private enum ViewMode: String {
         case stream, browser
@@ -97,6 +98,9 @@ struct WorkspaceView: View {
     @State private var terminalCompletions: [TerminalCompletion] = []
     /// Tracks which tab requested the current completions (discard stale responses)
     @State private var completionRequestTabId: String = ""
+    /// Current working directory per terminal tab (tabId → absolute path).
+    /// Updated client-side by parsing `cd` commands the user issues.
+    @State private var terminalCwds: [String: String] = [:]
 
     /// Returns true if the packet's sessionId matches the currently active tab
     private func isActiveTabSession(_ packet: WSPacket) -> Bool {
@@ -342,7 +346,7 @@ struct WorkspaceView: View {
             // Activities end naturally via engineComplete/engineError packets.
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
-            guard isInputFocused else { return }
+            guard isInputFocused || isTerminalInputActive else { return }
             let info = notification.userInfo
             let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.3
             let curveRaw = (info?[UIResponder.keyboardAnimationCurveUserInfoKey] as? UInt) ?? 7
@@ -804,6 +808,8 @@ struct WorkspaceView: View {
                         TerminalContentView(
                             workspace: workspace,
                             chatService: chatService,
+                            isKeyboardActive: $isTerminalInputActive,
+                            currentDirectory: terminalCwd(for: currentTab.id),
                             onSendCommand: { command in
                                 terminalCompletions = []
                                 sendTerminalCommand(command)
@@ -821,6 +827,7 @@ struct WorkspaceView: View {
                             },
                             completions: terminalCompletions
                         )
+                        .padding(.bottom, keyboardHeight)
                     } else {
                         chatArea
                     }
@@ -921,6 +928,8 @@ struct WorkspaceView: View {
                         TerminalContentView(
                             workspace: workspace,
                             chatService: chatService,
+                            isKeyboardActive: $isTerminalInputActive,
+                            currentDirectory: terminalCwd(for: currentTab.id),
                             onSendCommand: { command in
                                 terminalCompletions = []
                                 sendTerminalCommand(command)
@@ -938,6 +947,7 @@ struct WorkspaceView: View {
                             },
                             completions: terminalCompletions
                         )
+                        .padding(.bottom, keyboardHeight)
                     } else {
                         chatArea
 
@@ -1577,6 +1587,14 @@ struct WorkspaceView: View {
     }
 
     private func sendTerminalCommand(_ command: String) {
+        // Optimistically update the tab's cwd if the command is a `cd`.
+        // The shell on the macOS side authoritatively changes directory;
+        // this just keeps the prompt label in sync for typical usage.
+        let priorCwd = terminalCwd(for: currentTab.id)
+        if let newCwd = resolveCdCommand(command, relativeTo: priorCwd) {
+            terminalCwds[currentTab.id] = newCwd
+        }
+
         let msg = ChatMessage(
             workspaceId: workspace.id,
             tabId: currentTab.id,
@@ -1603,6 +1621,57 @@ struct WorkspaceView: View {
         }
     }
 
+    /// Resolved cwd for a terminal tab (falls back to the workspace root).
+    private func terminalCwd(for tabId: String) -> String {
+        terminalCwds[tabId] ?? workspace.localPath
+    }
+
+    /// Parses a shell command and returns the new absolute cwd if it's a `cd`.
+    /// Returns nil if the command doesn't change directory or can't be parsed
+    /// reliably (e.g. `cd -`, `cd ~`, `cd $VAR`).
+    ///
+    /// Handles simple chains like `cd foo && ls` by inspecting the first segment.
+    private func resolveCdCommand(_ command: String, relativeTo currentDir: String) -> String? {
+        let trimmed = command.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
+        // Take the first segment up to a chain separator (;, &&, ||, |).
+        let separators: Set<Character> = [";", "&", "|"]
+        var firstSegment = trimmed
+        if let idx = trimmed.firstIndex(where: { separators.contains($0) }) {
+            firstSegment = String(trimmed[..<idx]).trimmingCharacters(in: .whitespaces)
+        }
+
+        // Must be `cd` optionally followed by whitespace and an argument.
+        guard firstSegment == "cd"
+            || firstSegment.hasPrefix("cd ")
+            || firstSegment.hasPrefix("cd\t") else { return nil }
+
+        var arg = String(firstSegment.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+
+        // Strip a single pair of surrounding quotes
+        if arg.count >= 2,
+           (arg.hasPrefix("\"") && arg.hasSuffix("\"")) ||
+           (arg.hasPrefix("'") && arg.hasSuffix("'")) {
+            arg = String(arg.dropFirst().dropLast())
+        }
+
+        // Edge cases we can't resolve reliably without querying the shell
+        if arg.isEmpty || arg == "-" || arg.hasPrefix("~") || arg.contains("$") {
+            return nil
+        }
+
+        let combined: String
+        if arg.hasPrefix("/") {
+            combined = arg
+        } else {
+            combined = (currentDir as NSString).appendingPathComponent(arg)
+        }
+
+        // Resolve `.` and `..` segments
+        return (combined as NSString).standardizingPath
+    }
+
     /// Send a completion request with an already-extracted partial word
     private func sendTerminalCompletionRequest(_ partial: String) {
         guard !partial.isEmpty else { return }
@@ -1610,7 +1679,7 @@ struct WorkspaceView: View {
         completionRequestTabId = currentTab.id
         connectionManager.send(WSPacket(
             action: .terminalComplete,
-            payload: ["partial": partial, "path": workspace.localPath]
+            payload: ["partial": partial, "path": terminalCwd(for: currentTab.id)]
         ))
     }
 
