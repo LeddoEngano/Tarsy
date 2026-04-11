@@ -489,7 +489,7 @@ Features used to control the companion. The web client must reimplement these.
 |--------|-------|
 | WSProtocol actions | 149 |
 | macOS source files | 37 |
-| iOS source files | 53 |
+| iOS source files | 54 |
 | Shared source files | 24 |
 | Windows companion | 0 (planned) |
 | Web client | 0 (planned) |
@@ -522,4 +522,4 @@ Features used to control the companion. The web client must reimplement these.
 | File watcher | DispatchSource | FileSystemWatcher | — | — |
 
 
-*Generated on 2026-04-11 03:09:56 by `scripts/generate-features.sh`*
+*Generated on 2026-04-11 12:25:16 by `scripts/generate-features.sh`*

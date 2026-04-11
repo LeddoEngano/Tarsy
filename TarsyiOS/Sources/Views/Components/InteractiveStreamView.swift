@@ -131,9 +131,10 @@ struct InteractiveStreamView: View {
     @State private var isKeyboardActive = false
 
     // Voice input state
-    @StateObject private var voiceInput = VoiceInputManager()
-    @State private var isVoiceRecording = false
+    @StateObject private var voiceRecorder = VoiceRecorderController()
     @State private var showLanguagePicker = false
+    @State private var micButtonOffset: CGSize = .zero
+    @State private var micButtonOffsetBase: CGSize = .zero
 
     // Measured image content size (from SwiftUI layout)
     @State private var imageContentSize: CGSize = .zero
@@ -304,10 +305,9 @@ struct InteractiveStreamView: View {
                 .allowsHitTesting(true)
             }
         }
-        // Floating mic button — always visible, bottom-right
-        .overlay(alignment: .bottomTrailing) {
+        // Floating mic button — always visible, bottom-centered
+        .overlay(alignment: .bottom) {
             micButton
-                .padding(.trailing, 20)
                 .padding(.bottom, 56)
         }
         // Voice todo overlay
@@ -480,7 +480,7 @@ struct InteractiveStreamView: View {
 #endif
             requestNormalQuality()
             stopAnalogScroll()
-            voiceInput.stopRecording()
+            voiceRecorder.voiceInput.stopRecording(commit: false, completion: nil)
             connectionManager.removeListener("voice-todo")
             if isWebMode {
                 AppDelegate.orientationLock = .portrait
@@ -496,18 +496,21 @@ struct InteractiveStreamView: View {
         .alert("select language", isPresented: $showLanguagePicker) {
             ForEach(VoiceInputManager.supportedLanguages, id: \.code) { lang in
                 Button(lang.name) {
-                    voiceInput.setLanguage(lang.code)
+                    voiceRecorder.voiceInput.setLanguage(lang.code)
                     showLanguagePicker = false
-                    startVoiceRecording()
                 }
             }
             Button("cancel", role: .cancel) {}
         }
-        .onChange(of: voiceInput.needsLanguageSelection) { _, needs in
+        .onChange(of: voiceRecorder.voiceInput.needsLanguageSelection) { _, needs in
             if needs {
                 showLanguagePicker = true
-                voiceInput.needsLanguageSelection = false
+                voiceRecorder.voiceInput.needsLanguageSelection = false
+                voiceRecorder.voiceInput.stopRecording(commit: false, completion: nil)
             }
+        }
+        .task {
+            configureVoiceRecorder()
         }
     }
 
@@ -991,54 +994,83 @@ struct InteractiveStreamView: View {
     // MARK: - Floating Mic Button
 
     private var micButton: some View {
-        ZStack {
-            // Pulsing ring when recording
-            if isVoiceRecording {
+        // NOTE: HUD and pulsing ring are applied as overlays (not ZStack
+        // siblings) so they cannot affect the Image's layout size. Siblings
+        // would make the ZStack expand to the HUD's width when recording
+        // starts, and since the button is pinned to `bottomTrailing`, the
+        // Image would visibly teleport left as the ZStack grew.
+        Image(systemName: voiceRecorder.isCancelling ? "trash.fill" : (voiceRecorder.isRecording ? "mic.fill" : "mic"))
+            .font(TarsyTheme.font(size: 26, weight: .semibold))
+            .foregroundColor(
+                voiceRecorder.isCancelling
+                    ? .white
+                    : TarsyTheme.backgroundPrimary
+            )
+            .frame(width: 64, height: 64)
+            .background(
                 Circle()
-                    .stroke(TarsyTheme.accentAmber.opacity(0.4), lineWidth: 3)
-                    .frame(width: 72, height: 72)
-                    .scaleEffect(isVoiceRecording ? 1.3 : 1.0)
-                    .opacity(isVoiceRecording ? 0 : 1)
-                    .animation(.easeOut(duration: 1.0).repeatForever(autoreverses: false), value: isVoiceRecording)
-            }
-
-            Image(systemName: isVoiceRecording ? "mic.fill" : "mic")
-                .font(TarsyTheme.font(size: 28, weight: .medium))
-                .foregroundColor(isVoiceRecording ? .white : .white.opacity(0.9))
-                .frame(width: 64, height: 64)
-                .background(
+                    .fill(
+                        voiceRecorder.isCancelling
+                            ? TarsyTheme.accentTerracotta
+                            : TarsyTheme.accentAmber
+                    )
+            )
+            .opacity(0.7)
+            // Real drop shadow (dark) for elevation — the button sits on top
+            // of an unpredictable live stream, so it needs to pop.
+            .shadow(color: .black.opacity(0.45), radius: 14, x: 0, y: 8)
+            .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+            // Glow overlay when recording
+            .shadow(
+                color: (voiceRecorder.isCancelling ? TarsyTheme.accentTerracotta : TarsyTheme.accentAmber)
+                    .opacity(voiceRecorder.isRecording ? 0.5 : 0),
+                radius: 20
+            )
+            .scaleEffect(voiceRecorder.isCancelling ? 1.1 : 1.0)
+            .offset(x: voiceRecorder.dragOffsetX * 0.4)
+            // Pulsing ring — centered on the mic, doesn't affect layout
+            .overlay {
+                if voiceRecorder.isRecording {
                     Circle()
-                        .fill(isVoiceRecording ? TarsyTheme.accentAmber : TarsyTheme.accentAmber.opacity(0.8))
-                )
-                .shadow(color: TarsyTheme.accentAmber.opacity(isVoiceRecording ? 0.6 : 0.3), radius: isVoiceRecording ? 12 : 6)
-        }
-        .gesture(
-            LongPressGesture(minimumDuration: 0.15)
-                .onEnded { _ in startVoiceRecording() }
-                .sequenced(before: DragGesture(minimumDistance: 0)
-                    .onEnded { _ in stopVoiceRecording() }
-                )
-        )
+                        .stroke(
+                            (voiceRecorder.isCancelling ? TarsyTheme.accentTerracotta : TarsyTheme.accentAmber).opacity(0.4),
+                            lineWidth: 3
+                        )
+                        .frame(width: 72, height: 72)
+                        .scaleEffect(voiceRecorder.isRecording ? 1.3 : 1.0)
+                        .opacity(voiceRecorder.isRecording ? 0 : 1)
+                        .animation(.easeOut(duration: 1.0).repeatForever(autoreverses: false), value: voiceRecorder.isRecording)
+                        .allowsHitTesting(false)
+                }
+            }
+            // Recording HUD — floats above the mic, doesn't affect layout
+            .overlay {
+                if voiceRecorder.isRecording {
+                    VoiceRecordingHUD(recorder: voiceRecorder, style: .floatingPill)
+                        .fixedSize()
+                        .offset(y: -70)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.8), value: voiceRecorder.dragOffsetX)
+            .animation(.easeInOut(duration: 0.15), value: voiceRecorder.isCancelling)
+            .draggableVoiceRecordButton(
+                recorder: voiceRecorder,
+                offset: $micButtonOffset,
+                offsetBase: $micButtonOffsetBase
+            )
     }
 
     // MARK: - Voice Recording
 
-    private func startVoiceRecording() {
-        isVoiceRecording = true
-        Haptics.medium()
-        voiceInput.startRecording { _ in }
+    private func configureVoiceRecorder() {
+        voiceRecorder.onCommit = { [self] transcription in
+            sendVoiceCommand(transcription)
+        }
     }
 
-    private func stopVoiceRecording() {
-        guard isVoiceRecording else { return }
-        isVoiceRecording = false
-        Haptics.light()
-
-        let transcription = voiceInput.transcription.trimmingCharacters(in: .whitespacesAndNewlines)
-        voiceInput.stopRecording()
-
-        guard !transcription.isEmpty else { return }
-
+    private func sendVoiceCommand(_ transcription: String) {
         // Persist voice message to chat history
         onVoiceMessage?(transcription)
 

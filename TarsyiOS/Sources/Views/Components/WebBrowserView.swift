@@ -653,11 +653,12 @@ struct FullscreenWebBrowser: View {
     var onVoiceMessage: ((String) -> Void)?
 
     @StateObject private var fullscreenRef = WebViewRef()
-    @StateObject private var voiceInput = VoiceInputManager()
+    @StateObject private var voiceRecorder = VoiceRecorderController()
     @State private var isLoading = false
     @State private var showUrlBar = false
     @State private var urlText = ""
-    @State private var isVoiceRecording = false
+    @State private var micButtonOffset: CGSize = .zero
+    @State private var micButtonOffsetBase: CGSize = .zero
     @FocusState private var isUrlFocused: Bool
 
     var body: some View {
@@ -772,10 +773,9 @@ struct FullscreenWebBrowser: View {
                 .padding(.bottom, 12)
             }
         }
-        // Floating mic button — bottom-right
-        .overlay(alignment: .bottomTrailing) {
+        // Floating mic button — bottom-centered
+        .overlay(alignment: .bottom) {
             micButton
-                .padding(.trailing, 20)
                 .padding(.bottom, 56)
         }
         // Voice todo overlay
@@ -843,53 +843,76 @@ struct FullscreenWebBrowser: View {
     // MARK: - Mic Button
 
     private var micButton: some View {
-        ZStack {
-            if isVoiceRecording {
+        // HUD and ring applied as overlays so they don't affect the Image's
+        // layout size (avoids left-teleport when recording starts).
+        Image(systemName: voiceRecorder.isCancelling ? "trash.fill" : (voiceRecorder.isRecording ? "mic.fill" : "mic"))
+            .font(TarsyTheme.font(size: 26, weight: .semibold))
+            .foregroundColor(
+                voiceRecorder.isCancelling
+                    ? .white
+                    : TarsyTheme.backgroundPrimary
+            )
+            .frame(width: 64, height: 64)
+            .background(
                 Circle()
-                    .stroke(TarsyTheme.accentAmber.opacity(0.4), lineWidth: 3)
-                    .frame(width: 72, height: 72)
-                    .scaleEffect(isVoiceRecording ? 1.3 : 1.0)
-                    .opacity(isVoiceRecording ? 0 : 1)
-                    .animation(.easeOut(duration: 1.0).repeatForever(autoreverses: false), value: isVoiceRecording)
-            }
-
-            Image(systemName: isVoiceRecording ? "mic.fill" : "mic")
-                .font(TarsyTheme.font(size: 28, weight: .medium))
-                .foregroundColor(isVoiceRecording ? .white : .white.opacity(0.9))
-                .frame(width: 64, height: 64)
-                .background(
+                    .fill(
+                        voiceRecorder.isCancelling
+                            ? TarsyTheme.accentTerracotta
+                            : TarsyTheme.accentAmber
+                    )
+            )
+            .opacity(0.7)
+            .shadow(color: .black.opacity(0.45), radius: 14, x: 0, y: 8)
+            .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+            .shadow(
+                color: (voiceRecorder.isCancelling ? TarsyTheme.accentTerracotta : TarsyTheme.accentAmber)
+                    .opacity(voiceRecorder.isRecording ? 0.5 : 0),
+                radius: 20
+            )
+            .scaleEffect(voiceRecorder.isCancelling ? 1.1 : 1.0)
+            .offset(x: voiceRecorder.dragOffsetX * 0.4)
+            .overlay {
+                if voiceRecorder.isRecording {
                     Circle()
-                        .fill(isVoiceRecording ? TarsyTheme.accentAmber : TarsyTheme.accentAmber.opacity(0.8))
-                )
-                .shadow(color: TarsyTheme.accentAmber.opacity(isVoiceRecording ? 0.6 : 0.3), radius: isVoiceRecording ? 12 : 6)
-        }
-        .gesture(
-            LongPressGesture(minimumDuration: 0.15)
-                .onEnded { _ in startVoiceRecording() }
-                .sequenced(before: DragGesture(minimumDistance: 0)
-                    .onEnded { _ in stopVoiceRecording() }
-                )
-        )
+                        .stroke(
+                            (voiceRecorder.isCancelling ? TarsyTheme.accentTerracotta : TarsyTheme.accentAmber).opacity(0.4),
+                            lineWidth: 3
+                        )
+                        .frame(width: 72, height: 72)
+                        .scaleEffect(voiceRecorder.isRecording ? 1.3 : 1.0)
+                        .opacity(voiceRecorder.isRecording ? 0 : 1)
+                        .animation(.easeOut(duration: 1.0).repeatForever(autoreverses: false), value: voiceRecorder.isRecording)
+                        .allowsHitTesting(false)
+                }
+            }
+            .overlay {
+                if voiceRecorder.isRecording {
+                    VoiceRecordingHUD(recorder: voiceRecorder, style: .floatingPill)
+                        .fixedSize()
+                        .offset(y: -70)
+                        .transition(.scale(scale: 0.9).combined(with: .opacity))
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.8), value: voiceRecorder.dragOffsetX)
+            .animation(.easeInOut(duration: 0.15), value: voiceRecorder.isCancelling)
+            .draggableVoiceRecordButton(
+                recorder: voiceRecorder,
+                offset: $micButtonOffset,
+                offsetBase: $micButtonOffsetBase
+            )
+            .onAppear { configureVoiceRecorder() }
     }
 
     // MARK: - Voice Recording
 
-    private func startVoiceRecording() {
-        isVoiceRecording = true
-        Haptics.medium()
-        voiceInput.startRecording { _ in }
+    private func configureVoiceRecorder() {
+        voiceRecorder.onCommit = { [self] transcription in
+            sendVoiceCommand(transcription)
+        }
     }
 
-    private func stopVoiceRecording() {
-        guard isVoiceRecording else { return }
-        isVoiceRecording = false
-        Haptics.light()
-
-        let transcription = voiceInput.transcription.trimmingCharacters(in: .whitespacesAndNewlines)
-        voiceInput.stopRecording()
-
-        guard !transcription.isEmpty else { return }
-
+    private func sendVoiceCommand(_ transcription: String) {
         onVoiceMessage?(transcription)
 
         let voiceDirective = """

@@ -54,8 +54,7 @@ struct WorkspaceView: View {
     @State private var showPaywall = false
     @State private var importedSessionTabs: Set<String> = []
     @State private var checkpointFeedback: String? = nil
-    @State private var isRecording = false
-    @StateObject private var voiceInput = VoiceInputManager()
+    @StateObject private var voiceRecorder = VoiceRecorderController()
     @StateObject private var todoManager = VoiceTodoManager()
     @StateObject private var streamViewModel = StreamViewModel()
     @State private var engineModel = ""
@@ -291,6 +290,7 @@ struct WorkspaceView: View {
         .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .task {
+            configureVoiceRecorder()
             await badgeService.clearBadge(for: workspace.id)
 
             // Wait for agent detection before initializing tabs.
@@ -1182,25 +1182,33 @@ struct WorkspaceView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
-                // Text field
-                ZStack(alignment: .topLeading) {
-                    if messageText.isEmpty {
-                        Text(currentTab.type == .terminal ? "$ run a command..." : "send a command...")
-                            .font(currentTab.type == .terminal ? .system(size: 16, design: .monospaced) : TarsyTheme.font(size: 16))
-                            .foregroundColor(TarsyTheme.textSecondary.opacity(0.35))
-                            .padding(.horizontal, 20)
-                            .padding(.top, 22)
-                    }
-                    TextEditor(text: $messageText)
-                        .font(TarsyTheme.font(size: 16))
-                        .foregroundColor(TarsyTheme.textPrimary)
-                        .scrollContentBackground(.hidden)
-                        .frame(minHeight: 36, maxHeight: 200)
-                        .fixedSize(horizontal: false, vertical: true)
+                // Text field (replaced by VoiceRecordingHUD while recording)
+                if voiceRecorder.isRecording {
+                    VoiceRecordingHUD(recorder: voiceRecorder, style: .inlineBar)
                         .padding(.horizontal, 12)
-                        .padding(.top, 14)
-                        .padding(.bottom, 8)
-                        .focused($isInputFocused)
+                        .padding(.top, 10)
+                        .padding(.bottom, 4)
+                        .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                } else {
+                    ZStack(alignment: .topLeading) {
+                        if messageText.isEmpty {
+                            Text(currentTab.type == .terminal ? "$ run a command..." : "send a command...")
+                                .font(currentTab.type == .terminal ? .system(size: 16, design: .monospaced) : TarsyTheme.font(size: 16))
+                                .foregroundColor(TarsyTheme.textSecondary.opacity(0.35))
+                                .padding(.horizontal, 20)
+                                .padding(.top, 22)
+                        }
+                        TextEditor(text: $messageText)
+                            .font(TarsyTheme.font(size: 16))
+                            .foregroundColor(TarsyTheme.textPrimary)
+                            .scrollContentBackground(.hidden)
+                            .frame(minHeight: 36, maxHeight: 200)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 12)
+                            .padding(.top, 14)
+                            .padding(.bottom, 8)
+                            .focused($isInputFocused)
+                    }
                 }
 
                 // Action buttons row
@@ -1263,30 +1271,20 @@ struct WorkspaceView: View {
                             .accessibilityLabel("Agent tasks")
                         }
 
-                        HStack(spacing: 3) {
-                            if isRecording {
-                                Circle()
-                                    .fill(TarsyTheme.accentTerracotta)
-                                    .frame(width: 5, height: 5)
-                                    .opacity(recDotVisible ? 1 : 0.15)
-                                Text(recordingTimerText)
-                                    .font(TarsyTheme.font(size: 10))
-                                    .foregroundColor(TarsyTheme.accentTerracotta)
-                                    .monospacedDigit()
-                            }
-                            Image(systemName: isRecording ? "mic.fill" : "mic")
-                                .font(TarsyTheme.font(size: 16))
-                                .foregroundColor(isRecording ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
-                                .frame(width: 36, height: 36)
-                        }
-                            .gesture(
-                                LongPressGesture(minimumDuration: 0.15)
-                                    .onEnded { _ in startVoiceInput() }
-                                    .sequenced(before: DragGesture(minimumDistance: 0)
-                                        .onEnded { _ in stopVoiceInput() }
-                                    )
+                        Image(systemName: voiceRecorder.isRecording ? "mic.fill" : "mic")
+                            .font(TarsyTheme.font(size: 16))
+                            .foregroundColor(
+                                voiceRecorder.isCancelling
+                                    ? TarsyTheme.accentTerracotta
+                                    : (voiceRecorder.isRecording ? TarsyTheme.accentTerracotta : TarsyTheme.textSecondary)
                             )
-                            .accessibilityLabel(isRecording ? "Stop recording" : "Hold to record voice")
+                            .frame(width: 36, height: 36)
+                            .scaleEffect(voiceRecorder.isCancelling ? 1.2 : (voiceRecorder.isRecording ? 1.15 : 1.0))
+                            .offset(x: voiceRecorder.dragOffsetX * 0.3)
+                            .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.8), value: voiceRecorder.dragOffsetX)
+                            .animation(.easeInOut(duration: 0.15), value: voiceRecorder.isCancelling)
+                            .voiceRecordGesture(recorder: voiceRecorder)
+                            .accessibilityLabel(voiceRecorder.isRecording ? "Stop recording" : "Hold to record voice")
                     }
 
                     Button(action: { sendMessage() }) {
@@ -1302,14 +1300,21 @@ struct WorkspaceView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.bottom, 10)
-                .animation(.easeInOut(duration: 0.2), value: isRecording)
+                .animation(.easeInOut(duration: 0.2), value: voiceRecorder.isRecording)
                 .animation(.easeInOut(duration: 0.25), value: todoManager.hasActiveItems)
             }
             .background(currentTab.type == .terminal ? TarsyTheme.backgroundPrimary : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 20))
             .overlay(
                 RoundedRectangle(cornerRadius: 20)
-                    .stroke(currentTab.type == .terminal ? TarsyTheme.textSecondary.opacity(0.15) : (isRecording ? TarsyTheme.accentAmber : Color.clear), lineWidth: 1.5)
+                    .stroke(
+                        currentTab.type == .terminal
+                            ? TarsyTheme.textSecondary.opacity(0.15)
+                            : (voiceRecorder.isCancelling
+                                ? TarsyTheme.accentTerracotta
+                                : (voiceRecorder.isRecording ? TarsyTheme.accentAmber : Color.clear)),
+                        lineWidth: 1.5
+                    )
             )
             .if_iOS26GlassEffect()
             .padding(.horizontal, 12)
@@ -2336,55 +2341,35 @@ struct WorkspaceView: View {
 
     @State private var textBeforeVoice = ""
     @State private var showLanguagePicker = false
-    @State private var recordingSeconds = 0
-    @State private var recordingTimer: Timer?
-    @State private var recDotVisible = true
 
-    private var recordingTimerText: String {
-        let m = recordingSeconds / 60
-        let s = recordingSeconds % 60
-        return String(format: "%d:%02d", m, s)
-    }
-
-    private func startVoiceInput() {
-        textBeforeVoice = messageText
-        voiceInput.startRecording { transcription in
-            messageText = textBeforeVoice + (textBeforeVoice.isEmpty ? "" : " ") + transcription
-        }
-        if voiceInput.needsLanguageSelection {
-            showLanguagePicker = true
-        } else {
-            isRecording = true
-            recordingSeconds = 0
-            recDotVisible = true
-            recordingTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-                Task { @MainActor in
-                    recordingSeconds += 1
-                    recDotVisible.toggle()
-                }
+    /// Wires `voiceRecorder` callbacks to chat input state. Called once in onAppear.
+    private func configureVoiceRecorder() {
+        voiceRecorder.onStart = {
+            textBeforeVoice = messageText
+            if voiceRecorder.voiceInput.needsLanguageSelection {
+                // First run — immediately tear down and ask for language.
+                voiceRecorder.voiceInput.stopRecording(commit: false, completion: nil)
+                showLanguagePicker = true
             }
-            Haptics.light()
         }
-    }
-
-    private func stopVoiceInput() {
-        guard isRecording else { return }
-        recordingTimer?.invalidate()
-        recordingTimer = nil
-        voiceInput.stopRecording()
-        isRecording = false
-        Haptics.light()
+        voiceRecorder.onPartial = { partial in
+            messageText = textBeforeVoice + (textBeforeVoice.isEmpty ? "" : " ") + partial
+        }
+        voiceRecorder.onCommit = { finalText in
+            messageText = textBeforeVoice + (textBeforeVoice.isEmpty ? "" : " ") + finalText
+        }
+        voiceRecorder.onCancel = {
+            // Slid-to-cancel — revert the text input to what it was before recording.
+            messageText = textBeforeVoice
+        }
     }
 
     private func pickLanguageAndStart(_ code: String) {
-        voiceInput.setLanguage(code)
-        voiceInput.needsLanguageSelection = false
+        voiceRecorder.voiceInput.setLanguage(code)
+        voiceRecorder.voiceInput.needsLanguageSelection = false
         showLanguagePicker = false
-        voiceInput.startRecording { transcription in
-            messageText = textBeforeVoice + (textBeforeVoice.isEmpty ? "" : " ") + transcription
-        }
-        isRecording = true
-        Haptics.light()
+        // User already released the button; they'll need to press again to record.
+        // Previous behavior auto-started here but that's jarring on first run.
     }
 
     // MARK: - Git Safety Net
