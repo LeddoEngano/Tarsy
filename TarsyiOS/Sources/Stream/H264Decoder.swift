@@ -74,6 +74,22 @@ class H264Decoder: ObservableObject {
         totalFramesDecoded = 0
     }
 
+    /// Stops decoding and provisions a fresh AVSampleBufferDisplayLayer.
+    ///
+    /// After the app is backgrounded the display layer can land in `.failed`
+    /// state and subsequent enqueue() calls silently drop frames — flushing
+    /// alone is not enough to recover, per Apple's docs the layer must be
+    /// recreated. Call this instead of `stop()` when you plan to restart the
+    /// stream (e.g. after a WebSocket reconnect).
+    func reset() {
+        stop()
+        // Swap in a brand new layer so any subsequent frame flow starts
+        // against a clean, non-failed layer. @Published pushes this to SwiftUI
+        // and H264ContainerView.ensureLayerAttached re-parents it on the next
+        // update pass.
+        setupDisplayLayer()
+    }
+
     func receiveFrame(_ data: Data) {
         processingQueue.async { [weak self] in
             self?.decodeFrame(data)

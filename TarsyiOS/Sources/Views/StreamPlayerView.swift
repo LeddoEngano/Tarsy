@@ -20,7 +20,11 @@ class StreamViewModel: ObservableObject {
         isConnected = false
         frameCount = 0
         fps = 0
-        h264Decoder.stop()
+        // Use reset() (not stop()) so we also swap in a fresh display layer —
+        // AVSampleBufferDisplayLayer can enter .failed after the app is
+        // backgrounded, and a fresh layer guarantees the next stream restart
+        // renders cleanly.
+        h264Decoder.reset()
     }
 
     /// Receive a binary H.264 frame from WebSocket (LAN or relay)
@@ -356,10 +360,33 @@ struct StreamPlayerView: View {
             miniDragActive = false
             miniLastDragTranslation = .zero
         }
-        .onChange(of: connectionManager.isConnected) { _, connected in
-            if !connected && miniDragActive {
-                miniDragActive = false
-                miniLastDragTranslation = .zero
+        .onChange(of: connectionManager.isConnected) { wasConnected, connected in
+            if !connected {
+                // WebSocket dropped (app backgrounded, network blip, relay
+                // reconnect, etc). Tear down the local stream state so the
+                // shimmer comes back and the old AVSampleBufferDisplayLayer —
+                // which can be left in .failed after backgrounding — gets
+                // replaced. We keep `isActive = true` so the reconnect branch
+                // below knows to restart.
+                if miniDragActive {
+                    miniDragActive = false
+                    miniLastDragTranslation = .zero
+                }
+                if isActive {
+                    viewModel.disconnect()
+                }
+            } else if !wasConnected && isActive && !isStartingStream {
+                // Came back from a disconnect while this tab is still the
+                // active stream. The macOS side stopped encoding when the WS
+                // dropped, so we must re-issue stream_start — chat survives a
+                // reconnect because it re-reads history from Supabase, but the
+                // video pipeline is live-only and needs an explicit restart.
+                //
+                // The `!isStartingStream` guard avoids a double-start on cold
+                // workspace open: onAppear kicks off startStreamWithAutoSetup
+                // before the WS is up, and when the WS then comes online we
+                // don't want to fire a second one on top of the pending Task.
+                startStreamWithAutoSetup()
             }
         }
         .confirmationDialog("Select Port", isPresented: $showPortPicker, titleVisibility: .visible) {
