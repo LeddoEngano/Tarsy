@@ -24,8 +24,8 @@ targets:
       properties:
         CFBundleDisplayName: Tarsy
         CFBundleName: Tarsy
-        CFBundleShortVersionString: "1.0.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "1.0.1"
+        CFBundleVersion: "2"
         CFBundleIconName: AppIcon
         UILaunchScreen: {}
         UIRequiredDeviceCapabilities:
@@ -91,8 +91,8 @@ targets:
       properties:
         CFBundleDisplayName: Tarsy Widgets
         CFBundleName: TarsyWidgets
-        CFBundleShortVersionString: "1.0.0"
-        CFBundleVersion: "1"
+        CFBundleShortVersionString: "1.0.1"
+        CFBundleVersion: "2"
         UIAppFonts:
           - InterVariable.ttf
           - InterVariable-Italic.ttf
