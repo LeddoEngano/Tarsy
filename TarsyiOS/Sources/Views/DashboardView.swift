@@ -563,12 +563,26 @@ struct WorkspaceCard: View {
                 .font(.caption)
                 .foregroundColor(TarsyTheme.textSecondary)
         }
-        .padding(16)
+        .padding(.vertical, 16)
+        .padding(.leading, 16)
+        .padding(.trailing, 20)
         .background(TarsyTheme.backgroundSecondary)
-        .cornerRadius(12)
+        .clipShape(
+            .rect(
+                topLeadingRadius: 12,
+                bottomLeadingRadius: 12,
+                bottomTrailingRadius: 999,
+                topTrailingRadius: 999
+            )
+        )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(TarsyTheme.backgroundTertiary, lineWidth: 1)
+            UnevenRoundedRectangle(
+                topLeadingRadius: 12,
+                bottomLeadingRadius: 12,
+                bottomTrailingRadius: 999,
+                topTrailingRadius: 999
+            )
+            .stroke(TarsyTheme.backgroundTertiary, lineWidth: 1)
         )
         .overlay(alignment: .topTrailing) {
             if unreadCount > 0 {
