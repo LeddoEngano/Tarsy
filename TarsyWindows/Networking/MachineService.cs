@@ -302,8 +302,9 @@ public class MachineService
         catch (Exception ex)
         {
             Console.WriteLine($"[Machine] EnsureMachineKey error: {ex.Message}");
-            // Don't crash — legacy machineSecret path still works if the relay hasn't
-            // been updated yet, and the relay supports both flows during transition.
+            // Don't crash — the daemon will fail to authenticate to the relay on
+            // its next connect attempt and log "Machine credentials required",
+            // which is the right signal for the user.
         }
     }
 }

@@ -72,48 +72,10 @@ class DaemonManager: ObservableObject {
     private let laPushThrottle: TimeInterval = 4.0             // max 1 push per 4 seconds
 
     let profileService = ProfileService()
-    private var machineSecret: String?
-    /// Phase 3: P-256 keypair identity for signed-timestamp relay auth.
-    /// Created lazily on first relay connect; key material lives in Secure
-    /// Enclave (or Keychain fallback). Never logged.
+    /// P-256 keypair identity for signed-timestamp relay auth. Created
+    /// lazily during registerMachine(); key material lives in Secure Enclave
+    /// (or Keychain fallback). Never logged. See MachineKeyStore.swift.
     private var machineKeyStore: MachineKeyStore?
-
-    // MARK: - Machine Secret Keychain
-
-    private static let machineSecretService = "com.tarsy.macos.machine-secret"
-
-    private func loadMachineSecret() -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.machineSecretService,
-            kSecAttrAccount as String: "machine-secret",
-            kSecReturnData as String: true
-        ]
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    private func saveMachineSecret(_ secret: String) {
-        guard let data = secret.data(using: .utf8) else { return }
-        // Delete existing
-        let deleteQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.machineSecretService,
-            kSecAttrAccount as String: "machine-secret"
-        ]
-        SecItemDelete(deleteQuery as CFDictionary)
-        // Add new
-        let addQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.machineSecretService,
-            kSecAttrAccount as String: "machine-secret",
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
-        ]
-        SecItemAdd(addQuery as CFDictionary, nil)
-    }
 
     private var isStarting = false
 
@@ -579,10 +541,9 @@ class DaemonManager: ObservableObject {
             }
         )
 
-        // Phase 3: build the keypair-based identity (signed timestamp) if we
-        // have one. The relay supports both this and the legacy machineSecret
-        // at the same time; both are sent and the relay picks the signature
-        // path when `signature` is present.
+        // Build the signed-timestamp machine identity. The signer closure
+        // captures the key store actor so every (re)connect gets a fresh
+        // signature over a fresh timestamp.
         let identity: MachineAuthIdentity?
         if let store = machineKeyStore, let mId = machineId {
             let pub = store.publicKeyDER
@@ -600,14 +561,14 @@ class DaemonManager: ObservableObject {
             )
         } else {
             identity = nil
+            log("connectRelay: no machine identity — relay will reject")
         }
 
         await relayClient.connect(
             token: session.accessToken,
-            machineSecret: machineSecret,
             machineIdentity: identity
         )
-        log("Connected to relay for remote access (identity: \(identity == nil ? "legacy-only" : "signed"))")
+        log("Connected to relay for remote access")
     }
 
     // Forward response to relay when clientId is "relay"
@@ -950,7 +911,11 @@ class DaemonManager: ObservableObject {
             )
         // Security
         case .securityRotateSecret:
-            await rotateMachineSecret()
+            // Legacy rotation action — under Phase 3 the machine identity is a
+            // P-256 keypair in Secure Enclave and rotation is not yet wired up.
+            // Ack with status=ok so the iOS button doesn't spin; re-rotating
+            // the keypair is a tracked follow-up in docs/SECURITY_ROADMAP.md.
+            log("securityRotateSecret: no-op (keypair rotation not implemented)")
             await sendToClientOrRelay(
                 WSPacket(action: .securityRotateResult, payload: ["status": "ok"], id: packet.id),
                 to: clientId
@@ -2401,13 +2366,9 @@ class DaemonManager: ObservableObject {
             }
             lastError = nil
 
-            // Ensure machine has a relay secret (for role verification).
-            // Legacy flow — still required during the Phase 3 transition until
-            // migration 036 drops the column.
-            await ensureMachineSecret(userId: session.user.id, machineId: machineId!)
-            // Phase 3 — also ensure a P-256 keypair exists and its public key
-            // is registered in machine_tokens. The relay prefers this flow
-            // over the legacy secret when both are available.
+            // Ensure this machine has a P-256 keypair whose public key is
+            // registered in machine_tokens. Private key lives in Secure Enclave
+            // (or Keychain fallback); only the public key is ever uploaded.
             await ensureMachinePublicKey(userId: session.user.id, machineId: machineId!)
         } catch {
             log("registerMachine: FAILED — \(error)")
@@ -2468,72 +2429,9 @@ class DaemonManager: ObservableObject {
         }
     }
 
-    private func ensureMachineSecret(userId: UUID, machineId: UUID) async {
-        // Try loading from Keychain first
-        if let existing = loadMachineSecret() {
-            self.machineSecret = existing
-            log("ensureMachineSecret: loaded from Keychain")
-
-            // Ensure it exists in Supabase too (idempotent upsert)
-            do {
-                try await supabase
-                    .from("machine_tokens")
-                    .upsert([
-                        "user_id": userId.uuidString,
-                        "machine_id": machineId.uuidString,
-                        "machine_secret": existing
-                    ], onConflict: "machine_id")
-                    .execute()
-            } catch {
-                log("ensureMachineSecret: Supabase sync failed — \(error)")
-            }
-            return
-        }
-
-        // Generate new secret
-        let secret = UUID().uuidString
-        saveMachineSecret(secret)
-        self.machineSecret = secret
-        log("ensureMachineSecret: generated new secret")
-
-        do {
-            try await supabase
-                .from("machine_tokens")
-                .insert([
-                    "user_id": userId.uuidString,
-                    "machine_id": machineId.uuidString,
-                    "machine_secret": secret
-                ])
-                .execute()
-            log("ensureMachineSecret: saved to Supabase")
-        } catch {
-            log("ensureMachineSecret: Supabase insert failed — \(error)")
-        }
-    }
-
-    func rotateMachineSecret() async {
-        guard let userId = ownerUserId, let mId = machineId else { return }
-        let newSecret = UUID().uuidString
-        saveMachineSecret(newSecret)
-        self.machineSecret = newSecret
-
-        do {
-            try await supabase
-                .from("machine_tokens")
-                .update(["machine_secret": newSecret, "rotated_at": ISO8601DateFormatter().string(from: Date())])
-                .eq("machine_id", value: mId.uuidString)
-                .eq("user_id", value: userId.uuidString)
-                .execute()
-            log("rotateMachineSecret: rotated successfully")
-
-            // Reconnect relay with new secret
-            if let token = try? await supabase.auth.session.accessToken {
-                await relayClient.connect(token: token, machineSecret: newSecret)
-            }
-        } catch {
-            log("rotateMachineSecret: failed — \(error)")
-        }
-    }
+    // Legacy `ensureMachineSecret` / `rotateMachineSecret` removed in
+    // migration 037 — machine auth is now P-256 keypair via
+    // `ensureMachinePublicKey` above.
 
     /// Returns the Mac's unique hardware UUID from IOKit
     private func getHardwareUUID() -> String? {

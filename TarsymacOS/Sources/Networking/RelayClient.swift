@@ -13,11 +13,10 @@ actor RelayClient {
     private var onConnectionStateChanged: (@Sendable (Bool, Int) -> Void)?
 
     private var authToken: String?
-    private var machineSecret: String?
-    /// Phase 3: signed-timestamp machine auth identity. When set, connect()
-    /// will populate `machine_id`, `timestamp`, `signature`, and `publicKey`
-    /// in the auth payload alongside the legacy `machineSecret` field. The
-    /// relay prefers the signature flow when both are present.
+    /// Signed-timestamp machine auth identity. When set, connect() will
+    /// populate `machine_id`, `timestamp`, `signature`, and `machinePublicKey`
+    /// in the auth payload. The relay verifies the signature against the
+    /// stored public key in machine_tokens.public_key.
     private var machineIdentity: MachineAuthIdentity?
     private var isReconnecting = false
     private var pingTask: Task<Void, Never>?
@@ -38,11 +37,9 @@ actor RelayClient {
 
     func connect(
         token: String,
-        machineSecret: String? = nil,
         machineIdentity: MachineAuthIdentity? = nil
     ) async {
         self.authToken = token
-        if let machineSecret { self.machineSecret = machineSecret }
         if let machineIdentity { self.machineIdentity = machineIdentity }
         isIntentionalDisconnect = false
         // Only reset reconnect attempts on explicit connect (not reconnect)
@@ -75,13 +72,13 @@ actor RelayClient {
         self.webSocket = ws
         ws.resume()
 
-        // Build auth payload. During the Phase 3 transition we send BOTH the
-        // legacy `machineSecret` (if we have one) and the new signed-timestamp
-        // fields (if we have an identity). The relay prefers the signature
-        // flow when `signature` is present and falls back to `machineSecret`
-        // otherwise — belt and suspenders while the rollout happens.
+        // Build signed-timestamp auth payload. The relay expects:
+        // machine_id, timestamp, signature, machinePublicKey. If we don't
+        // have a machineIdentity we still attempt to connect (the relay will
+        // reject with "Machine credentials required") — this lets the daemon
+        // log a clean error during an initial bootstrap failure instead of
+        // silently refusing to touch the WebSocket.
         var auth: [String: Any] = ["action": "auth", "token": token, "role": "machine"]
-        if let secret = machineSecret { auth["machineSecret"] = secret }
         if let identity = machineIdentity {
             // Fresh timestamp on every (re)connect — freshness window is ±60s
             // on the relay side. Milliseconds to match Date.now() in JS.

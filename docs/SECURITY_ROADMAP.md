@@ -5,9 +5,11 @@ April 2026 audit. Covers what's shipped and what's still deferred. Keep
 this file up to date as phases land.
 
 All three initial phases (realtime leak fix, APNs + pairing encryption,
-machine keypair auth) are deployed to production. The remaining work is
-distribution-gated cleanup (migrations 036 / 037 after app rollout) and
-nice-to-haves (key rotation, multi-device push).
+machine keypair auth) plus the post-cleanup migrations 036 / 037 are
+deployed to production. The legacy plaintext columns and the dual-auth
+relay branch are gone. The system runs only on the new RPC + signature
+paths now. Remaining work is nice-to-haves (key rotation, multi-device
+push, audit cadence).
 
 ## Completed
 
@@ -126,71 +128,66 @@ nice-to-haves (key rotation, multi-device push).
   machine id, and user id (instead of a dead `machineSecret`) and to
   build the same signed-timestamp payload as the macOS client.
 
+### Cleanup — migrations 036 + 037 — same commit cycle as Phase 3
+
+With zero production users, there was no transition to protect. The
+post-cleanup migrations were applied immediately after Phase 3 rather
+than gated on app adoption. The system now runs **only** on the new
+RPC + signature paths.
+
+- **Migration 036** — dropped the Phase 2 plaintext columns that were
+  kept as a transition bridge:
+  - `push_tokens.device_token`
+  - `live_activity_tokens.activity_token`
+  - `machine_pairings.pairing_token`, `machine_pairings.connection_code`
+  - The 3 BEFORE INSERT triggers
+    (`push_tokens_encrypt_before_write`,
+    `live_activity_tokens_encrypt_before_write`,
+    `machine_pairings_hash_before_write`) and their trigger functions.
+  - The 2 plaintext-column unique constraints
+    (`push_tokens_device_token_key`,
+    `live_activity_tokens_activity_token_key`).
+  - Helper functions `_apns_enc_key()` / `_pairing_pepper()` were
+    intentionally kept — they are still called by the public RPCs.
+- **Migration 037** — dropped `machine_tokens.machine_secret` entirely.
+- **Relay** — `relay/src/index.ts` had the legacy `else` branch
+  (`auth.machineSecret` path) removed. The signature flow is now the
+  only accepted machine auth. Redeployed via `fly deploy --remote-only`.
+- **TarsymacOS Swift** — deleted `machineSecret` property,
+  `machineSecretService` keychain identifier, `loadMachineSecret`,
+  `saveMachineSecret`, `ensureMachineSecret`, `rotateMachineSecret`,
+  and the call site in `registerMachine`. `RelayClient.swift`'s
+  `connect()` no longer takes a `machineSecret` parameter. The
+  `securityRotateSecret` WSAction handler is now a logged no-op
+  pending the keypair rotation follow-up.
+- **TarsyWindows** had nothing to remove — Phase 3 already replaced
+  the broken `EnsureSecret` stub with `EnsureMachineKey`, so cleanup
+  was just a stale comment.
+- **Verification in prod** — 9-group post-cleanup script: plaintext
+  columns dropped, encrypted/hmac/public_key columns intact, helpers
+  preserved, all 8 RPCs preserved, legacy unique constraints gone,
+  new unique constraints intact, machine_tokens row count sanity.
+
 ## Deferred — follow-up work
-
-### Phase 3 rollout checklist (near-term)
-
-The DB, relay, and source code are already live. What's left is app
-distribution and eventual cleanup:
-
-1. **Regenerate the Xcode project** to pick up
-   `TarsymacOS/Sources/Security/MachineKeyStore.swift`:
-   ```
-   cd TarsymacOS && xcodegen generate
-   ```
-2. **Build and smoke test TarsymacOS.app locally** — the logs should
-   show `ensureMachinePublicKey: uploaded public key (91 bytes) to
-   Supabase` the first time it runs after upgrade, and `Connected to
-   relay for remote access (identity: signed)` on every subsequent
-   connect. **No** password / biometric prompt should ever appear.
-3. **Build and smoke test TarsyWindows.exe locally** (`dotnet build`)
-   — logs should show `EnsureMachineKey: uploaded public key (91
-   bytes, backend=tpm)` (or `backend=software` on machines without
-   TPM 2.0) and then `Connected` to the relay. This is the **first
-   time Windows auth will work end-to-end** against the relay.
-4. **Cut releases** of both apps when you're satisfied. No hurry —
-   the relay still accepts the legacy `machineSecret` flow, so
-   unreleased machines keep working until every user has upgraded.
-5. **Post-adoption cleanup: migration 036** — see below. Gated on
-   verifying that `machine_tokens.machine_secret` no longer changes
-   after all machines have been on the new release for N days.
-
-### Migration 036 — drop plaintext columns from Phase 2
-
-Note the numbering: Phase 3 took `035`, so the Phase 2 cleanup slots
-in as `036`. After iOS and macOS releases using the Phase 2 RPCs have
-adopted in production (verified by watching
-`push_tokens.device_token` stay null for N days), drop:
-
-- `push_tokens.device_token` column + `push_tokens_device_token_key`
-  unique index.
-- `live_activity_tokens.activity_token` column +
-  `live_activity_tokens_activity_token_key` unique index.
-- `machine_pairings.pairing_token` and `machine_pairings.connection_code`
-  columns.
-- BEFORE INSERT triggers:
-  `_push_tokens_encrypt_trigger`,
-  `_live_activity_tokens_encrypt_trigger`,
-  `_machine_pairings_hash_trigger` (and their attached triggers).
-
-Low complication — the encrypted/HMAC columns are already fully
-populated. Main gate is app release adoption.
-
-### Migration 037 — drop `machine_tokens.machine_secret`
-
-Parallel to 036 but for Phase 3. Gated on full adoption of the new
-public-key auth across both macOS and Windows. Also remove the
-`machineSecret` branch from `relay/src/index.ts` in the same deploy.
 
 ### Rotation of the machine keypair
 
-`security:rotate_machine_secret` WSAction still exists and still
-rotates the legacy `UUID` secret. Rotating the Phase 3 keypair is a
-follow-up — the flow would be: delete the Keychain/CngKey entry for
-`com.tarsy.macos.machine-key` / `tarsy.machine.p256.v1`, re-run
-`MachineKeyStore.loadOrCreate()` (which regenerates), and re-call
-`register_machine_public_key`. Straightforward but not wired up yet.
-Low priority — only needed on compromise incident.
+The `security:rotate_machine_secret` WSAction still exists in the wire
+protocol (Swift + C# enums + relay allowlist) for iOS UI compatibility.
+The macOS handler is currently a logged no-op that returns
+`status: ok`. Wiring it up would mean:
+
+1. Add a `rotate()` method to `MachineKeyStore` (both Swift and C#)
+   that deletes the Keychain / CngKey entry and re-runs
+   `loadOrCreate()`.
+2. Call it from the `securityRotateSecret` handler in
+   `DaemonManager.swift`, then upload via
+   `register_machine_public_key` and reconnect the relay so the new
+   keypair is exercised.
+3. (Optional) Mirror in TarsyWindows.
+
+Low priority — only needed on a compromise incident. Tracked as a
+pending TODO since the rotation is currently silently no-op.
 
 ### Key rotation infrastructure
 
@@ -243,14 +240,15 @@ verification. Assume future migrations will introduce new issues too.
 - Phase 1 commit: `27c2b15` — security: drop dead realtime pubs and block secrets in ai_context
 - Phase 2 commit: `ccf132f` — security: encrypt APNs tokens at rest, HMAC pairing tokens
 - Phase 3 commit: `542297c` — security: machine auth via P-256 keypair in Secure Enclave / TPM
-- Current migrations: `001` … `035` in `supabase/migrations/`
+- Cleanup commit: see `git log -- supabase/migrations/036_*.sql` — drops legacy plaintext + dual-auth
+- Current migrations: `001` … `037` in `supabase/migrations/`
 - Relay source: `relay/src/index.ts`
 - Key Swift entry points:
   - macOS key store: `TarsymacOS/Sources/Security/MachineKeyStore.swift`
   - macOS daemon: `TarsymacOS/Sources/DaemonManager.swift`
-    (`ensureMachineSecret`, `ensureMachinePublicKey`, `rotateMachineSecret`)
+    (`ensureMachinePublicKey`)
   - macOS relay client: `TarsymacOS/Sources/Networking/RelayClient.swift`
-    (`connect(token:machineSecret:machineIdentity:)`)
+    (`connect(token:machineIdentity:)`)
   - iOS push registration: `TarsyiOS/Sources/TarsyiOSApp.swift` (`savePushTokenIfNeeded`)
   - Live activity: `TarsyiOS/Sources/LiveActivity/LiveActivityManager.swift` (`storeLiveActivityToken`)
   - Pairing: `TarsyShared/Sources/TarsyShared/Networking/PairingService.swift` (`generatePairingToken`)
