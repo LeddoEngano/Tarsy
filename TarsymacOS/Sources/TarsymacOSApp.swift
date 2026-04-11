@@ -2,6 +2,16 @@ import SwiftUI
 import TarsyShared
 import AppKit
 
+/// Bump this whenever onboarding adds a new required step. Users whose
+/// stored `onboardingVersion` is below this value will be forced back
+/// into onboarding on next launch, even if `hasCompletedOnboarding` is
+/// true. Version history:
+///   1 - initial release (screen recording, accessibility, files and folders, automation)
+///   2 - 2026-04: replaced files-and-folders with full disk access,
+///       fixed false-positive detection. All pre-existing installs must
+///       re-verify because their previous "granted" state was unreliable.
+let kRequiredOnboardingVersion: Int = 2
+
 @main
 struct TarsymacOSApp: App {
     @NSApplicationDelegateAdaptor(TarsyAppDelegate.self) var appDelegate
@@ -15,6 +25,13 @@ struct TarsymacOSApp: App {
         signal(SIGPIPE, SIG_IGN)
     }
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    /// Set to `kRequiredOnboardingVersion` only when onboarding completes
+    /// with every required permission actually verified. If this is below
+    /// the required version at launch, onboarding re-runs.
+    @AppStorage("onboardingVersion") private var onboardingVersion: Int = 0
+    /// Set by `OnboardingWindow` when every required permission has been
+    /// verified as granted. Used by the hard-gate on window close.
+    @AppStorage("permissionsVerified") private var permissionsVerified: Bool = false
 
     var body: some Scene {
         // Onboarding / Main window
@@ -23,8 +40,33 @@ struct TarsymacOSApp: App {
                 .environmentObject(authManager)
                 .environmentObject(daemonManager)
                 .onDisappear {
-                    if authManager.isAuthenticated {
+                    // If this window is closing because of an intentional
+                    // mid-onboarding relaunch (e.g. Screen Recording grant
+                    // requires a fresh process), skip the hard-gate entirely
+                    // and clear the flag. The relaunched process will see
+                    // onboarding as still incomplete and pick up where the
+                    // user left off.
+                    if UserDefaults.standard.bool(forKey: "isRelaunchingForPermissions") {
+                        UserDefaults.standard.set(false, forKey: "isRelaunchingForPermissions")
+                        return
+                    }
+                    // Hard-gate: only mark onboarding complete if the user
+                    // is authenticated AND every required permission has
+                    // been verified as granted in this session. If the
+                    // user tries to close the onboarding window without
+                    // completing permissions, terminate the app — Tarsy
+                    // cannot function remotely without them.
+                    if authManager.isAuthenticated && permissionsVerified {
                         hasCompletedOnboarding = true
+                        onboardingVersion = kRequiredOnboardingVersion
+                    } else if authManager.isAuthenticated && !permissionsVerified {
+                        let alert = NSAlert()
+                        alert.messageText = "Tarsy can't run without these permissions"
+                        alert.informativeText = "Tarsy is a remote control tool. Without Screen Recording, Accessibility, Automation, and Full Disk Access, it cannot function while you're away from your Mac. Please reopen Tarsy and complete setup."
+                        alert.alertStyle = .critical
+                        alert.addButton(withTitle: "Quit Tarsy")
+                        alert.runModal()
+                        NSApp.terminate(nil)
                     }
                 }
                 .onOpenURL { url in
@@ -34,6 +76,13 @@ struct TarsymacOSApp: App {
                 }
                 .onAppear {
                     appDelegate.authManager = authManager
+                    // Force re-onboarding if the stored version is below the
+                    // current required version — even if the user previously
+                    // saw "setup complete" under an older, buggier onboarding.
+                    if onboardingVersion < kRequiredOnboardingVersion {
+                        hasCompletedOnboarding = false
+                        permissionsVerified = false
+                    }
                 }
         }
         .windowStyle(.hiddenTitleBar)

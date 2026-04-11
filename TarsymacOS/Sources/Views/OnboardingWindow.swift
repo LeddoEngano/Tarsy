@@ -36,8 +36,8 @@ struct OnboardingWindow: View {
     enum PermissionSubStep: Int, CaseIterable {
         case screenRecording
         case accessibility
-        case filesAndFolders
         case automation
+        case fullDiskAccess
     }
 
     struct PermissionInfo {
@@ -404,38 +404,49 @@ struct OnboardingWindow: View {
 
     @State private var hasScreenRecording = false
     @State private var hasAccessibility = false
-    @State private var hasFilesAccess = false
+    @State private var hasFDA = false
     @State private var hasAutomation = false
     @State private var permissionSubStep: PermissionSubStep = .screenRecording
+    /// Mirrors @AppStorage("permissionsVerified") — read by the hard-gate
+    /// in `TarsymacOSApp.onDisappear`. Set to true once every required
+    /// permission has been verified as granted in this session.
+    @AppStorage("permissionsVerified") private var permissionsVerified: Bool = false
+
+    /// Screen Recording state captured on first check in this process
+    /// lifetime. If SR was false at launch and later becomes true, macOS
+    /// requires an app relaunch before the SR APIs actually work — we use
+    /// this flag to detect the transition and prompt for a restart.
+    @State private var srStateAtLaunch: Bool? = nil
+    @State private var showSRRestartAlert = false
 
     private var allPermissionsGranted: Bool {
-        hasScreenRecording && hasAccessibility && hasFilesAccess && hasAutomation
+        hasScreenRecording && hasAccessibility && hasFDA && hasAutomation
     }
 
     private var totalPermissions: Int { PermissionSubStep.allCases.count }
 
     private var grantedCount: Int {
-        [hasScreenRecording, hasAccessibility, hasFilesAccess, hasAutomation].filter { $0 }.count
+        [hasScreenRecording, hasAccessibility, hasFDA, hasAutomation].filter { $0 }.count
     }
 
     private func permissionInfo(for subStep: PermissionSubStep) -> PermissionInfo {
         switch subStep {
         case .screenRecording:
             return PermissionInfo(icon: "rectangle.dashed.badge.record", title: "screen recording",
-                    why: "tarsy streams your mac screen to your iphone so you can see and control it remotely.",
+                    why: "tarsy streams your mac screen to your iphone so you can see and control what your ai agents are doing while you're away from your desk.",
                     isGranted: hasScreenRecording, settingsKey: "Privacy_ScreenCapture")
         case .accessibility:
             return PermissionInfo(icon: "hand.tap", title: "accessibility",
-                    why: "tarsy needs accessibility access to move windows, type, and handle remote input from your iphone.",
+                    why: "tarsy delivers your remote taps, scrolls, and keystrokes to your mac. without this, you can't click anything from your iphone.",
                     isGranted: hasAccessibility, settingsKey: "Privacy_Accessibility")
-        case .filesAndFolders:
-            return PermissionInfo(icon: "folder", title: "files and folders",
-                    why: "tarsy scans your project directories to list repos and provide file context to AI agents.",
-                    isGranted: hasFilesAccess, settingsKey: "Privacy_FilesAndFolders")
         case .automation:
             return PermissionInfo(icon: "gearshape.2", title: "automation",
-                    why: "tarsy uses apple events to control browser tabs so it can manage dev server previews remotely.",
+                    why: "tarsy uses apple events to drive browser tabs for dev server previews and to dismiss routine system prompts on your behalf.",
                     isGranted: hasAutomation, settingsKey: nil)
+        case .fullDiskAccess:
+            return PermissionInfo(icon: "externaldrive.badge.checkmark", title: "full disk access",
+                    why: "ai agents touch files all over your disk — projects, caches, config. without full disk access, macos will pop a permission prompt every time an agent touches a new folder, and you won't be there to click allow. this is the single grant that keeps tarsy working remotely.",
+                    isGranted: hasFDA, settingsKey: "Privacy_AllFiles")
         }
     }
 
@@ -454,16 +465,24 @@ struct OnboardingWindow: View {
     }
 
     private func grantCurrentPermission() {
-        if permissionSubStep == .screenRecording {
+        switch permissionSubStep {
+        case .screenRecording:
             // CGRequestScreenCaptureAccess() registers the app in the Screen Recording
             // list AND opens System Settings. Just opening Settings doesn't add the app.
             CGRequestScreenCaptureAccess()
-        } else if permissionSubStep == .automation {
+        case .automation:
             requestAutomationPermission()
-        } else if permissionSubStep == .filesAndFolders {
-            requestFilesAndFoldersPermission()
-        } else if let key = permissionInfo(for: permissionSubStep).settingsKey {
-            openSettings(key)
+        case .fullDiskAccess:
+            // FDA cannot be programmatically requested — only a user flipping
+            // the toggle in System Settings grants it. Deep-link there and
+            // rely on polling to detect the grant.
+            if let key = permissionInfo(for: .fullDiskAccess).settingsKey {
+                openSettings(key)
+            }
+        case .accessibility:
+            if let key = permissionInfo(for: .accessibility).settingsKey {
+                openSettings(key)
+            }
         }
     }
 
@@ -569,8 +588,8 @@ struct OnboardingWindow: View {
                     let granted: Bool = switch subStep {
                     case .screenRecording: hasScreenRecording
                     case .accessibility: hasAccessibility
-                    case .filesAndFolders: hasFilesAccess
                     case .automation: hasAutomation
+                    case .fullDiskAccess: hasFDA
                     }
                     Circle()
                         .fill(subStep == permissionSubStep ? Theme.amber :
@@ -582,9 +601,22 @@ struct OnboardingWindow: View {
 
             Spacer()
         }
+        .alert("Screen Recording Enabled", isPresented: $showSRRestartAlert) {
+            Button("Restart Tarsy", role: .destructive) { relaunchApp() }
+            Button("Later", role: .cancel) {}
+        } message: {
+            Text("macOS requires Tarsy to restart before Screen Recording actually starts working. Without a restart the stream will be blank.")
+        }
         .task {
             // Initial check
             await checkPermissionsAsync()
+            // Capture the SR state as it was when this process launched.
+            // If this flips from false -> true during onboarding, the user
+            // just granted SR in System Settings and macOS requires a
+            // relaunch for the capture APIs to actually see it.
+            if srStateAtLaunch == nil {
+                srStateAtLaunch = hasScreenRecording
+            }
             advanceToNextUngranted()
 
             // Poll every 2s for permission changes
@@ -592,6 +624,10 @@ struct OnboardingWindow: View {
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
                 guard !Task.isCancelled else { break }
                 await checkPermissionsAsync()
+                // SR just flipped from false -> true? Prompt for relaunch.
+                if srStateAtLaunch == false && hasScreenRecording && !showSRRestartAlert {
+                    showSRRestartAlert = true
+                }
                 if allPermissionsGranted {
                     withAnimation(.easeInOut(duration: 0.2)) { step = .agents }
                 } else if permissionInfo(for: permissionSubStep).isGranted {
@@ -601,6 +637,23 @@ struct OnboardingWindow: View {
                 }
             }
         }
+    }
+
+    /// Relaunch Tarsy via `/usr/bin/open -n`. Used after Screen Recording
+    /// is granted, since macOS requires a fresh process to pick up the
+    /// new TCC decision for SR specifically.
+    ///
+    /// Sets a transient "isRelaunching" flag so the hard-gate in
+    /// `TarsymacOSApp.onDisappear` knows to skip the "permissions
+    /// incomplete" alert during this intentional termination.
+    private func relaunchApp() {
+        UserDefaults.standard.set(true, forKey: "isRelaunchingForPermissions")
+        let path = Bundle.main.bundlePath
+        let task = Process()
+        task.launchPath = "/usr/bin/open"
+        task.arguments = ["-n", path]
+        try? task.run()
+        NSApp.terminate(nil)
     }
 
     private var permissionsProgressBar: some View {
@@ -653,18 +706,74 @@ struct OnboardingWindow: View {
     private func checkPermissionsAsync() async {
         hasScreenRecording = checkScreenRecordingPermission()
         hasAccessibility = checkAccessibilityPermission()
-        hasFilesAccess = preAccessDirectories()
+        hasFDA = checkFullDiskAccess()
         hasAutomation = checkAutomationPermission()
+        // Keep the hard-gate flag in sync with live state so it survives
+        // a window close (including cmd-W) without needing a completion
+        // ceremony. Only set true when every permission is actually green.
+        permissionsVerified = allPermissionsGranted
     }
 
-    /// Check accessibility permission by attempting a real AX query.
-    /// AXIsProcessTrusted() caches its result per-process on macOS 15+,
-    /// so we test by querying the frontmost app's AX element instead.
+    /// Detect whether the app has Full Disk Access.
+    ///
+    /// FDA grants read access to `/Library/Application Support/com.apple.TCC/TCC.db`,
+    /// which exists on every modern Mac and is otherwise protected by FDA.
+    /// `FileHandle(forReadingFrom:)` throws `EPERM` when FDA is not granted,
+    /// and succeeds (with real bytes to read) when it is. This probe does
+    /// NOT trigger a TCC prompt (FDA can only be granted via System
+    /// Settings, never via an API) and does NOT burn the prompt for any
+    /// other permission.
+    ///
+    /// Fallback: if for some reason TCC.db is not readable via file handle
+    /// (unusual disk layout, tccd race), try reading `~/Library/Safari` —
+    /// also FDA-protected, present on any Mac with Safari (which is all
+    /// of them, though the directory may not exist until Safari launches).
+    private func checkFullDiskAccess() -> Bool {
+        let tccDB = URL(fileURLWithPath: "/Library/Application Support/com.apple.TCC/TCC.db")
+        if let handle = try? FileHandle(forReadingFrom: tccDB) {
+            defer { try? handle.close() }
+            // A successful read of at least 1 byte is a strong positive.
+            if (try? handle.read(upToCount: 1)) != nil {
+                return true
+            }
+        }
+        // Fallback probe: Safari library directory.
+        let safari = NSHomeDirectory() + "/Library/Safari"
+        if FileManager.default.fileExists(atPath: safari) {
+            if (try? FileManager.default.contentsOfDirectory(atPath: safari)) != nil {
+                // contentsOfDirectory on FDA-protected paths throws on denial
+                // (unlike Desktop/Documents/Downloads which return empty).
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Check accessibility permission by attempting a real AX query against
+    /// a DIFFERENT process. `AXIsProcessTrusted()` caches its result per-
+    /// process on macOS 15+, so once the app launches it can never notice
+    /// that the user granted (or revoked) the grant without a relaunch —
+    /// which means the onboarding UI would never clear the Accessibility
+    /// step after the user enables it in System Settings.
+    ///
+    /// The workaround is to do a real AX probe, but it MUST target another
+    /// process. A process can always introspect itself via AX regardless of
+    /// TCC, so probing our own PID (or any process that happens to be
+    /// frontmost while the onboarding is open — usually Tarsy itself) gives
+    /// a false-positive `granted` and the onboarding silently skips the
+    /// step. Pick the first regular running app that isn't us, fall back to
+    /// `AXIsProcessTrusted()` only if nothing else is running.
     private func checkAccessibilityPermission() -> Bool {
-        guard let frontApp = NSWorkspace.shared.frontmostApplication else {
+        let ourPid = getpid()
+        let probeTarget = NSWorkspace.shared.runningApplications.first { app in
+            app.processIdentifier != ourPid
+                && app.activationPolicy == .regular
+                && app.processIdentifier > 0
+        }
+        guard let target = probeTarget else {
             return AXIsProcessTrusted()
         }
-        let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
+        let appElement = AXUIElementCreateApplication(target.processIdentifier)
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appElement, kAXRoleAttribute as CFString, &value)
         // .apiDisabled means accessibility is not enabled for this process.
@@ -677,45 +786,6 @@ struct OnboardingWindow: View {
     /// window names for system windows even WITHOUT screen recording permission.
     private func checkScreenRecordingPermission() -> Bool {
         CGPreflightScreenCaptureAccess()
-    }
-
-    /// Check that we have access to TCC-protected directories (Desktop and Documents).
-    /// Non-protected directories (Developer, Code, etc.) don't require TCC consent,
-    /// so we must specifically verify the protected ones.
-    private func preAccessDirectories() -> Bool {
-        let fm = FileManager.default
-        let tccProtectedDirs = [
-            NSHomeDirectory() + "/Desktop",
-            NSHomeDirectory() + "/Documents",
-        ]
-
-        for dir in tccProtectedDirs {
-            if fm.fileExists(atPath: dir) {
-                if (try? fm.contentsOfDirectory(atPath: dir)) == nil {
-                    return false
-                }
-            }
-        }
-
-        return true
-    }
-
-    /// Force access to TCC-protected directories to trigger the macOS consent dialog.
-    /// Simply opening System Settings does NOT grant permission — the app must actually
-    /// attempt file access so macOS shows its native "would like to access" dialog.
-    private func requestFilesAndFoldersPermission() {
-        let fm = FileManager.default
-        let tccProtectedDirs = [
-            NSHomeDirectory() + "/Desktop",
-            NSHomeDirectory() + "/Documents",
-        ]
-
-        for dir in tccProtectedDirs {
-            if fm.fileExists(atPath: dir) {
-                // This triggers the TCC consent dialog for each protected directory
-                _ = try? fm.contentsOfDirectory(atPath: dir)
-            }
-        }
     }
 
     private func openSettings(_ key: String) {
@@ -921,12 +991,51 @@ struct OnboardingWindow: View {
                     closeWindow()
                 })
                     .padding(.horizontal, 48)
-                    .padding(.bottom, 20)
+                    .padding(.bottom, 16)
+
+                remoteLimitsCallout
+                    .padding(.horizontal, 48)
+                    .padding(.bottom, 16)
 
                 readyDismissButton
                     .padding(.bottom, 16)
             }
         }
+    }
+
+    /// A one-paragraph honest disclosure about the hard limit of
+    /// remote control on macOS: synthetic keystrokes into secure text
+    /// fields (admin password, FileVault, Keychain) are blocked by
+    /// WindowServer, so if one of those appears while the user is
+    /// away from the Mac, Tarsy cannot dismiss it for them. This
+    /// applies to TeamViewer, AnyDesk, and every other remote control
+    /// tool on macOS — it's a platform security decision, not a
+    /// Tarsy limitation — but users deserve to know up front.
+    private var remoteLimitsCallout: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .font(TarsyTheme.font(size: 10))
+                Text("one limit worth knowing")
+                    .font(TarsyTheme.font(size: 11, weight: .medium))
+            }
+            .foregroundColor(Theme.textPrimary)
+
+            Text("if macOS asks for your admin password while you're away (e.g. to install something or change a system setting), Tarsy can see the prompt and will notify you — but it cannot type your password for you. macOS blocks remote tools from touching password fields. handle those next time you're at your mac. everything else is covered.")
+                .font(TarsyTheme.font(size: 10))
+                .foregroundColor(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .lineSpacing(2)
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Theme.bgCard)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Theme.border, lineWidth: 1)
+                )
+        )
     }
 
     @State private var readyLogoVisible = false

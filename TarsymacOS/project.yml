@@ -30,6 +30,11 @@ targets:
         LSUIElement: true
         LSApplicationCategoryType: "public.app-category.developer-tools"
         NSAppleEventsUsageDescription: "Tarsy needs to control your browser to manage tabs and navigate pages."
+        NSDesktopFolderUsageDescription: "Tarsy runs AI coding agents that need to read and write project files on your Desktop. Without this, agents will fail the moment they touch a file here and you will not be able to approve it while you are away from your Mac."
+        NSDocumentsFolderUsageDescription: "Tarsy runs AI coding agents that need to read and write project files in Documents. Without this, agents will fail the moment they touch a file here and you will not be able to approve it while you are away from your Mac."
+        NSDownloadsFolderUsageDescription: "Tarsy runs AI coding agents that need to read files in Downloads (package caches, installers, cloned repos). Without this, agents will fail the moment they touch a file here and you will not be able to approve it while you are away from your Mac."
+        NSRemovableVolumesUsageDescription: "Tarsy may need to access projects stored on external drives. Without this, agents will fail on removable-volume projects and you will not be able to approve it remotely."
+        NSNetworkVolumesUsageDescription: "Tarsy may need to access projects stored on network shares. Without this, agents will fail on network-volume projects and you will not be able to approve it remotely."
         ITSAppUsesNonExemptEncryption: false
         ATSApplicationFontsPath: Fonts
         CFBundleURLTypes:
