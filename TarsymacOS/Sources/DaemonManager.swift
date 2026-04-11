@@ -911,13 +911,15 @@ class DaemonManager: ObservableObject {
             )
         // Security
         case .securityRotateSecret:
-            // Legacy rotation action — under Phase 3 the machine identity is a
-            // P-256 keypair in Secure Enclave and rotation is not yet wired up.
-            // Ack with status=ok so the iOS button doesn't spin; re-rotating
-            // the keypair is a tracked follow-up in docs/SECURITY_ROADMAP.md.
-            log("securityRotateSecret: no-op (keypair rotation not implemented)")
+            // Wipes the P-256 keypair in Secure Enclave (or Keychain
+            // fallback), creates a fresh one, uploads the new public key
+            // via register_machine_public_key, and reconnects the relay so
+            // the new identity is immediately exercised.
+            let ok = await rotateMachineKeypair()
             await sendToClientOrRelay(
-                WSPacket(action: .securityRotateResult, payload: ["status": "ok"], id: packet.id),
+                WSPacket(action: .securityRotateResult,
+                         payload: ["status": ok ? "ok" : "error"],
+                         id: packet.id),
                 to: clientId
             )
         case .securityRotateResult, .securityFingerprintUpdate:
@@ -2432,6 +2434,53 @@ class DaemonManager: ObservableObject {
     // Legacy `ensureMachineSecret` / `rotateMachineSecret` removed in
     // migration 037 — machine auth is now P-256 keypair via
     // `ensureMachinePublicKey` above.
+
+    /// Wipes and regenerates the machine identity keypair, uploads the new
+    /// public key to Supabase, and reconnects the relay with the new
+    /// signed-timestamp identity. Triggered by the `securityRotateSecret`
+    /// WSAction (iOS rotation button). Returns true on full success.
+    private func rotateMachineKeypair() async -> Bool {
+        guard let mId = machineId, let uId = ownerUserId else {
+            log("rotateMachineKeypair: no machine/user id")
+            return false
+        }
+        do {
+            let newStore = try MachineKeyStore.rotate()
+            self.machineKeyStore = newStore
+            log("rotateMachineKeypair: keypair rotated (backend=\(newStore.backend))")
+
+            // Upload the freshly generated public key. ensureMachinePublicKey
+            // diffs against the DB and only writes if different — after a
+            // rotate it will always write.
+            await ensureMachinePublicKey(userId: uId, machineId: mId)
+
+            // Rebuild the MachineAuthIdentity from the new store and reconnect
+            // the relay so the next signed-timestamp is signed by the new key.
+            guard let session = try? await supabase.auth.session else {
+                log("rotateMachineKeypair: no session, cannot reconnect relay")
+                return false
+            }
+            let pub = newStore.publicKeyDER
+            let identity = MachineAuthIdentity(
+                machineId: mId.uuidString.lowercased(),
+                userId: session.user.id.uuidString.lowercased(),
+                publicKeyDER: pub,
+                signer: { [weak newStore] message in
+                    guard let newStore else {
+                        throw NSError(domain: "DaemonManager", code: -1,
+                                      userInfo: [NSLocalizedDescriptionKey: "key store deallocated"])
+                    }
+                    return try await newStore.sign(message: message)
+                }
+            )
+            await relayClient.connect(token: session.accessToken, machineIdentity: identity)
+            log("rotateMachineKeypair: relay reconnected with new identity")
+            return true
+        } catch {
+            log("rotateMachineKeypair: FAILED — \(error)")
+            return false
+        }
+    }
 
     /// Returns the Mac's unique hardware UUID from IOKit
     private func getHardwareUUID() -> String? {

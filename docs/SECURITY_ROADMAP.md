@@ -8,8 +8,9 @@ All three initial phases (realtime leak fix, APNs + pairing encryption,
 machine keypair auth) plus the post-cleanup migrations 036 / 037 are
 deployed to production. The legacy plaintext columns and the dual-auth
 relay branch are gone. The system runs only on the new RPC + signature
-paths now. Remaining work is nice-to-haves (key rotation, multi-device
-push, audit cadence).
+paths now. macOS keypair rotation is wired up. Remaining work is
+nice-to-haves (vault secret rotation, multi-device push, audit cadence,
+Windows keypair rotation parity).
 
 ## Completed
 
@@ -168,26 +169,55 @@ RPC + signature paths.
   preserved, all 8 RPCs preserved, legacy unique constraints gone,
   new unique constraints intact, machine_tokens row count sanity.
 
+### Machine keypair rotation — macOS done, Windows pending
+
+**macOS** — wired. The `security:rotate_machine_secret` WSAction
+handler in `DaemonManager.swift` calls `rotateMachineKeypair()`, which:
+1. Wipes both Keychain accounts (`p256-se-v1` and `p256-sw-v1`) via
+   `MachineKeyStore.rotate()` and creates a fresh keypair in Secure
+   Enclave (or the software fallback).
+2. Calls `ensureMachinePublicKey` which writes the new public key
+   through the `register_machine_public_key` RPC. The RPC's `ON
+   CONFLICT (machine_id) DO UPDATE` bumps `rotated_at` to `now()`.
+3. Rebuilds the `MachineAuthIdentity` from the new store and calls
+   `relayClient.connect(token:machineIdentity:)`, which reconnects the
+   WebSocket and sends a fresh signed timestamp signed by the new
+   private key.
+4. Acks the iOS button with `securityRotateResult` carrying
+   `status: ok` (or `error` if any step failed).
+
+The old SE key handle is removed from Keychain; the actual SE key
+material becomes orphaned and is GC'd by the OS over time. SE has
+plenty of slot capacity for the realistic rotation cadence (a handful
+of times per machine lifetime, typically only on a compromise
+incident).
+
+**Windows** — `MachineKeyStore.cs` does NOT yet have a `Rotate()`
+method, and `TarsyWindows/Services/DaemonManager.cs` has no packet
+dispatcher case for `SecurityRotateSecret`. Adding it would mirror the
+macOS work:
+1. `MachineKeyStore.cs.Rotate()` — open + `Delete()` the existing
+   `CngKey` for both providers, then call `LoadOrCreate()`.
+2. New `RotateMachineKeypair()` in `MachineService.cs` (or wherever
+   the daemon dispatches WSAction packets) that wipes, uploads via
+   the same REST RPC the original `EnsureMachineKey` uses, and
+   reconnects the relay.
+
+Low priority — only matters if a Windows user wants to rotate from
+the iOS UI. Macros the macOS implementation is the one that mattered
+because that's the platform with the no-op handler that the iOS UI
+already targets.
+
 ## Deferred — follow-up work
 
-### Rotation of the machine keypair
+### Vault secret rotation
 
-The `security:rotate_machine_secret` WSAction still exists in the wire
-protocol (Swift + C# enums + relay allowlist) for iOS UI compatibility.
-The macOS handler is currently a logged no-op that returns
-`status: ok`. Wiring it up would mean:
-
-1. Add a `rotate()` method to `MachineKeyStore` (both Swift and C#)
-   that deletes the Keychain / CngKey entry and re-runs
-   `loadOrCreate()`.
-2. Call it from the `securityRotateSecret` handler in
-   `DaemonManager.swift`, then upload via
-   `register_machine_public_key` and reconnect the relay so the new
-   keypair is exercised.
-3. (Optional) Mirror in TarsyWindows.
-
-Low priority — only needed on a compromise incident. Tracked as a
-pending TODO since the rotation is currently silently no-op.
+There's still no first-class story for rotating
+`apns_token_enc_key` or `pairing_hmac_pepper` in
+`vault.secrets`. Currently they are immutable for the life of the
+project. Plan documented earlier (versioned secret names,
+multi-version decrypt fallback, batched re-encrypt). Only relevant on
+a compromise incident or regulatory requirement.
 
 ### Key rotation infrastructure
 

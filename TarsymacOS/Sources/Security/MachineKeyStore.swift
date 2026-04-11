@@ -114,7 +114,33 @@ public actor MachineKeyStore {
         return (.software(key), key.publicKey.derRepresentation, "software-keychain")
     }
 
+    // MARK: - Rotation
+
+    /// Wipes the existing P-256 keypair from secure storage and creates a
+    /// fresh one. Returns a brand-new MachineKeyStore — the caller should
+    /// replace its reference to the old store and re-upload the new public
+    /// key via `register_machine_public_key` before reconnecting the relay.
+    ///
+    /// On Secure Enclave devices the old key handle is removed from Keychain.
+    /// The actual SE key material becomes orphaned and will be GC'd by the OS
+    /// over time; SE has plenty of slot capacity for the realistic rotation
+    /// frequency (a handful of times in a machine's lifetime, on incident).
+    public static func rotate() throws -> MachineKeyStore {
+        keychainDelete(account: keychainAccountSE)
+        keychainDelete(account: keychainAccountSW)
+        return try MachineKeyStore()
+    }
+
     // MARK: - Keychain helpers
+
+    private static func keychainDelete(account: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecAttrAccount as String: account,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
 
     private static func keychainLoad(account: String) -> Data? {
         let query: [String: Any] = [
