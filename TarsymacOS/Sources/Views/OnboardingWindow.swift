@@ -991,51 +991,12 @@ struct OnboardingWindow: View {
                     closeWindow()
                 })
                     .padding(.horizontal, 48)
-                    .padding(.bottom, 16)
-
-                remoteLimitsCallout
-                    .padding(.horizontal, 48)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 20)
 
                 readyDismissButton
                     .padding(.bottom, 16)
             }
         }
-    }
-
-    /// A one-paragraph honest disclosure about the hard limit of
-    /// remote control on macOS: synthetic keystrokes into secure text
-    /// fields (admin password, FileVault, Keychain) are blocked by
-    /// WindowServer, so if one of those appears while the user is
-    /// away from the Mac, Tarsy cannot dismiss it for them. This
-    /// applies to TeamViewer, AnyDesk, and every other remote control
-    /// tool on macOS — it's a platform security decision, not a
-    /// Tarsy limitation — but users deserve to know up front.
-    private var remoteLimitsCallout: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "info.circle")
-                    .font(TarsyTheme.font(size: 10))
-                Text("one limit worth knowing")
-                    .font(TarsyTheme.font(size: 11, weight: .medium))
-            }
-            .foregroundColor(Theme.textPrimary)
-
-            Text("if macOS asks for your admin password while you're away (e.g. to install something or change a system setting), Tarsy can see the prompt and will notify you — but it cannot type your password for you. macOS blocks remote tools from touching password fields. handle those next time you're at your mac. everything else is covered.")
-                .font(TarsyTheme.font(size: 10))
-                .foregroundColor(Theme.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(2)
-        }
-        .padding(10)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Theme.bgCard)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Theme.border, lineWidth: 1)
-                )
-        )
     }
 
     @State private var readyLogoVisible = false
