@@ -320,6 +320,24 @@ class TerminalSession {
 
         try process.run()
 
+        // Install a no-op SIGINT trap so the shell survives Ctrl+C.
+        //
+        // zsh here is non-interactive (pipe stdin/stdout, no `-i`), so it has
+        // no default SIGINT handler and `process.interrupt()` — which signals
+        // zsh AND all its descendants — would otherwise terminate the shell
+        // itself, not just the foreground child. After that, the next command
+        // written to the input pipe would silently go nowhere, no sentinel
+        // would ever fire, and the iOS client would be stuck showing a
+        // spinner forever.
+        //
+        // With `trap ':' INT` the shell catches SIGINT (no-op), stays alive,
+        // and resumes executing the command list — so the post-command
+        // sentinel printf still fires and iOS clears its running state.
+        // Children still die on SIGINT: POSIX `exec` resets *caught* signal
+        // handlers to their default disposition in the new process, so
+        // `sleep`/`npx`/etc. are terminated as normal.
+        inputPipe.fileHandleForWriting.write(Data("trap ':' INT\n".utf8))
+
         // After the shell starts (and .zshrc finishes), force cd to the correct
         // workspace directory. This guarantees the right cwd even when the user's
         // shell profile contains a `cd` that overrides currentDirectoryURL.
