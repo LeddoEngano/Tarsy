@@ -18,6 +18,13 @@ struct ContentView: View {
     @State private var isAutoConnecting = false
     @AppStorage("hasSeenNotificationPrimer") private var hasSeenNotificationPrimer = false
 
+    /// Safety net for unexpected system dialogs on the Mac (TCC /
+    /// Automation / Keychain prompts that slipped past onboarding).
+    /// Surfaces a banner + sheet so the user can approve them without
+    /// being at the Mac.
+    @StateObject private var systemDialogService = SystemDialogService()
+    @State private var showSystemDialogSheet = false
+
     var body: some View {
         ZStack {
             Group {
@@ -26,6 +33,10 @@ struct ContentView: View {
                 } else if authManager.isAuthenticated {
                     VStack(spacing: 0) {
                         StatusBanner()
+                        SystemDialogBanner(
+                            service: systemDialogService,
+                            showSheet: $showSystemDialogSheet
+                        )
                         DashboardView()
                     }
                 } else {
@@ -97,6 +108,10 @@ struct ContentView: View {
                 // Re-request workspace state so UI syncs after reconnection
                 connectionManager?.send(WSPacket(action: .workspaceList))
             }
+            // Attach the system dialog safety net to the active
+            // connection. `attach` re-subscribes idempotently so it's
+            // safe to call on every onAppear.
+            systemDialogService.attach(to: connectionManager)
 
             // Global listener for Live Activity updates — runs even when WorkspaceView is not on screen.
             // This catches engineComplete/engineError replayed on reconnect so activities don't stay stuck.
@@ -150,6 +165,14 @@ struct ContentView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Cannot send password — encrypted connection not established. Please reconnect and try again.")
+        }
+        .sheet(isPresented: $showSystemDialogSheet) {
+            if let dialog = systemDialogService.currentDialog {
+                SystemDialogSheet(dialog: dialog) { label in
+                    systemDialogService.click(label, on: dialog)
+                    showSystemDialogSheet = false
+                }
+            }
         }
     }
 

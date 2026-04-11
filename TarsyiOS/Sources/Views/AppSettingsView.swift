@@ -15,6 +15,7 @@ struct AppSettingsView: View {
     @State private var permissionConfig = AgentPermissionConfig.load()
     @State private var displayNameInput = ""
     @State private var isEditingName = false
+    @State private var showPermissionDoctor = false
 
 
     var body: some View {
@@ -226,6 +227,37 @@ struct AppSettingsView: View {
                         }
                         .cornerRadius(10)
 
+                        // Mac Permissions (Permission Doctor)
+                        sectionHeader("Mac Permissions")
+
+                        Button {
+                            showPermissionDoctor = true
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "stethoscope")
+                                    .font(TarsyTheme.font(size: 16))
+                                    .foregroundColor(TarsyTheme.textSecondary)
+                                    .frame(width: 28)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Permission Doctor")
+                                        .font(TarsyTheme.monoFontSmall)
+                                        .foregroundColor(TarsyTheme.textPrimary)
+                                    Text("live status of your mac's permissions")
+                                        .font(TarsyTheme.font(size: 9))
+                                        .foregroundColor(TarsyTheme.textSecondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(TarsyTheme.font(size: 10))
+                                    .foregroundColor(TarsyTheme.textSecondary)
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(TarsyTheme.backgroundSecondary)
+                        }
+                        .buttonStyle(.plain)
+                        .cornerRadius(10)
+
                         // About Section
                         sectionHeader("About")
 
@@ -265,6 +297,10 @@ struct AppSettingsView: View {
         }
         .sheet(isPresented: $showMCPStore) {
             MCPStoreView(workspacePath: nil)
+                .environmentObject(connectionManager)
+        }
+        .sheet(isPresented: $showPermissionDoctor) {
+            PermissionDoctorView()
                 .environmentObject(connectionManager)
         }
     }
