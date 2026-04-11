@@ -74,11 +74,16 @@ private struct TerminalInputField: UIViewRepresentable {
         func textFieldShouldReturn(_ textField: UITextField) -> Bool {
             let command = textField.text ?? ""
             guard !command.isEmpty else { return false }
-            parent.onSubmit(command)
+            // Clear the field AND the binding synchronously BEFORE notifying
+            // the parent. `onSubmit` mutates parent state (chatService,
+            // running flag, etc.) which schedules a SwiftUI re-render; if we
+            // left `parent.text` pointing at the old command, `updateUIView`
+            // would see `uiView.text != text` on that re-render and restore
+            // the old command into the field. Clearing first keeps the
+            // re-render a no-op for the text field.
             textField.text = ""
-            DispatchQueue.main.async {
-                self.parent.text = ""
-            }
+            parent.text = ""
+            parent.onSubmit(command)
             return false
         }
 
@@ -138,6 +143,9 @@ struct TerminalContentView: View {
     /// Absolute path of the current working directory for this terminal tab.
     /// Driven by the parent so it stays in sync as the user issues `cd` commands.
     var currentDirectory: String
+    /// True while a command is executing on this terminal tab. Drives the
+    /// in-terminal cancel/spinner affordance that mirrors the agent tab UX.
+    var isRunning: Bool
     var onSendCommand: (String) -> Void
     /// Called with the extracted partial word (not the full input)
     var onRequestCompletion: (String) -> Void
@@ -228,113 +236,138 @@ struct TerminalContentView: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    // Push content to bottom when there's little output
-                    // Uses flexible spacer that shrinks as content grows
-                    Color.clear
-                        .frame(height: max(0, geo.size.height - 80))
-
-                    // Path header
-                    Text(currentDirectory)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
-                        .padding(.horizontal, 12)
-                        .padding(.top, 10)
-                        .padding(.bottom, 6)
-
-                    // Terminal output lines (lazily rendered from cache)
-                    ForEach(cachedLines) { line in
-                        Text(line.text)
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundColor(line.isCommand ? TarsyTheme.textSecondary : TarsyTheme.textPrimary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(spacing: 0) {
+                // Scrollable terminal output — path header + history lines.
+                // `defaultScrollAnchor(.bottom)` keeps short output glued to
+                // the bottom of the scroll area (right above the pinned
+                // prompt) and auto-sticks to the bottom as new chunks arrive.
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        // Path header
+                        Text(currentDirectory)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(TarsyTheme.textSecondary.opacity(0.5))
                             .padding(.horizontal, 12)
-                            .textSelection(.enabled)
-                    }
+                            .padding(.top, 10)
+                            .padding(.bottom, 6)
 
-                    // Autocomplete suggestions (above prompt)
-                    if !completions.isEmpty {
-                        completionOverlay
-                            .id("completions")
-                            .transition(.opacity.combined(with: .move(edge: .bottom)))
-                    }
-
-                    // Inline prompt + input
-                    HStack(spacing: 0) {
-                        Text("\(promptDirectory) $ ")
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundColor(TarsyTheme.textSecondary)
-                            .lineLimit(1)
-
-                        TerminalInputField(
-                            text: $inputText,
-                            isActive: $isKeyboardActive,
-                            onSubmit: { command in
-                                Haptics.light()
-                                historyIndex = -1
-                                savedInput = ""
-                                onSendCommand(command)
-                            }
-                        )
-                        .frame(height: 20)
-
-                        Spacer(minLength: 4)
-
-                        // Ctrl+C + History arrows
-                        HStack(spacing: 4) {
-                            Button(action: {
-                                Haptics.medium()
-                                onInterrupt()
-                            }) {
-                                Text("⌃C")
-                                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                    .foregroundColor(TarsyTheme.textSecondary)
-                                    .frame(width: 30, height: 22)
-                                    .background(TarsyTheme.backgroundTertiary.opacity(0.6))
-                                    .cornerRadius(5)
-                            }
-
-                            HStack(spacing: 2) {
-                                Button(action: historyUp) {
-                                    Image(systemName: "chevron.up")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundColor(commandHistory.isEmpty ? TarsyTheme.textSecondary.opacity(0.2) : TarsyTheme.textSecondary)
-                                        .frame(width: 26, height: 22)
-                                }
-                                .disabled(commandHistory.isEmpty)
-
-                                Button(action: historyDown) {
-                                    Image(systemName: "chevron.down")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundColor(historyIndex < 0 ? TarsyTheme.textSecondary.opacity(0.2) : TarsyTheme.textSecondary)
-                                        .frame(width: 26, height: 22)
-                                }
-                                .disabled(historyIndex < 0)
-                            }
-                            .background(TarsyTheme.backgroundTertiary.opacity(0.6))
-                            .cornerRadius(5)
+                        // Terminal output lines (lazily rendered from cache)
+                        ForEach(cachedLines) { line in
+                            Text(line.text)
+                                .font(.system(size: 13, design: .monospaced))
+                                .foregroundColor(line.isCommand ? TarsyTheme.textSecondary : TarsyTheme.textPrimary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 12)
+                                .textSelection(.enabled)
                         }
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id("terminal-bottom")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: .infinity)
+                .defaultScrollAnchor(.bottom)
+                .scrollDismissesKeyboard(.interactively)
+
+                // Autocomplete suggestions — pinned above the running bar /
+                // prompt so they sit right next to the input while typing.
+                if !completions.isEmpty {
+                    completionOverlay
+                        .transition(.opacity.combined(with: .move(edge: .bottom)))
+                }
+
+                // Running bar: cancel button + spinner, right-aligned.
+                // Only visible while a command is executing.
+                if isRunning {
+                    HStack(spacing: 8) {
+                        Spacer()
+                        Button(action: {
+                            Haptics.medium()
+                            onInterrupt()
+                        }) {
+                            Text("cancel")
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundColor(TarsyTheme.accentTerracotta)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background(TarsyTheme.accentTerracotta.opacity(0.12))
+                                .cornerRadius(8)
+                        }
+                        .accessibilityLabel("Cancel running command")
+
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(TarsyTheme.accentTerracotta)
+                            .frame(width: 20, height: 20)
                     }
                     .padding(.horizontal, 12)
-                    .padding(.top, 4)
-                    .padding(.bottom, 12)
-                    .id("terminal-prompt")
-
-                    Color.clear
-                        .frame(height: 1)
-                        .id("terminal-bottom")
+                    .padding(.top, 6)
+                    .padding(.bottom, 2)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
+
+                // Pinned prompt + input. Sits at the bottom of the terminal
+                // area and rides up with the keyboard via the outer
+                // `.padding(.bottom, keyboardHeight)` applied by the parent.
+                HStack(spacing: 0) {
+                    Text("\(promptDirectory) $ ")
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .lineLimit(1)
+
+                    TerminalInputField(
+                        text: $inputText,
+                        isActive: $isKeyboardActive,
+                        onSubmit: { command in
+                            Haptics.light()
+                            historyIndex = -1
+                            savedInput = ""
+                            onSendCommand(command)
+                        }
+                    )
+                    .frame(height: 20)
+
+                    Spacer(minLength: 4)
+
+                    // History arrows only — cancel lives in the running bar
+                    // above so it's only visible while a command is actually
+                    // executing.
+                    HStack(spacing: 2) {
+                        Button(action: historyUp) {
+                            Image(systemName: "chevron.up")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(commandHistory.isEmpty ? TarsyTheme.textSecondary.opacity(0.2) : TarsyTheme.textSecondary)
+                                .frame(width: 26, height: 22)
+                        }
+                        .disabled(commandHistory.isEmpty)
+
+                        Button(action: historyDown) {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(historyIndex < 0 ? TarsyTheme.textSecondary.opacity(0.2) : TarsyTheme.textSecondary)
+                                .frame(width: 26, height: 22)
+                        }
+                        .disabled(historyIndex < 0)
+                    }
+                    .background(TarsyTheme.backgroundTertiary.opacity(0.6))
+                    .cornerRadius(5)
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .padding(.bottom, 12)
             }
             .background(Color(hex: "0a0a0a"))
-            .scrollDismissesKeyboard(.interactively)
             .contentShape(Rectangle())
             .onTapGesture {
-                if !isKeyboardActive {
-                    isKeyboardActive = true
-                }
+                // Tap inside the terminal area but outside the input field
+                // toggles the keyboard: activates if currently down,
+                // dismisses if currently up. Taps that hit the UITextField
+                // itself are consumed by UIKit and never reach this gesture,
+                // so focusing the field stays natural.
+                isKeyboardActive.toggle()
             }
             // Single scroll trigger — updateCounter fires for both new messages and chunk appends
             .onChange(of: chatService.updateCounter) { _, _ in
@@ -352,11 +385,6 @@ struct TerminalContentView: View {
                     }
                 }
             }
-            .onChange(of: completions) { _, _ in
-                withAnimation(.easeOut(duration: 0.15)) {
-                    proxy.scrollTo("terminal-bottom", anchor: .bottom)
-                }
-            }
             .onChange(of: inputText) { _, newValue in
                 scheduleCompletion(for: newValue)
             }
@@ -368,7 +396,6 @@ struct TerminalContentView: View {
                 debounceTask?.cancel()
             }
         }
-        } // GeometryReader
     }
 
     // MARK: - Auto-completion Debounce

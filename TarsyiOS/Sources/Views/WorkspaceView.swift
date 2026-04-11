@@ -101,6 +101,12 @@ struct WorkspaceView: View {
     /// Current working directory per terminal tab (tabId → absolute path).
     /// Updated client-side by parsing `cd` commands the user issues.
     @State private var terminalCwds: [String: String] = [:]
+    /// Tab IDs for terminal tabs that currently have a command executing.
+    /// Set on command submit and cleared when the macOS daemon emits a
+    /// `terminalPromptReady` packet — the sentinel-driven signal that
+    /// replaced the old silence-timer heuristic (which misfired on
+    /// commands with quiet stretches like `npx expo run:ios`).
+    @State private var runningTerminals: Set<String> = []
 
     /// Returns true if the packet's sessionId matches the currently active tab
     private func isActiveTabSession(_ packet: WSPacket) -> Bool {
@@ -810,6 +816,7 @@ struct WorkspaceView: View {
                             chatService: chatService,
                             isKeyboardActive: $isTerminalInputActive,
                             currentDirectory: terminalCwd(for: currentTab.id),
+                            isRunning: runningTerminals.contains(currentTab.id),
                             onSendCommand: { command in
                                 terminalCompletions = []
                                 sendTerminalCommand(command)
@@ -930,6 +937,7 @@ struct WorkspaceView: View {
                             chatService: chatService,
                             isKeyboardActive: $isTerminalInputActive,
                             currentDirectory: terminalCwd(for: currentTab.id),
+                            isRunning: runningTerminals.contains(currentTab.id),
                             onSendCommand: { command in
                                 terminalCompletions = []
                                 sendTerminalCommand(command)
@@ -1073,6 +1081,7 @@ struct WorkspaceView: View {
                 Rectangle()
                     .fill(TarsyTheme.textSecondary.opacity(0.15))
                     .frame(height: 0.5)
+                    .padding(.bottom, 8)
             }
 
             // Info bar
@@ -1130,10 +1139,49 @@ struct WorkspaceView: View {
         .background(currentTab.type == .terminal ? Color(hex: "0a0a0a") : TarsyTheme.backgroundPrimary)
     }
 
+    /// Right-aligned "running" bar with a cancel button next to a spinner.
+    /// Used above the chat text editor (agent tabs) and above the terminal
+    /// prompt row to give the user a consistent way to abort an in-flight
+    /// command across both surfaces.
+    @ViewBuilder
+    private func runningBar(onCancel: @escaping () -> Void) -> some View {
+        HStack(spacing: 8) {
+            Spacer()
+            Button(action: onCancel) {
+                Text("cancel")
+                    .font(TarsyTheme.font(size: 12, weight: .semibold))
+                    .foregroundColor(TarsyTheme.accentTerracotta)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(TarsyTheme.accentTerracotta.opacity(0.12))
+                    .cornerRadius(8)
+            }
+            .accessibilityLabel("Cancel running command")
+
+            ProgressView()
+                .scaleEffect(0.7)
+                .tint(TarsyTheme.accentTerracotta)
+                .frame(width: 20, height: 20)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+    }
+
     private var inputBar: some View {
         VStack(spacing: 0) {
             // Input bar
             VStack(spacing: 0) {
+                // "Running" bar above the text editor — visible while the
+                // agent is working. Cancel button sits immediately left of
+                // the spinner, both right-aligned.
+                if isAgentThinking || agentActivity != nil {
+                    runningBar(onCancel: {
+                        Haptics.medium()
+                        interruptEngine()
+                    })
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
                 // Text field
                 ZStack(alignment: .topLeading) {
                     if messageText.isEmpty {
@@ -1165,23 +1213,6 @@ struct WorkspaceView: View {
                                 .frame(width: 36, height: 36)
                         }
                         .accessibilityLabel("Add attachment")
-
-                        // Ctrl+C interrupt button — visible when agent is working
-                        if isAgentThinking || agentActivity != nil {
-                            Button(action: {
-                                Haptics.medium()
-                                interruptEngine()
-                            }) {
-                                Text("⌃C")
-                                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                                    .foregroundColor(TarsyTheme.accentTerracotta)
-                                    .frame(width: 36, height: 36)
-                                    .background(TarsyTheme.accentTerracotta.opacity(0.12))
-                                    .cornerRadius(8)
-                            }
-                            .transition(.scale(scale: 0.5).combined(with: .opacity))
-                            .accessibilityLabel("Interrupt agent")
-                        }
                     }
 
                     Spacer()
@@ -1283,6 +1314,8 @@ struct WorkspaceView: View {
             .if_iOS26GlassEffect()
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .animation(.easeInOut(duration: 0.2), value: isAgentThinking)
+            .animation(.easeInOut(duration: 0.2), value: agentActivity)
         }
         .background(TarsyTheme.backgroundPrimary)
         .overlay(alignment: .topLeading) {
@@ -1586,6 +1619,22 @@ struct WorkspaceView: View {
         }
     }
 
+    /// Mark a terminal tab as running a command. Cleared by either an
+    /// explicit `interruptTerminal` or the `terminalPromptReady` packet
+    /// from macOS — whichever happens first.
+    private func markTerminalRunning(_ tabId: String) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            runningTerminals.insert(tabId)
+        }
+    }
+
+    /// Immediately clear the running flag for a terminal tab.
+    private func clearTerminalRunning(_ tabId: String) {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            _ = runningTerminals.remove(tabId)
+        }
+    }
+
     private func sendTerminalCommand(_ command: String) {
         // Optimistically update the tab's cwd if the command is a `cd`.
         // The shell on the macOS side authoritatively changes directory;
@@ -1594,6 +1643,8 @@ struct WorkspaceView: View {
         if let newCwd = resolveCdCommand(command, relativeTo: priorCwd) {
             terminalCwds[currentTab.id] = newCwd
         }
+
+        markTerminalRunning(currentTab.id)
 
         let msg = ChatMessage(
             workspaceId: workspace.id,
@@ -1693,6 +1744,7 @@ struct WorkspaceView: View {
             // No session yet — clear any queued command so it doesn't run
             pendingTerminalCommands.removeValue(forKey: currentTab.id)
         }
+        clearTerminalRunning(currentTab.id)
     }
 
     private func interruptEngine() {
@@ -2007,6 +2059,16 @@ struct WorkspaceView: View {
                         let range = NSRange(output.startIndex..., in: output)
                         let cleaned = Self.ansiRegex.stringByReplacingMatches(in: output, range: range, withTemplate: "")
                         chatService.addAssistantChunk(workspaceId: workspace.id, tabId: termTabId, content: cleaned)
+                    }
+
+                case .terminalPromptReady:
+                    // macOS wraps every command with a sentinel printf, so
+                    // we get a precise "shell is ready for next input"
+                    // signal instead of guessing from output silence. Clear
+                    // the matching tab's running state.
+                    let readySid = packet.payload?["sessionId"] ?? ""
+                    if let readyTabId = tabId(forSession: readySid) {
+                        clearTerminalRunning(readyTabId)
                     }
 
                 case .terminalCompleteResult:

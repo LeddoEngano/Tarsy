@@ -41,6 +41,13 @@ actor TerminalSessionManager {
         sessions[sessionId]?.onOutput = handler
     }
 
+    /// Install a callback that fires every time the wrapped-command
+    /// sentinel is seen in the session's output stream — i.e. the
+    /// shell has just finished a command and is ready for the next one.
+    func setPromptReadyHandler(for sessionId: String, handler: @escaping @Sendable () -> Void) {
+        sessions[sessionId]?.onPromptReady = handler
+    }
+
     // MARK: - Claude Code Sessions
 
     func createClaudeSession(
@@ -195,12 +202,38 @@ class TerminalSession {
     let inputPipe: Pipe
     let outputPipe: Pipe
     var onOutput: (@Sendable (String) -> Void)?
+    /// Fired whenever the sentinel marker appears in the output stream,
+    /// i.e. every time a user-issued command finishes and the shell is
+    /// ready for the next input. Used by the iOS client to clear the
+    /// "cancel" / spinner affordance.
+    var onPromptReady: (@Sendable () -> Void)?
+
+    /// Per-session unique token. We wrap every `sendInput` command with
+    /// `; printf '\n__TARSY_DONE_<token>__\n'` so that when the command
+    /// list finishes, zsh emits a marker we can detect in the output
+    /// stream. A UUID suffix guarantees the marker can never collide
+    /// with real command output.
+    private let sentinelToken: String
+    /// Fully-formed marker (what we scan for in the output stream).
+    private let sentinelMarker: String
+    /// Bytes we scan for when detecting the marker. Computed once.
+    private let sentinelMarkerCount: Int
+    /// Output accumulator for marker detection. Chunks from the pipe
+    /// may split a marker in half, so we hold back up to
+    /// `sentinelMarkerCount - 1` trailing bytes until we either see
+    /// more data (confirming / rejecting the match) or the session
+    /// closes.
+    private var outputBuffer: String = ""
 
     init(id: String, workingDirectory: String? = nil) throws {
         self.id = id
         self.process = Process()
         self.inputPipe = Pipe()
         self.outputPipe = Pipe()
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        self.sentinelToken = token
+        self.sentinelMarker = "\u{1E}__TARSY_DONE_\(token)__\u{1E}"
+        self.sentinelMarkerCount = self.sentinelMarker.count
 
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
         process.arguments = ["-l"]
@@ -282,7 +315,7 @@ class TerminalSession {
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            self?.onOutput?(text)
+            self?.processIncomingOutput(text)
         }
 
         try process.run()
@@ -300,7 +333,22 @@ class TerminalSession {
     }
 
     func sendInput(_ input: String) {
-        guard let data = "\(input)\n".data(using: .utf8) else { return }
+        let sanitized = input.trimmingCharacters(in: .newlines)
+        guard !sanitized.isEmpty else { return }
+
+        // Wrap every command in a brace group and append a sentinel
+        // printf on the same command list. When zsh finishes executing
+        // the list (success, failure, even silent fall-through) it
+        // prints the sentinel, which the output scanner uses as the
+        // "prompt is ready" signal for the iOS client.
+        //
+        // `{ ... ; }` is a command group, NOT a subshell — it runs in
+        // the parent shell, so user `cd`s and variable assignments keep
+        // working. ASCII Record Separator (\x1E) is used as the marker
+        // delimiter so it can never collide with real command output.
+        // `printf` is a zsh builtin, so the wrap is essentially free.
+        let wrapped = "{ \(sanitized); }; printf '\\036__TARSY_DONE_\(sentinelToken)__\\036'\n"
+        guard let data = wrapped.data(using: .utf8) else { return }
         inputPipe.fileHandleForWriting.write(data)
     }
 
@@ -311,5 +359,53 @@ class TerminalSession {
     func terminate() {
         process.terminate()
         outputPipe.fileHandleForReading.readabilityHandler = nil
+    }
+
+    // MARK: - Output Processing
+
+    /// Appends incoming text to the buffer, emits any sentinel-free
+    /// prefix as normal output, and fires `onPromptReady` for each
+    /// complete sentinel marker detected. Holds back up to
+    /// `sentinelMarkerCount - 1` trailing bytes so a marker split
+    /// across chunks is still caught.
+    private func processIncomingOutput(_ text: String) {
+        outputBuffer += text
+
+        // Drain every complete marker currently in the buffer.
+        while let range = outputBuffer.range(of: sentinelMarker) {
+            let before = String(outputBuffer[..<range.lowerBound])
+            if !before.isEmpty { onOutput?(before) }
+            outputBuffer.removeSubrange(outputBuffer.startIndex..<range.upperBound)
+            onPromptReady?()
+        }
+
+        // After draining, the buffer may still contain a partial marker
+        // at its tail. Figure out the longest suffix of the buffer that
+        // is also a prefix of the marker, and hold back exactly that
+        // many characters. Everything before it is safe to emit.
+        let holdBack = longestMarkerPrefixSuffix()
+        if holdBack < outputBuffer.count {
+            let safeEnd = outputBuffer.index(outputBuffer.endIndex, offsetBy: -holdBack)
+            let safe = String(outputBuffer[..<safeEnd])
+            if !safe.isEmpty { onOutput?(safe) }
+            outputBuffer.removeSubrange(outputBuffer.startIndex..<safeEnd)
+        }
+    }
+
+    /// Length of the longest suffix of `outputBuffer` that is also a
+    /// prefix of `sentinelMarker`. Used to hold back just enough
+    /// trailing bytes to detect a marker split across chunks without
+    /// delaying the bulk of the stream.
+    private func longestMarkerPrefixSuffix() -> Int {
+        let maxCheck = min(outputBuffer.count, sentinelMarkerCount - 1)
+        guard maxCheck > 0 else { return 0 }
+        for len in stride(from: maxCheck, through: 1, by: -1) {
+            let suffixStart = outputBuffer.index(outputBuffer.endIndex, offsetBy: -len)
+            let suffix = String(outputBuffer[suffixStart...])
+            if sentinelMarker.hasPrefix(suffix) {
+                return len
+            }
+        }
+        return 0
     }
 }
