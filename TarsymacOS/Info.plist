@@ -21,7 +21,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0.19</string>
+	<string>1.1.0</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -32,7 +32,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>20</string>
+	<string>21</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSApplicationCategoryType</key>
@@ -47,9 +47,9 @@
 	<string>Tarsy runs AI coding agents that need to read and write project files in Documents. Without this, agents will fail the moment they touch a file here and you will not be able to approve it while you are away from your Mac.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>Tarsy runs AI coding agents that need to read files in Downloads (package caches, installers, cloned repos). Without this, agents will fail the moment they touch a file here and you will not be able to approve it while you are away from your Mac.</string>
-	<key>NSRemovableVolumesUsageDescription</key>
-	<string>Tarsy may need to access projects stored on external drives. Without this, agents will fail on removable-volume projects and you will not be able to approve it remotely.</string>
 	<key>NSNetworkVolumesUsageDescription</key>
 	<string>Tarsy may need to access projects stored on network shares. Without this, agents will fail on network-volume projects and you will not be able to approve it remotely.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Tarsy may need to access projects stored on external drives. Without this, agents will fail on removable-volume projects and you will not be able to approve it remotely.</string>
 </dict>
 </plist>
