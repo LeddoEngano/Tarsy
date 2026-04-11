@@ -216,23 +216,19 @@ echo "    API version -> $VERSION"
 # ─── Update download redirect ──────────────────────────────────────
 echo "==> Updating download redirect..."
 
-cat > "$NEXT_CONFIG" << CONFIGEOF
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  async redirects() {
-    return [
-      {
-        source: "/download/macos",
-        destination:
-          "$VERSIONED_URL",
-        permanent: false,
-      },
-    ];
-  },
-};
+# Surgical replacement of just the Tarsy-*.dmg URL in the redirect destination.
+# Do NOT rewrite the whole file — it contains the security headers() block.
+if ! grep -q 'tarsy-releases/Tarsy-[0-9.]*\.dmg' "$NEXT_CONFIG"; then
+    echo "ERROR: Could not find Tarsy-*.dmg URL in $NEXT_CONFIG"
+    exit 1
+fi
+sed -i '' -E "s|tarsy-releases/Tarsy-[0-9.]+\.dmg|tarsy-releases/${VERSIONED_NAME}|" "$NEXT_CONFIG"
 
-export default nextConfig;
-CONFIGEOF
+# Sanity check: make sure the headers() block is still there
+if ! grep -q 'async headers()' "$NEXT_CONFIG"; then
+    echo "ERROR: security headers() block missing from $NEXT_CONFIG after update"
+    exit 1
+fi
 
 echo "    /download/macos -> $VERSIONED_NAME"
 
