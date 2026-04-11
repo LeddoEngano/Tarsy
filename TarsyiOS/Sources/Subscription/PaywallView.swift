@@ -7,7 +7,7 @@ struct PaywallView: View {
     @State private var isPurchasing = false
     @State private var isRestoring = false
     @State private var showError = false
-    @State private var selectedPlan: Plan = .annual
+    @State private var selectedPlan: Plan = .monthly
 
     enum Plan {
         case monthly, annual
@@ -83,20 +83,20 @@ struct PaywallView: View {
                 Spacer()
 
                 // Plan selector
-                HStack(spacing: 10) {
-                    planCard(
-                        plan: .annual,
-                        label: "Annual",
-                        price: subscriptionManager.annualProduct?.displayPrice ?? "$119.99",
-                        detail: "/year",
-                        badge: "SAVE 33%"
-                    )
+                HStack(spacing: 20) {
                     planCard(
                         plan: .monthly,
                         label: "Monthly",
                         price: subscriptionManager.monthlyProduct?.displayPrice ?? "$14.99",
                         detail: "/month",
                         badge: nil
+                    )
+                    planCard(
+                        plan: .annual,
+                        label: "Annual",
+                        price: subscriptionManager.annualProduct?.displayPrice ?? "$119.99",
+                        detail: "/year",
+                        badge: "SAVE 33%"
                     )
                 }
                 .padding(.horizontal, 24)
