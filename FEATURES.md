@@ -99,6 +99,8 @@ openclawMessage
 openclawOutput
 openclawStatus
 payloadTooLarge
+permissionsStatus
+permissionsStatusRequest
 ping
 pong
 portsList
@@ -142,6 +144,9 @@ streamStop
 sudoRequest
 sudoResponse
 sudoResult
+systemDialogClickButton
+systemDialogDetected
+systemDialogDismissed
 systemResources
 systemResourcesResult
 terminalClose
@@ -152,6 +157,7 @@ terminalInput
 terminalInterrupt
 terminalList
 terminalOutput
+terminalPromptReady
 ultracontextStatus
 wizardExecute
 wizardGhDetected
@@ -168,7 +174,7 @@ workspaceStop
 workspaceUpdate
 ```
 
-**Total: 143 actions**
+**Total: 149 actions**
 
 ### Data Models
 
@@ -481,9 +487,9 @@ Features used to control the companion. The web client must reimplement these.
 
 | Metric | Count |
 |--------|-------|
-| WSProtocol actions | 143 |
-| macOS source files | 35 |
-| iOS source files | 51 |
+| WSProtocol actions | 149 |
+| macOS source files | 37 |
+| iOS source files | 53 |
 | Shared source files | 24 |
 | Windows companion | 0 (planned) |
 | Web client | 0 (planned) |
@@ -516,4 +522,4 @@ Features used to control the companion. The web client must reimplement these.
 | File watcher | DispatchSource | FileSystemWatcher | — | — |
 
 
-*Generated on 2026-04-10 18:11:46 by `scripts/generate-features.sh`*
+*Generated on 2026-04-11 01:26:17 by `scripts/generate-features.sh`*

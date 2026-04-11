@@ -81,6 +81,8 @@ const CLIENT_ALLOWED_PREFIXES = [
   "security:rotate_machine_secret",
   "devtools:",
   "e2e:",
+  "system_dialog:click_button",
+  "permissions:status_request",
   "auth", "ping", "pong",
 ];
 
@@ -96,6 +98,8 @@ const MACHINE_ALLOWED_PREFIXES = [
   "security:rotate_result", "security:fingerprint_update",
   "devtools:",
   "e2e:",
+  "system_dialog:detected", "system_dialog:dismissed",
+  "permissions:status",
   "relay:machine_online", "auth", "auth:success", "ping", "pong", "error",
 ];
 

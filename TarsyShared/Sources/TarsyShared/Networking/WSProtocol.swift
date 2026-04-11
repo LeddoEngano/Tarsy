@@ -64,6 +64,11 @@ public enum WSAction: String, Codable, Sendable {
     case terminalComplete = "terminal:complete"
     case terminalCompleteResult = "terminal:complete_result"
     case terminalInterrupt = "terminal:interrupt"
+    /// Emitted by the macOS daemon when the wrapped-command sentinel
+    /// fires in a terminal session's output — zsh has finished whatever
+    /// was running and is ready for the next command. iOS uses this to
+    /// clear the per-tab "running" affordance.
+    case terminalPromptReady = "terminal:prompt_ready"
 
     // Engine interrupt (Ctrl+C for AI agents)
     case engineInterrupt = "engine:interrupt"
@@ -140,6 +145,41 @@ public enum WSAction: String, Codable, Sendable {
     case sudoRequest = "sudo:request"
     case sudoResponse = "sudo:response"
     case sudoResult = "sudo:result"
+
+    // System Dialog Safety Net
+    // Detects unexpected macOS TCC / automation / keychain / auth
+    // prompts and surfaces them on iOS so the remote user can approve
+    // or deny without being physically at the Mac. Dialogs backed by
+    // a secure text field (admin password, FileVault) are classified
+    // as not-remotely-actionable; the iOS UI shows a "requires your
+    // admin password" message instead of an approve button.
+    //
+    // Direction:
+    //   detected / dismissed → machine → client
+    //   click_button          → client  → machine
+    //
+    // Payload keys:
+    //   detected: id, title, body, buttons (JSON array of {label, x, y, width, height}),
+    //             owner (bundle id), remotelyActionable ("true"/"false"),
+    //             thumbnailPng (optional base64 of a small crop for the iOS sheet)
+    //   dismissed: id
+    //   click_button: id, label
+    case systemDialogDetected = "system_dialog:detected"
+    case systemDialogDismissed = "system_dialog:dismissed"
+    case systemDialogClickButton = "system_dialog:click_button"
+
+    // Permission Doctor
+    // Live permission status on the Mac. iOS requests via
+    // `permissions:status_request`; macOS replies with
+    // `permissions:status` and also broadcasts unsolicited whenever
+    // any permission transitions (e.g., user revokes Screen Recording
+    // in System Settings, or onboarding grants a new one).
+    //
+    // Payload (permissions:status):
+    //   screen_recording, accessibility, automation, full_disk_access
+    //     — all "true" / "false" strings.
+    case permissionsStatusRequest = "permissions:status_request"
+    case permissionsStatus = "permissions:status"
 
     // Agent Detection
     case agentsDetected = "agents:detected"
