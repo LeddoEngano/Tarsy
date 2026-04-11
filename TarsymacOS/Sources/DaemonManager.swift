@@ -39,6 +39,18 @@ class DaemonManager: ObservableObject {
     private var detectedSlashCommands: [[String: String]] = []
     private let e2e = E2ECrypto()       // LAN E2E
     private let relayE2E = E2ECrypto() // Relay E2E (separate key pair)
+    /// Safety net: detects unexpected system-level modal dialogs
+    /// (TCC / Automation / Keychain) and surfaces them on iOS so the
+    /// remote user can approve them without being at the Mac.
+    private let systemDialogDetector = SystemDialogDetector()
+    /// The most recent dialog we've emitted `systemDialogDetected` for.
+    /// Used so that a freshly-connected iOS client can be brought up to
+    /// speed with an in-flight dialog on (re)connect.
+    private var lastSystemDialog: SystemDialogDetector.Dialog?
+    /// Live permission state watchdog. Surfaces revocations as push
+    /// notifications and broadcasts transitions to connected clients
+    /// so the iOS Permission Doctor UI stays in sync with reality.
+    private let permissionMonitor = PermissionMonitor()
 
     private let agentTaskService = AgentTaskService()
     private var sessionTaskMap: [String: UUID] = [:] // sessionId -> agentTask.id
@@ -181,12 +193,143 @@ class DaemonManager: ObservableObject {
         Task { await SessionFileWatcher.shared.start() }
         log("UltraContext session watcher started")
 
+        // 9. System dialog safety net — AX-polls for unexpected TCC /
+        // Automation / Keychain prompts and forwards them to iOS so the
+        // user can approve them remotely.
+        systemDialogDetector.onDialogAppeared = { [weak self] dialog in
+            guard let self else { return }
+            self.lastSystemDialog = dialog
+            Task { await self.broadcastSystemDialogAppeared(dialog) }
+        }
+        systemDialogDetector.onDialogDismissed = { [weak self] dialogId in
+            guard let self else { return }
+            if self.lastSystemDialog?.id == dialogId {
+                self.lastSystemDialog = nil
+            }
+            Task { await self.broadcastSystemDialogDismissed(dialogId) }
+        }
+        systemDialogDetector.start()
+        log("System dialog detector started")
+
+        // 10. Permission doctor watchdog — detects silent revocation
+        // of Screen Recording / Accessibility / Automation / FDA
+        // (e.g., after a macOS update or user mistake) and surfaces
+        // it as a push notification + iOS banner before the user
+        // discovers something is broken.
+        permissionMonitor.onChange = { [weak self] previous, current in
+            guard let self else { return }
+            Task { await self.broadcastPermissionsStatus(current) }
+            if let prev = previous {
+                self.handlePermissionTransition(from: prev, to: current)
+            }
+        }
+        permissionMonitor.start()
+        log("Permission monitor started")
+
         isRunning = true
+    }
+
+    // MARK: - Permission doctor broadcast / handling
+
+    private func broadcastPermissionsStatus(_ perms: TarsyPermissions) async {
+        let packet = WSPacket(action: .permissionsStatus, payload: perms.payload)
+        await wsServer?.broadcast(packet)
+        await relayClient.send(packet: packet)
+    }
+
+    /// Compare previous vs. current permission state and surface a
+    /// push notification when any permission flipped green → red.
+    /// Multiple simultaneous revocations are merged into a single
+    /// notification so we don't spam the user's lock screen.
+    private func handlePermissionTransition(
+        from prev: TarsyPermissions, to curr: TarsyPermissions
+    ) {
+        var lost: [String] = []
+        if prev.screenRecording && !curr.screenRecording {
+            lost.append("Screen Recording")
+        }
+        if prev.accessibility && !curr.accessibility {
+            lost.append("Accessibility")
+        }
+        if prev.automation && !curr.automation {
+            lost.append("Automation")
+        }
+        if prev.fullDiskAccess && !curr.fullDiskAccess {
+            lost.append("Full Disk Access")
+        }
+        guard !lost.isEmpty else { return }
+        let list = lost.joined(separator: ", ")
+        log("Permission revoked: \(list)")
+        PushNotificationService.shared.sendLocalNotification(
+            title: "Tarsy permission revoked",
+            body: "\(list) was disabled. Tarsy can't function remotely without it — re-enable in System Settings."
+        )
+        // Also fire the APNs path for a truly-suspended iOS app.
+        Task { @MainActor in
+            PushNotificationService.shared.notifySystemDialog(
+                title: "\(list) was disabled",
+                owner: "com.tarsy.macos"
+            )
+        }
+    }
+
+    // MARK: - System dialog broadcast / handling
+
+    /// Broadcast a newly-detected dialog to every connected iOS client
+    /// (LAN + relay). Payload is JSON-encoded because `WSPacket.payload`
+    /// is a flat `[String: String]` — we stuff the button array into a
+    /// single key as an encoded JSON string.
+    private func broadcastSystemDialogAppeared(_ dialog: SystemDialogDetector.Dialog) async {
+        var payload: [String: String] = [
+            "id": dialog.id,
+            "owner": dialog.owner,
+            "title": dialog.title,
+            "body": dialog.body,
+            "remotelyActionable": dialog.remotelyActionable ? "true" : "false",
+        ]
+        if let buttonsData = try? JSONEncoder().encode(dialog.buttons),
+           let buttonsJSON = String(data: buttonsData, encoding: .utf8) {
+            payload["buttons"] = buttonsJSON
+        }
+        let packet = WSPacket(action: .systemDialogDetected, payload: payload)
+        await wsServer?.broadcast(packet)
+        await relayClient.send(packet: packet)
+        // Also fire an APNs push so a truly-suspended iOS app wakes
+        // up and nudges the user. The foreground/recent-background
+        // cases are handled on the iOS side by the websocket packet
+        // handler's local-notification fallback.
+        PushNotificationService.shared.notifySystemDialog(
+            title: dialog.title, owner: dialog.owner)
+    }
+
+    private func broadcastSystemDialogDismissed(_ dialogId: String) async {
+        let packet = WSPacket(
+            action: .systemDialogDismissed, payload: ["id": dialogId])
+        await wsServer?.broadcast(packet)
+        await relayClient.send(packet: packet)
+    }
+
+    /// Handle an iOS-initiated click on a remotely-actionable dialog.
+    /// The detector re-scans live before clicking so stale AX refs
+    /// can't misfire.
+    private func handleSystemDialogClick(_ packet: WSPacket) async {
+        guard let id = packet.payload?["id"],
+              let label = packet.payload?["label"] else {
+            return
+        }
+        let didClick = systemDialogDetector.clickButton(inDialog: id, label: label)
+        if didClick {
+            log("system dialog: clicked '\(label)' on dialog \(id)")
+        } else {
+            log("system dialog: click '\(label)' on \(id) — dialog not found or not actionable")
+        }
     }
 
     func stop() {
         allowSleep()
         removeSleepWakeObservers()
+        systemDialogDetector.stop()
+        permissionMonitor.stop()
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
         tokenRefreshTimer?.invalidate()
@@ -754,6 +897,22 @@ class DaemonManager: ObservableObject {
             await handleMCPList(clientId: clientId, packet: packet)
         case .mcpHealthCheck:
             await handleMCPHealthCheck(clientId: clientId, packet: packet)
+        // System Dialog Safety Net
+        case .systemDialogClickButton:
+            await handleSystemDialogClick(packet)
+        case .systemDialogDetected, .systemDialogDismissed:
+            break // Emitted by the macOS side; ignored if received here.
+        // Permission Doctor
+        case .permissionsStatusRequest:
+            let perms = permissionMonitor.current()
+            await sendToClientOrRelay(
+                WSPacket(action: .permissionsStatus,
+                         payload: perms.payload,
+                         id: packet.id),
+                to: clientId
+            )
+        case .permissionsStatus:
+            break // Emitted by the macOS side; ignored if received here.
         // Sudo
         case .sudoRequest:
             await handleSudoRequest(clientId: clientId, packet: packet)
@@ -975,6 +1134,15 @@ class DaemonManager: ObservableObject {
                     await self.detectSudoPromptInOutput(output, sessionId: sessionId)
                     await self.sendToClientOrRelay(
                         WSPacket(action: .terminalOutput, payload: ["sessionId": sessionId, "output": output]),
+                        to: self.lastActiveClientId
+                    )
+                }
+            }
+            await terminalManager.setPromptReadyHandler(for: sessionId) { [weak self] in
+                Task {
+                    guard let self else { return }
+                    await self.sendToClientOrRelay(
+                        WSPacket(action: .terminalPromptReady, payload: ["sessionId": sessionId]),
                         to: self.lastActiveClientId
                     )
                 }

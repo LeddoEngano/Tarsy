@@ -73,6 +73,28 @@ class PushNotificationService {
         }
     }
 
+    /// Notify iOS that an unexpected system dialog (TCC / Automation /
+    /// Keychain / admin-password sheet) has appeared on the Mac and
+    /// needs user attention. Fires via APNs so the user is reached
+    /// even if the Tarsy iOS app is suspended in the background.
+    ///
+    /// The foreground/recent-background case is handled on the iOS
+    /// side by `SystemDialogService.maybeFireLocalNotification` when
+    /// the websocket packet arrives — this remote path only exists
+    /// to cover the truly-suspended case where iOS isn't listening.
+    func notifySystemDialog(title: String, owner: String) {
+        let body = title.isEmpty
+            ? "A system prompt on your mac needs your approval."
+            : title
+        Task {
+            await sendRemotePush(
+                title: "Mac needs attention",
+                body: body,
+                workspaceId: nil
+            )
+        }
+    }
+
     // MARK: - Live Activity Push Updates
 
     /// Encodable wrapper for Live Activity push payloads
