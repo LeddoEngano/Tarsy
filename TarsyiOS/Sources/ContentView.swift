@@ -39,6 +39,7 @@ struct ContentView: View {
                         )
                         DashboardView()
                     }
+                    .environmentObject(systemDialogService)
                 } else {
                     LoginView()
                 }

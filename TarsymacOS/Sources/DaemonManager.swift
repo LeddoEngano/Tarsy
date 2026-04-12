@@ -1673,46 +1673,43 @@ class DaemonManager: ObservableObject {
     }
 
     private func handleBrowserTabList(clientId: String, packet: WSPacket) async {
-        // Get tab count
-        let countScript = """
+        // Fetch ALL tabs in a single AppleScript call. The old approach
+        // ran 1+2N separate osascript processes (count + title + URL per
+        // tab), which took ~7-10s for 15 tabs and could time out the iOS
+        // listener. This single-call approach returns everything at once
+        // in ~0.3s regardless of tab count.
+        let script = """
         tell application "Google Chrome"
-            return (count of tabs of front window) as text
+            if (count of windows) is 0 then return ""
+            set tabList to ""
+            set tabCount to count of tabs of front window
+            repeat with i from 1 to tabCount
+                set t to tab i of front window
+                set tabTitle to title of t
+                set tabURL to URL of t
+                if i > 1 then set tabList to tabList & linefeed
+                set tabList to tabList & (i as text) & "||" & tabTitle & "||" & tabURL
+            end repeat
+            return tabList
         end tell
         """
-        let countStr = await runAppleScript(countScript)
-        let tabCount = Int(countStr.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
-        log("browserTabList: \(tabCount) tabs")
+        let result = await runAppleScript(script)
+        let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        log("browserTabList: result length \(trimmed.count)")
 
-        guard tabCount > 0 else {
-            await sendToClientOrRelay(
-                WSPacket(action: .browserTabListResult, payload: ["tabs": ""], id: packet.id),
-                to: clientId
-            )
-            return
-        }
-
-        // Get each tab individually to avoid concatenation issues
-        var entries: [String] = []
-        for i in 1...tabCount {
-            let titleScript = """
-            tell application "Google Chrome"
-                return title of tab \(i) of front window
-            end tell
-            """
-            let urlScript = """
-            tell application "Google Chrome"
-                return URL of tab \(i) of front window
-            end tell
-            """
-            let title = await runAppleScript(titleScript)
-            let url = await runAppleScript(urlScript)
+        // Attach favicon URLs (derived from the host of each tab's URL)
+        let lines = trimmed.components(separatedBy: "\n")
+        let entries = lines.compactMap { line -> String? in
+            let parts = line.components(separatedBy: "||")
+            guard parts.count >= 3 else { return nil }
+            let url = parts[2].trimmingCharacters(in: .whitespacesAndNewlines)
             let host = URL(string: url)?.host ?? ""
             let favicon = host.isEmpty ? "" : "https://www.google.com/s2/favicons?sz=32&domain=\(host)"
-            entries.append("\(i)||\(title)||\(url)||\(favicon)")
+            return "\(parts[0])||\(parts[1])||\(url)||\(favicon)"
         }
 
         let tabsPayload = entries.joined(separator: "\n")
-        log("browserTabList: payload \(tabsPayload.prefix(200))")
+        log("browserTabList: \(entries.count) tabs")
         await sendToClientOrRelay(
             WSPacket(action: .browserTabListResult, payload: ["tabs": tabsPayload], id: packet.id),
             to: clientId

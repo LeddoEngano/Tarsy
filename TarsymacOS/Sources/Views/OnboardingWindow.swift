@@ -441,7 +441,7 @@ struct OnboardingWindow: View {
                     isGranted: hasAccessibility, settingsKey: "Privacy_Accessibility")
         case .automation:
             return PermissionInfo(icon: "gearshape.2", title: "automation",
-                    why: "tarsy uses apple events to drive browser tabs for dev server previews and to dismiss routine system prompts on your behalf.",
+                    why: "tarsy uses apple events to control your browser — switch tabs, navigate back/forward, refresh pages — and to dismiss routine system prompts on your behalf. macos scopes this per-app, so you'll see one confirmation dialog for system events, and a second one for google chrome. click allow on both.",
                     isGranted: hasAutomation, settingsKey: nil)
         case .fullDiskAccess:
             return PermissionInfo(icon: "externaldrive.badge.checkmark", title: "full disk access",
@@ -684,23 +684,141 @@ struct OnboardingWindow: View {
     private func requestAutomationPermission() {
         NSApp.activate(ignoringOtherApps: true)
 
-        // Execute an AppleScript targeting System Events to trigger the macOS automation consent dialog.
-        // This must run on the main thread so the permission dialog can attach to our app.
-        var error: NSDictionary?
-        let script = NSAppleScript(source: """
+        // Pre-warm 1: System Events. Triggers the base automation consent
+        // dialog. System Events is always running on macOS, so there's no
+        // launch-timing concern — `NSAppleScript` will either show the
+        // TCC prompt (first time) or execute silently (subsequent runs).
+        _ = NSAppleScript(source: """
             tell application "System Events"
                 return name of first process whose frontmost is true
             end tell
-        """)
-        let result = script?.executeAndReturnError(&error)
-        hasAutomation = result != nil && error == nil
+        """)?.executeAndReturnError(nil)
+
+        // Pre-warm 2: Google Chrome. macOS scopes automation consent per
+        // target app, so the System Events grant above does NOT cover
+        // Chrome. Tarsy drives Chrome for the web/fullstack workspace
+        // browser controls (back/forward/refresh/tab list/tab switch/tab
+        // close — see `DaemonManager.handleBrowserTabList`), so if we
+        // skip this pre-warm the user will get a TCC dialog on their Mac
+        // the first time they tap the tab switcher on their iPhone —
+        // which they can't click because they're away from the Mac. The
+        // whole point of the onboarding pre-warm is that every TCC grant
+        // Tarsy will ever need must be cached BEFORE the user leaves the
+        // machine.
+        //
+        // This is best-effort: the result is not checked and not used to
+        // block step completion (see `checkAutomationPermission` — it
+        // only verifies System Events and a version-scoped "step was
+        // visited" flag). If Chrome is denied, the rest of the app still
+        // works; only browser tab features lose their grant.
+        preWarmChromeAutomation()
+
+        // Mark this onboarding step as consumed for the current required
+        // version. This is the critical piece that unblocks the step even
+        // if Chrome is denied, errors, or fails to launch — we don't
+        // gate step completion on Chrome's outcome.
+        UserDefaults.standard.set(kRequiredOnboardingVersion, forKey: automationStepVersionKey)
+
+        // Refresh the UI state.
+        hasAutomation = checkAutomationPermission()
+    }
+
+    /// Explicitly launch Chrome (if not running) and trigger the Apple
+    /// Events TCC consent dialog for it. The naive approach — just run an
+    /// `NSAppleScript` against "Google Chrome" and rely on Apple Events
+    /// auto-launching — is unreliable: when Chrome isn't running, the
+    /// event can error before TCC ever gets a chance to show its prompt,
+    /// so the user never sees the dialog during onboarding and gets hit
+    /// with a surprise prompt mid-session from a remote iPhone where they
+    /// can't click Allow.
+    ///
+    /// This helper does the sequence explicitly:
+    ///
+    ///   1. Bail out if Chrome isn't installed.
+    ///   2. If Chrome isn't running, launch it hidden (no activation, no
+    ///      recent-items entry) via `NSWorkspace.openApplication`.
+    ///   3. Poll until Chrome appears in the running-apps list (up to 8s).
+    ///   4. Sleep 1.5s more so Chrome's Apple Events handler registers
+    ///      before we try to send it an event — without this, the first
+    ///      event can error with "application isn't running" even though
+    ///      it just launched.
+    ///   5. Re-activate Tarsy so the TCC prompt attaches to our window
+    ///      rather than ending up behind Chrome.
+    ///   6. Run the Chrome `NSAppleScript`. TCC intercepts, shows the
+    ///      consent dialog, blocks until the user answers.
+    ///
+    /// This blocks the main thread for several seconds while Chrome
+    /// launches. That's acceptable here because the "grant permission"
+    /// button is explicitly synchronous — the user already expects a
+    /// brief delay while system dialogs appear.
+    private func preWarmChromeAutomation() {
+        guard let chromeURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") else {
+            return
+        }
+
+        let chromeRunning: () -> Bool = {
+            !NSRunningApplication.runningApplications(withBundleIdentifier: "com.google.Chrome").isEmpty
+        }
+
+        if !chromeRunning() {
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = false
+            config.hides = true
+            config.addsToRecentItems = false
+            NSWorkspace.shared.openApplication(at: chromeURL, configuration: config, completionHandler: nil)
+
+            for _ in 0..<80 {
+                if chromeRunning() { break }
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+
+            Thread.sleep(forTimeInterval: 1.5)
+        }
+
+        NSApp.activate(ignoringOtherApps: true)
+        Thread.sleep(forTimeInterval: 0.3)
+
+        _ = NSAppleScript(source: """
+            tell application "Google Chrome"
+                return name
+            end tell
+        """)?.executeAndReturnError(nil)
     }
 
     private func checkAutomationPermission() -> Bool {
-        let target = NSAppleEventDescriptor(bundleIdentifier: "com.apple.systemevents")
-        guard let aeDesc = target.aeDesc else { return false }
-        let status = AEDeterminePermissionToAutomateTarget(aeDesc, typeWildCard, typeWildCard, false)
-        return status == noErr
+        // Only check whether the user has gone through the automation
+        // step's "grant permission" flow under the current onboarding
+        // version. We intentionally do NOT call `AEDeterminePermissionTo-
+        // AutomateTarget` here — after a `tccutil reset`, that API
+        // returns `procNotFound` for System Events even though the
+        // process IS running, which made the automation step permanently
+        // stuck (hasAutomation never became true regardless of user
+        // action). See system log evidence:
+        //
+        //   AEDeterminePermissionToAutomateTarget(bund("com.apple.systemevents"))
+        //   returning procNotFound because no application found for address descriptor.
+        //
+        // Instead, we trust the version-scoped flag that is written by
+        // `requestAutomationPermission()` the moment the user clicks
+        // Grant. The actual TCC grants (System Events + Chrome) are
+        // triggered by the `NSAppleScript` calls in that function — if
+        // the user clicks Allow, the grants are cached; if they deny,
+        // the rest of the app still works minus some automation features.
+        return UserDefaults.standard.integer(forKey: automationStepVersionKey) >= kRequiredOnboardingVersion
+    }
+
+    /// UserDefaults key storing the `kRequiredOnboardingVersion` at which
+    /// the user last went through the automation sub-step's grant button.
+    /// Bumping the required version automatically re-invalidates this
+    /// flag, forcing re-prompt flow on existing installs.
+    private var automationStepVersionKey: String { "onboardingAutomationVersion" }
+
+    /// Returns true iff Google Chrome is installed on the user's Mac.
+    /// Used to gate the Chrome Apple Events pre-warm during onboarding —
+    /// we skip it entirely on machines without Chrome so we don't confuse
+    /// the user with a prompt for an app they don't have.
+    private func isChromeInstalled() -> Bool {
+        return NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.google.Chrome") != nil
     }
 
     private func checkPermissionsAsync() async {

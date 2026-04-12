@@ -99,6 +99,7 @@ struct StreamPlayerView: View {
     @ObservedObject var viewModel: StreamViewModel
     @EnvironmentObject var machineService: MachineService
     @EnvironmentObject var connectionManager: ConnectionManager
+    @EnvironmentObject var systemDialogService: SystemDialogService
 
     let workspace: Workspace
     @Binding var isActive: Bool
@@ -330,6 +331,7 @@ struct StreamPlayerView: View {
                 onMultiQuestionSubmit: onMultiQuestionSubmit,
                 onVoiceMessage: onVoiceMessage
             )
+            .environmentObject(systemDialogService)
         }
         .onAppear {
             checkDevServerStatus()

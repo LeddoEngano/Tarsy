@@ -10,7 +10,38 @@ import AppKit
 ///   2 - 2026-04: replaced files-and-folders with full disk access,
 ///       fixed false-positive detection. All pre-existing installs must
 ///       re-verify because their previous "granted" state was unreliable.
-let kRequiredOnboardingVersion: Int = 2
+///   3 - 2026-04: automation step now pre-warms the Google Chrome
+///       Apple Events consent prompt in addition to System Events. macOS
+///       scopes automation per target app, so granting System Events
+///       alone did not cover Chrome — users hit a surprise prompt the
+///       first time they used the browser tab switcher. Existing installs
+///       must re-run onboarding so the Chrome pre-warm actually executes.
+///   4 - 2026-04: automation detection now requires Chrome in addition
+///       to System Events (the v3 bump didn't re-surface the automation
+///       sub-step for users who already had System Events granted, so
+///       the Chrome pre-warm was still being skipped). This bump forces
+///       re-onboarding, the MenuBarExtra label auto-opens the window at
+///       launch, and the automation sub-step now stays visible until
+///       Chrome is actually pre-warmed.
+///   5 - 2026-04: the v4 logic verified the Chrome grant directly,
+///       which left users stuck on the automation step if Chrome denied
+///       the prompt, failed to launch, or returned an AppleScript error.
+///       Rewrote automation detection to be best-effort for Chrome —
+///       the sub-step is now gated on System Events grant + a version-
+///       scoped "pre-warm consumed" flag written when the user clicks
+///       Grant, regardless of Chrome outcome. Clicking Grant always
+///       advances the step; Chrome is never a blocker.
+///   6 - 2026-04: the v5 Chrome pre-warm relied on `NSAppleScript` auto-
+///       launching Chrome via Apple Events, which errored silently when
+///       Chrome wasn't running — TCC never got a chance to show its
+///       prompt and users were hit with it mid-session from their iPhone.
+///       The fix now explicitly launches Chrome via `NSWorkspace.open-
+///       Application` (hidden, non-activating), polls until its process
+///       and Apple Events handler are ready, re-activates Tarsy so the
+///       TCC dialog attaches to our window, and only THEN sends the
+///       Apple Event. Requires re-onboarding so existing installs
+///       execute the new launch sequence.
+let kRequiredOnboardingVersion: Int = 6
 
 @main
 struct TarsymacOSApp: App {
@@ -101,13 +132,17 @@ struct TarsymacOSApp: App {
                     appDelegate.authManager = authManager
                 }
         } label: {
-            if updateChecker.shouldShowBanner {
-                Image(systemName: "arrow.down.circle.fill")
-            } else {
-                Image("MenuBarIcon")
-                    .renderingMode(.original)
-                    .opacity(daemonManager.isRunning ? 1.0 : 0.5)
-            }
+            // The label closure is the only View in the whole Scene tree
+            // that renders at launch under `LSUIElement: true` (there's no
+            // dock icon, and the onboarding Window doesn't auto-open).
+            // Piggyback on its `.onAppear` to run the version-bump check
+            // and programmatically open the onboarding window when the
+            // stored `onboardingVersion` is below the current required
+            // version. Without this, a version bump silently does nothing
+            // for existing installs because the check inside
+            // OnboardingWindow.onAppear is unreachable until the window is
+            // already open.
+            MenuBarBootstrapLabel(updateChecker: updateChecker, daemonManager: daemonManager)
         }
         .menuBarExtraStyle(.window)
 
@@ -125,6 +160,49 @@ struct TarsymacOSApp: App {
             SettingsView()
                 .environmentObject(authManager)
                 .environmentObject(daemonManager)
+        }
+    }
+}
+
+/// Menu bar icon label that doubles as the launch bootstrapper for the
+/// onboarding window. See the comment on its use site in
+/// `TarsymacOSApp.body` for the rationale.
+private struct MenuBarBootstrapLabel: View {
+    @ObservedObject var updateChecker: UpdateChecker
+    @ObservedObject var daemonManager: DaemonManager
+    @Environment(\.openWindow) private var openWindow
+    @AppStorage("onboardingVersion") private var onboardingVersion: Int = 0
+    @State private var didBootstrap = false
+
+    var body: some View {
+        Group {
+            if updateChecker.shouldShowBanner {
+                Image(systemName: "arrow.down.circle.fill")
+            } else {
+                Image("MenuBarIcon")
+                    .renderingMode(.original)
+                    .opacity(daemonManager.isRunning ? 1.0 : 0.5)
+            }
+        }
+        .onAppear {
+            // MenuBarExtra reconstructs its label as state changes
+            // (`daemonManager.isRunning` flips, updates become available),
+            // which fires .onAppear multiple times over the app's
+            // lifetime. Gate on a one-shot @State flag so we only ever
+            // open the onboarding window once per process launch.
+            guard !didBootstrap else { return }
+            didBootstrap = true
+
+            guard onboardingVersion < kRequiredOnboardingVersion else { return }
+
+            // Delay briefly so SwiftUI has registered the "onboarding"
+            // Window scene before we try to open it. Without the delay,
+            // `openWindow(id:)` can no-op silently on the first run of a
+            // fresh launch.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                openWindow(id: "onboarding")
+                NSApp.activate(ignoringOtherApps: true)
+            }
         }
     }
 }

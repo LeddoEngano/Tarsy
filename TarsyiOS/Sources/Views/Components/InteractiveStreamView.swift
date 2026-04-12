@@ -93,6 +93,11 @@ struct InteractiveStreamView: View {
     var onMultiQuestionSubmit: (([String: String]) -> Void)?
     var onVoiceMessage: ((String) -> Void)?
 
+    // System dialog safety net — shows banner when Mac has a pending
+    // TCC/system prompt the user needs to dismiss (e.g. Chrome automation)
+    @EnvironmentObject var systemDialogService: SystemDialogService
+    @State private var showSystemDialogSheet = false
+
     private var isWebMode: Bool { workspaceStack == .web || workspaceStack == .fullstack }
 
     @State private var tapFeedbackPoint: CGPoint? = nil
@@ -201,6 +206,15 @@ struct InteractiveStreamView: View {
                                 webNavButton(icon: "chevron.left", action: .browserBack)
                                 webNavButton(icon: "chevron.right", action: .browserForward)
                                 webNavButton(icon: "arrow.clockwise", action: .browserRefresh)
+                                Button {
+                                    Haptics.light()
+                                    fetchTabs()
+                                } label: {
+                                    Image(systemName: "rectangle.stack")
+                                        .font(TarsyTheme.font(size: 16, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.8))
+                                        .frame(width: 28, height: 28)
+                                }
                             }
 
                             Spacer()
@@ -351,16 +365,34 @@ struct InteractiveStreamView: View {
             .animation(.easeInOut(duration: 0.25), value: interactiveOptions?.count)
         }
         .overlay(alignment: .top) {
-            if showGalleryHint {
-                Text("Saved to your gallery!")
-                    .font(TarsyTheme.font(size: 12, weight: .medium))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(.black.opacity(0.7))
-                    .cornerRadius(8)
-                    .padding(.top, 56)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+            VStack(spacing: 0) {
+                // System dialog banner — shows when Mac has a pending
+                // TCC prompt (e.g. Chrome automation Allow/Don't Allow)
+                // so the user can tap "review" and click Allow remotely.
+                SystemDialogBanner(
+                    service: systemDialogService,
+                    showSheet: $showSystemDialogSheet
+                )
+
+                if showGalleryHint {
+                    Text("Saved to your gallery!")
+                        .font(TarsyTheme.font(size: 12, weight: .medium))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.black.opacity(0.7))
+                        .cornerRadius(8)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+            .padding(.top, 56)
+        }
+        .sheet(isPresented: $showSystemDialogSheet) {
+            if let dialog = systemDialogService.currentDialog {
+                SystemDialogSheet(dialog: dialog) { label in
+                    systemDialogService.click(label, on: dialog)
+                    showSystemDialogSheet = false
+                }
             }
         }
         .overlay {
@@ -917,6 +949,19 @@ struct InteractiveStreamView: View {
             }
         }
         connectionManager.send(WSPacket(action: .browserTabList))
+
+        // Safety timeout — close the spinner if no response after 10s.
+        // This can happen if Chrome isn't running on the Mac, the macOS
+        // app isn't connected, or the relay drops the response.
+        Task {
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            await MainActor.run {
+                if browserTabs.isEmpty && showTabMenu {
+                    connectionManager.removeListener("browser-tabs")
+                    withAnimation { showTabMenu = false }
+                }
+            }
+        }
     }
 
     private func switchToTab(_ tab: BrowserTab) {
