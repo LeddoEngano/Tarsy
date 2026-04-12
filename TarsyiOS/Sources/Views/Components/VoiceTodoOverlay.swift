@@ -159,6 +159,5 @@ private struct ShakingIcon: View {
     VoiceTodoOverlay(todoManager: VoiceTodoManager())
         .padding()
         .background(TarsyTheme.backgroundPrimary)
-        .preferredColorScheme(.dark)
 }
 #endif

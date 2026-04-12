@@ -1,18 +1,18 @@
 import SwiftUI
 
 enum TarsyTheme {
-    // Backgrounds
-    static let backgroundPrimary = Color(hex: "131316")
-    static let backgroundSecondary = Color(hex: "1c1c21")
-    static let backgroundTertiary = Color(hex: "2a2a30")
+    // Backgrounds — adaptive via asset catalog (dark/light variants)
+    static let backgroundPrimary = Color("bgPrimary")
+    static let backgroundSecondary = Color("bgSecondary")
+    static let backgroundTertiary = Color("bgTertiary")
 
-    // Text
-    static let textPrimary = Color(hex: "e4e4e7")
-    static let textSecondary = Color(hex: "71717a")
-    static let textAccent = Color(hex: "ffffff")
+    // Text — adaptive via asset catalog
+    static let textPrimary = Color("textPrimary")
+    static let textSecondary = Color("textSecondary")
+    static let textAccent = Color("textAccent")
 
-    // Accents
-    static let accentAmber = Color(hex: "ffffff")
+    // Accents — dynamic via ThemeManager
+    static var accentAmber: Color { ThemeManager.shared.accentColor }
     static let accentTerracotta = Color(hex: "e5716a")
     static let accentMoss = Color(hex: "6bc77b")
 
@@ -22,19 +22,19 @@ enum TarsyTheme {
     static let statusIdle = Color(hex: "52525b")
     static let statusError = Color(hex: "e5716a")
 
-    // Fonts
-    static let monoFont = Font.system(.body, design: .monospaced)
-    static let monoFontSmall = Font.system(.caption, design: .monospaced)
-    static let monoFontLarge = Font.system(.title3, design: .monospaced)
+    // Fonts — dynamic via ThemeManager
+    static var monoFont: Font { Font.system(.body, design: ThemeManager.shared.currentFontDesign) }
+    static var monoFontSmall: Font { Font.system(.caption, design: ThemeManager.shared.currentFontDesign) }
+    static var monoFontLarge: Font { Font.system(.title3, design: ThemeManager.shared.currentFontDesign) }
 
     // Aliases
-    static let bodyFont = monoFont
-    static let bodyFontSmall = monoFontSmall
-    static let bodyFontLarge = monoFontLarge
+    static var bodyFont: Font { monoFont }
+    static var bodyFontSmall: Font { monoFontSmall }
+    static var bodyFontLarge: Font { monoFontLarge }
 
     /// Central font factory
     static func font(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-        Font.system(size: size, weight: weight, design: .monospaced)
+        Font.system(size: size, weight: weight, design: ThemeManager.shared.currentFontDesign)
     }
 }
 

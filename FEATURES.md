@@ -40,6 +40,10 @@ browserTabClose
 browserTabList
 browserTabListResult
 browserTabSwitch
+buildComplete
+buildError
+buildProgress
+buildStart
 claudeAskUser
 claudeClose
 claudeComplete
@@ -88,6 +92,9 @@ gitRollback
 gitRollbackResult
 gitStage
 gitStageResult
+hotReloadError
+hotReloadInjection
+hotReloadStatus
 httpRequest
 httpResponse
 mcpHealthCheck
@@ -136,6 +143,9 @@ screenshotResult
 securityFingerprintUpdate
 securityRotateResult
 securityRotateSecret
+simulatorList
+simulatorListResult
+simulatorStatus
 slashCommandsDetected
 slashCommandsRequest
 streamFrame
@@ -174,7 +184,7 @@ workspaceStop
 workspaceUpdate
 ```
 
-**Total: 149 actions**
+**Total: 159 actions**
 
 ### Data Models
 
@@ -487,9 +497,9 @@ Features used to control the companion. The web client must reimplement these.
 
 | Metric | Count |
 |--------|-------|
-| WSProtocol actions | 149 |
-| macOS source files | 37 |
-| iOS source files | 54 |
+| WSProtocol actions | 159 |
+| macOS source files | 44 |
+| iOS source files | 57 |
 | Shared source files | 24 |
 | Windows companion | 0 (planned) |
 | Web client | 0 (planned) |
@@ -522,4 +532,4 @@ Features used to control the companion. The web client must reimplement these.
 | File watcher | DispatchSource | FileSystemWatcher | — | — |
 
 
-*Generated on 2026-04-12 02:53:23 by `scripts/generate-features.sh`*
+*Generated on 2026-04-12 20:59:53 by `scripts/generate-features.sh`*

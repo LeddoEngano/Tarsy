@@ -893,6 +893,5 @@ struct StreamPlayerView: View {
     )
     .environmentObject(MachineService())
     .environmentObject(ConnectionManager())
-    .preferredColorScheme(.dark)
 }
 #endif

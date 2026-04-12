@@ -66,7 +66,6 @@ struct FileExplorerView: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
         .onAppear { loadTree() }
         .onDisappear { connectionManager.removeListener("files-\(workspace.id)") }
         .sheet(item: $selectedFile) { file in
@@ -316,7 +315,6 @@ struct FilePreviewView: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
     }
 
     // Basic syntax colorization
@@ -358,6 +356,5 @@ struct FilePreviewView: View {
 #Preview {
     FileExplorerView(workspace: PreviewData.workspace)
         .environmentObject(ConnectionManager())
-        .preferredColorScheme(.dark)
 }
 #endif

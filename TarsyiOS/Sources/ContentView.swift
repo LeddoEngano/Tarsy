@@ -24,6 +24,7 @@ struct ContentView: View {
     /// being at the Mac.
     @StateObject private var systemDialogService = SystemDialogService()
     @State private var showSystemDialogSheet = false
+    private var themeManager = ThemeManager.shared
 
     var body: some View {
         ZStack {
@@ -65,7 +66,7 @@ struct ContentView: View {
                 showNotificationPrimer = false
             }
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(themeManager.preferredScheme)
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .onChange(of: machineService.isOnline) { _, isOnline in
             if !isOnline && connectionManager.isConnected {

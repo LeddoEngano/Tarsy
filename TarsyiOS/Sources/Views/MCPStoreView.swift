@@ -105,7 +105,6 @@ struct MCPStoreView: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
         .onAppear { setupListeners(); loadMCPs() }
         .onDisappear { connectionManager.removeListener("mcp-store") }
     }
@@ -331,6 +330,5 @@ struct MCPEntry: Identifiable {
 #Preview {
     MCPStoreView(workspacePath: "/Users/dev/projects/tarsy")
         .environmentObject(ConnectionManager())
-        .preferredColorScheme(.dark)
 }
 #endif

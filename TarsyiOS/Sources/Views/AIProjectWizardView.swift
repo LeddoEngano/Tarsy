@@ -76,7 +76,6 @@ struct AIProjectWizardView: View {
                 header
             }
         }
-        .preferredColorScheme(.dark)
         .onAppear {
             listenForAgents()
             listenForWizardPackets()

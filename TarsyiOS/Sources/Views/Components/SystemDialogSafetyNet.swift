@@ -278,7 +278,6 @@ struct SystemDialogSheet: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     @ViewBuilder

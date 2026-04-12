@@ -180,6 +180,5 @@ struct AIContextEditorView: View {
 #Preview {
     AIContextEditorView(workspace: PreviewData.workspace)
         .environmentObject(WorkspaceService())
-        .preferredColorScheme(.dark)
 }
 #endif

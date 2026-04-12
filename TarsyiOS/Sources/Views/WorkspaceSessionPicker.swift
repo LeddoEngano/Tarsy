@@ -96,7 +96,6 @@ struct WorkspaceSessionPicker: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
         .task {
             await client.loadSessions()
         }
@@ -239,6 +238,5 @@ struct WorkspaceSessionPicker: View {
         detectedAgents: [.claude, .gemini],
         onSelect: { _, _ in }
     )
-    .preferredColorScheme(.dark)
 }
 #endif

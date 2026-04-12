@@ -109,7 +109,6 @@ struct LegalWebView: View {
 #Preview {
     NameOnboardingView {}
         .environmentObject(ProfileService())
-        .preferredColorScheme(.dark)
 }
 #endif
 

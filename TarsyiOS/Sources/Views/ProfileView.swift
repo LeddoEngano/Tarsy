@@ -20,6 +20,7 @@ struct ProfileView: View {
     @State private var deleteConfirmText = ""
     @State private var isDeleting = false
     @State private var showVoiceLanguagePicker = false
+    @Bindable private var themeManager = ThemeManager.shared
 
     var body: some View {
         NavigationStack {
@@ -30,6 +31,7 @@ struct ProfileView: View {
                     VStack(alignment: .leading, spacing: 24) {
                         profileHeader
                         subscriptionSection
+                        themeSection
                         if !connectionManager.detectedAgents.isEmpty {
                             agentPermissionsSection
                         }
@@ -53,7 +55,7 @@ struct ProfileView: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(themeManager.preferredScheme)
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .onAppear { loadKeys() }
         .sheet(item: $editingProvider) { provider in
@@ -455,6 +457,190 @@ struct ProfileView: View {
         }
         .padding(.top, 16)
         .padding(.bottom, 32)
+    }
+
+    // MARK: - Theme Customization
+
+    private var themeSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Theme")
+
+            // Accent Color
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: "paintpalette.fill")
+                        .font(TarsyTheme.font(size: 14))
+                        .foregroundColor(TarsyTheme.accentAmber)
+                        .frame(width: 28)
+
+                    Text("Accent Color")
+                        .font(TarsyTheme.monoFontSmall)
+                        .foregroundColor(TarsyTheme.textPrimary)
+
+                    Spacer()
+
+                    Text(themeManager.accentPreset.displayName)
+                        .font(TarsyTheme.font(size: 10))
+                        .foregroundColor(TarsyTheme.accentAmber)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(TarsyTheme.backgroundSecondary)
+
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(ThemeManager.AccentPreset.allCases) { preset in
+                            Button(action: { themeManager.accentPreset = preset }) {
+                                VStack(spacing: 6) {
+                                    Circle()
+                                        .fill(preset.color)
+                                        .frame(width: 28, height: 28)
+                                        .overlay(
+                                            Circle()
+                                                .strokeBorder(Color.white, lineWidth: themeManager.accentPreset == preset ? 2 : 0)
+                                        )
+
+                                    Text(preset.displayName)
+                                        .font(TarsyTheme.font(size: 9))
+                                        .foregroundColor(themeManager.accentPreset == preset ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
+                                }
+                                .frame(width: 56)
+                                .padding(.vertical, 8)
+                                .background(themeManager.accentPreset == preset ? TarsyTheme.backgroundTertiary : Color.clear)
+                                .cornerRadius(8)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+                }
+                .background(TarsyTheme.backgroundSecondary)
+            }
+            .cornerRadius(10)
+
+            // Font Design
+            VStack(spacing: 0) {
+                HStack(spacing: 12) {
+                    Image(systemName: "textformat")
+                        .font(TarsyTheme.font(size: 14))
+                        .foregroundColor(TarsyTheme.accentAmber)
+                        .frame(width: 28)
+
+                    Text("Font Style")
+                        .font(TarsyTheme.monoFontSmall)
+                        .foregroundColor(TarsyTheme.textPrimary)
+
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(TarsyTheme.backgroundSecondary)
+
+                HStack(spacing: 0) {
+                    ForEach(ThemeManager.FontDesign.allCases) { design in
+                        Button(action: { themeManager.fontDesign = design }) {
+                            VStack(spacing: 4) {
+                                Text(design.emoji)
+                                    .font(Font.system(size: 18, weight: .bold, design: design.swiftUIDesign))
+                                    .foregroundColor(themeManager.fontDesign == design ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
+
+                                Text(design.displayName)
+                                    .font(Font.system(size: 10, design: design.swiftUIDesign))
+                                    .foregroundColor(themeManager.fontDesign == design ? TarsyTheme.textPrimary : TarsyTheme.textSecondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(themeManager.fontDesign == design ? TarsyTheme.backgroundTertiary : Color.clear)
+                        }
+                    }
+                }
+                .background(TarsyTheme.backgroundSecondary)
+            }
+            .cornerRadius(10)
+
+            // Appearance Mode
+            HStack(spacing: 12) {
+                Image(systemName: "circle.lefthalf.filled")
+                    .font(TarsyTheme.font(size: 14))
+                    .foregroundColor(TarsyTheme.accentAmber)
+                    .frame(width: 28)
+
+                Text("Appearance")
+                    .font(TarsyTheme.monoFontSmall)
+                    .foregroundColor(TarsyTheme.textPrimary)
+
+                Spacer()
+
+                HStack(spacing: 4) {
+                    ForEach(ThemeManager.AppearanceMode.allCases) { mode in
+                        Button(action: { themeManager.appearanceMode = mode }) {
+                            Text(mode.displayName)
+                                .font(TarsyTheme.font(size: 11))
+                                .foregroundColor(themeManager.appearanceMode == mode ? TarsyTheme.accentAmber : TarsyTheme.textSecondary)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(themeManager.appearanceMode == mode ? TarsyTheme.backgroundTertiary : Color.clear)
+                                .cornerRadius(6)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(TarsyTheme.backgroundSecondary)
+            .cornerRadius(10)
+
+            // Fun Settings
+            VStack(spacing: 1) {
+                // Haptics
+                HStack(spacing: 12) {
+                    Image(systemName: "iphone.radiowaves.left.and.right")
+                        .font(TarsyTheme.font(size: 14))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .frame(width: 28)
+
+                    Text("Haptic Feedback")
+                        .font(TarsyTheme.monoFontSmall)
+                        .foregroundColor(TarsyTheme.textPrimary)
+
+                    Spacer()
+
+                    Toggle("", isOn: $themeManager.hapticsEnabled)
+                        .tint(TarsyTheme.accentAmber)
+                        .labelsHidden()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(TarsyTheme.backgroundSecondary)
+
+                // Terminal Greeting
+                HStack(spacing: 12) {
+                    Image(systemName: "hand.wave.fill")
+                        .font(TarsyTheme.font(size: 14))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .frame(width: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Terminal Greeting")
+                            .font(TarsyTheme.monoFontSmall)
+                            .foregroundColor(TarsyTheme.textPrimary)
+                        Text("show welcome message on launch")
+                            .font(TarsyTheme.font(size: 9))
+                            .foregroundColor(TarsyTheme.textSecondary)
+                    }
+
+                    Spacer()
+
+                    Toggle("", isOn: $themeManager.showTerminalGreeting)
+                        .tint(TarsyTheme.accentAmber)
+                        .labelsHidden()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(TarsyTheme.backgroundSecondary)
+            }
+            .cornerRadius(10)
+        }
     }
 
     // MARK: - Components

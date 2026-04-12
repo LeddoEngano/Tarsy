@@ -167,6 +167,5 @@ struct WorkspaceSettingsView: View {
 #Preview {
     WorkspaceSettingsView(workspace: PreviewData.workspace)
         .environmentObject(WorkspaceService())
-        .preferredColorScheme(.dark)
 }
 #endif

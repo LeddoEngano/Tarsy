@@ -64,6 +64,5 @@ struct ConnectionIndicator: View {
     }
     .environmentObject(ConnectionManager())
     .background(TarsyTheme.backgroundPrimary)
-    .preferredColorScheme(.dark)
 }
 #endif

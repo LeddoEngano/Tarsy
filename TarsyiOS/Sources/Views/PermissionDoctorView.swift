@@ -86,7 +86,6 @@ struct PermissionDoctorView: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
         .onAppear {
             connectionManager.addListener("permission-doctor-listener") { packet in
                 guard packet.action == .permissionsStatus,

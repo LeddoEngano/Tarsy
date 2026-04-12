@@ -281,7 +281,6 @@ struct AppSettingsView: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
         .onAppear { loadKeys() }
         .sheet(item: $editingProvider) { provider in
             APIKeyEditorSheet(provider: provider, existingKey: getKeyForProvider(provider)) { newKey in
@@ -552,7 +551,6 @@ struct APIKeyEditorSheet: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
         .onAppear {
             keyText = existingKey ?? ""
             isFocused = true

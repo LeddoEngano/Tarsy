@@ -460,7 +460,6 @@ struct InteractiveParser {
     )
     .padding()
     .background(TarsyTheme.backgroundPrimary)
-    .preferredColorScheme(.dark)
 }
 
 #Preview("InteractiveOptionsView") {
@@ -475,6 +474,5 @@ struct InteractiveParser {
     )
     .padding()
     .background(TarsyTheme.backgroundPrimary)
-    .preferredColorScheme(.dark)
 }
 #endif

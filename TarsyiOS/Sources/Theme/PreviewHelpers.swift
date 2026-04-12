@@ -31,7 +31,6 @@ struct PreviewWrapper<Content: View>: View {
             .environmentObject(profileService)
             .environmentObject(subscriptionManager)
             .environmentObject(deepLinkRouter)
-            .preferredColorScheme(.dark)
     }
 }
 

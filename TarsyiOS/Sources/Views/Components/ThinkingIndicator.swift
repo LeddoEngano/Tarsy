@@ -132,6 +132,5 @@ struct ActivityNarrationView: View {
     }
     .padding()
     .background(TarsyTheme.backgroundPrimary)
-    .preferredColorScheme(.dark)
 }
 #endif

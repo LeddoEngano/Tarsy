@@ -67,7 +67,6 @@ struct GitSafetyNetView: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
         .onAppear { loadData(); setupListeners() }
         .onDisappear { connectionManager.removeListener("git-\(workspace.id)") }
         .confirmationDialog("Rollback to this checkpoint?", isPresented: $showRollbackConfirm, titleVisibility: .visible) {
@@ -523,7 +522,6 @@ struct FileDiffView: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
     }
 
     private func parseHunks() -> [DiffLine] {
@@ -644,6 +642,5 @@ struct GitCommit: Identifiable {
 #Preview {
     GitSafetyNetView(workspace: PreviewData.workspace)
         .environmentObject(ConnectionManager())
-        .preferredColorScheme(.dark)
 }
 #endif

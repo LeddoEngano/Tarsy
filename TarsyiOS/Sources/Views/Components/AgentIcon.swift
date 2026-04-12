@@ -29,6 +29,5 @@ struct AgentIcon: View {
     }
     .padding()
     .background(TarsyTheme.backgroundPrimary)
-    .preferredColorScheme(.dark)
 }
 #endif

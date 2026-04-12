@@ -33,7 +33,7 @@ struct DashboardView: View {
                     HStack(spacing: 8) {
                         TarsyEyes(size: 32, animated: false)
                         Text("tarsy")
-                            .font(TarsyTheme.font(size: 24, weight: .bold))
+                            .font(.system(size: 24, weight: .bold, design: .monospaced))
                             .foregroundColor(TarsyTheme.accentAmber)
                     }
 
@@ -278,7 +278,7 @@ struct DashboardView: View {
                 .padding(.bottom, 20)
 
             Text("tarsy")
-                .font(TarsyTheme.font(size: 28, weight: .bold))
+                .font(.system(size: 28, weight: .bold, design: .monospaced))
                 .foregroundColor(TarsyTheme.textPrimary)
                 .padding(.bottom, 4)
 

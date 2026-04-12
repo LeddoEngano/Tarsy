@@ -106,7 +106,6 @@ struct QuickDispatchView: View {
             .toolbarBackground(TarsyTheme.backgroundPrimary, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
         .onAppear {
             selectedWorkspace = workspaces.first
             isCommandFocused = true
@@ -163,6 +162,5 @@ struct QuickDispatchView: View {
 #Preview {
     QuickDispatchView(workspaces: [PreviewData.workspace, PreviewData.idleWorkspace])
         .environmentObject(ConnectionManager())
-        .preferredColorScheme(.dark)
 }
 #endif

@@ -23,13 +23,13 @@ struct TarsyEyes: View {
         ZStack {
             HStack(spacing: size * 0.1) {
                 Circle()
-                    .fill(.white)
+                    .fill(TarsyTheme.textPrimary)
                     .frame(width: size * 0.36, height: size * 0.36)
                     .scaleEffect(x: leftEye.scaleX, y: leftEye.scaleY)
                     .offset(x: leftEye.offsetX, y: leftEye.offsetY)
 
                 Circle()
-                    .fill(.white)
+                    .fill(TarsyTheme.textPrimary)
                     .frame(width: size * 0.414, height: size * 0.414)
                     .scaleEffect(x: rightEye.scaleX, y: rightEye.scaleY)
                     .offset(x: rightEye.offsetX, y: rightEye.offsetY)
@@ -41,11 +41,11 @@ struct TarsyEyes: View {
                 HStack(spacing: size * 0.1) {
                     morphIcon
                         .font(TarsyTheme.font(size: size * 0.30))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(TarsyTheme.textPrimary)
 
                     morphIcon
                         .font(TarsyTheme.font(size: size * 0.345))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(TarsyTheme.textPrimary)
                 }
                 .opacity(morphOpacity)
             }
@@ -597,20 +597,17 @@ struct TarsyEyes: View {
     TarsyEyes(size: 120)
         .padding(40)
         .background(Color(hex: "0a0a0a"))
-        .preferredColorScheme(.dark)
 }
 
 #Preview("Animated — Small") {
     TarsyEyes(size: 40)
         .padding(40)
         .background(Color(hex: "0a0a0a"))
-        .preferredColorScheme(.dark)
 }
 
 #Preview("Static") {
     TarsyEyes(size: 100, animated: false)
         .padding(40)
         .background(Color(hex: "0a0a0a"))
-        .preferredColorScheme(.dark)
 }
 #endif

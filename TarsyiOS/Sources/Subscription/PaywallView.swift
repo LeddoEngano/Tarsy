@@ -166,7 +166,6 @@ struct PaywallView: View {
                 .padding(.bottom, 20)
             }
         }
-        .preferredColorScheme(.dark)
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .alert("Something went wrong", isPresented: $showError) {
             Button("OK") {}
@@ -268,6 +267,5 @@ struct PaywallView: View {
 #if DEBUG
 #Preview {
     PaywallView()
-        .preferredColorScheme(.dark)
 }
 #endif
