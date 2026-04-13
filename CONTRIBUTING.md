@@ -5,9 +5,9 @@ Thanks for your interest in contributing to Tarsy! This guide will help you get 
 ## Prerequisites
 
 - macOS 14.0+ with Xcode 15+
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `brew install xcodegen`
-- [Bun](https://bun.sh) — for the relay server
-- [Supabase CLI](https://supabase.com/docs/guides/cli) — for local backend
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
+- [Bun](https://bun.sh): for the relay server
+- [Supabase CLI](https://supabase.com/docs/guides/cli): for local backend
 - An Apple Developer account (free or paid)
 
 ## Setup
@@ -30,10 +30,10 @@ Open `Tarsy.xcconfig` and fill in your values:
 | Variable | Where to get it |
 |----------|----------------|
 | `TARSY_SUPABASE_URL` | Your [Supabase project](https://supabase.com/dashboard) → Settings → API |
-| `TARSY_SUPABASE_ANON_KEY` | Same page — the `anon` / `public` key |
+| `TARSY_SUPABASE_ANON_KEY` | Same page: the `anon` / `public` key |
 | `TARSY_RELAY_URL` | Deploy your own relay (see below) or use `ws://localhost:8080/ws` for local dev |
 | `DEVELOPMENT_TEAM` | [developer.apple.com](https://developer.apple.com) → Account → Membership → Team ID |
-| `ULTRACONTEXT_API_KEY` | Optional — leave as placeholder if not using UltraContext |
+| `ULTRACONTEXT_API_KEY` | Optional: leave as placeholder if not using UltraContext |
 
 ### 3. Set up the database
 
@@ -78,7 +78,7 @@ This checks that all prerequisites are installed and your config is filled in.
 
 | Directory | What it is |
 |-----------|-----------|
-| `TarsyShared/` | Swift Package — shared auth, networking, models, E2E crypto |
+| `TarsyShared/` | Swift Package: shared auth, networking, models, E2E crypto |
 | `TarsymacOS/` | macOS menu bar app (the "server" side) |
 | `TarsyiOS/` | iOS app (the "client" side) |
 | `TarsyWindows/` | Windows client (C#) |
@@ -89,10 +89,10 @@ This checks that all prerequisites are installed and your config is filled in.
 
 ## Key files
 
-- **`DaemonManager.swift`** — macOS central orchestrator. Most new macOS features wire through here.
-- **`ConnectionManager.swift`** — iOS WebSocket connection manager.
-- **`WSProtocol.swift`** — WebSocket protocol definition (60+ action types).
-- **`Config.swift`** — Runtime configuration (reads from xcconfig via Info.plist).
+- **`DaemonManager.swift`**: macOS central orchestrator. Most new macOS features wire through here.
+- **`ConnectionManager.swift`**: iOS WebSocket connection manager.
+- **`WSProtocol.swift`**: WebSocket protocol definition (60+ action types).
+- **`Config.swift`**: Runtime configuration (reads from xcconfig via Info.plist).
 
 ## Making changes
 
@@ -106,7 +106,7 @@ This checks that all prerequisites are installed and your config is filled in.
 
 - Use `TarsyTheme` colors and monospaced fonts for all UI
 - Follow the existing SwiftUI patterns (`@Observable`, `@State`, `@Environment`)
-- Keep the dark, minimal aesthetic — no blue tints or colorful defaults
+- Keep the dark, minimal aesthetic: no blue tints or colorful defaults
 
 ### Database changes
 
@@ -115,7 +115,7 @@ This checks that all prerequisites are installed and your config is filled in.
 
 ## Pull requests
 
-- Keep PRs focused — one feature or fix per PR
+- Keep PRs focused: one feature or fix per PR
 - Include a clear description of what changed and why
 - Test on both iOS and macOS when touching shared code or networking
 - Run `xcodegen generate` in both app directories if you changed `project.yml`
@@ -124,9 +124,9 @@ This checks that all prerequisites are installed and your config is filled in.
 
 These are tracked as issues but always welcome:
 
-- **Test coverage** — Currently minimal. Tests for `WSProtocol`, `E2ECrypto`, and `ConnectionManager` would be high-impact.
-- **DaemonManager refactor** — At ~4,800 lines, this file should be split into focused modules.
-- **Doc comments** — Public APIs in `TarsyShared` need documentation.
+- **Test coverage**: Currently minimal. Tests for `WSProtocol`, `E2ECrypto`, and `ConnectionManager` would be high-impact.
+- **DaemonManager refactor**: At ~4,800 lines, this file should be split into focused modules.
+- **Doc comments**: Public APIs in `TarsyShared` need documentation.
 
 ## Questions?
 

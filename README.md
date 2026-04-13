@@ -25,7 +25,7 @@
 
 ## What is Tarsy?
 
-You kick off an AI coding agent on your Mac, close the lid, and walk away. From your iPhone, you can see exactly what it's doing — approve file changes, answer permission prompts, watch the screen in real-time, and course-correct when it goes off track.
+You kick off an AI coding agent on your Mac, close the lid, and walk away. From your iPhone, you can see exactly what it's doing. Approve file changes, answer permission prompts, watch the screen in real-time, and course-correct when it goes off track.
 
 No VNC. No SSH. No browser tab left open. Just your phone.
 
@@ -36,7 +36,8 @@ Tarsy works with **Claude Code**, **Gemini CLI**, **Codex CLI**, **Aider**, or a
 | Feature | Description |
 |---------|-------------|
 | **Remote Desktop** | Hardware-accelerated H.264 streaming from Mac to iPhone, over LAN or relay |
-| **AI Agent Control** | Send messages, answer prompts, approve permissions — for any CLI agent |
+| **AI Agent Control** | Send messages, answer prompts, approve permissions for any CLI agent |
+| **Hot Reload** | Push SwiftUI changes to the iOS Simulator without rebuilding |
 | **End-to-End Encrypted** | All packets and video frames encrypted with TOFU key pinning |
 | **Smart Connect** | Auto-detects LAN, falls back to relay seamlessly |
 | **Git Safety Net** | View diffs, browse history, rollback to checkpoints from your phone |
@@ -56,7 +57,7 @@ Tarsy is a monorepo with five components that work together:
 
 | Component | Tech | What it does |
 |-----------|------|-------------|
-| [`TarsyShared`](TarsyShared/) | Swift Package | Auth, networking, models, E2E crypto — shared by both apps |
+| [`TarsyShared`](TarsyShared/) | Swift Package | Auth, networking, models, E2E crypto (shared by both apps) |
 | [`TarsymacOS`](TarsymacOS/) | Swift, ScreenCaptureKit, VideoToolbox | Menu bar daemon: screen capture, remote input, AI engine management |
 | [`TarsyiOS`](TarsyiOS/) | SwiftUI, AVFoundation, StoreKit 2 | iPhone app: stream viewer, AI chat, workspace management |
 | [`relay`](relay/) | Bun, Hono, TypeScript | WebSocket bridge deployed on Fly.io |
@@ -81,9 +82,9 @@ iPhone (TarsyiOS)
 ### Prerequisites
 
 - macOS 14.0+, iOS 17.0+, Xcode 15+
-- [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `brew install xcodegen`
-- [Bun](https://bun.sh) — for the relay server
-- [Supabase CLI](https://supabase.com/docs/guides/cli) — for local backend
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
+- [Bun](https://bun.sh): needed for the relay server
+- [Supabase CLI](https://supabase.com/docs/guides/cli): needed for local backend
 
 ### Quick start
 
@@ -115,7 +116,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions, includin
 
 ```
 Tarsy/
-├── TarsyShared/            # Swift Package — shared across apps
+├── TarsyShared/            # Swift Package, shared across apps
 │   └── Sources/
 │       ├── Auth/           # AuthManager (Apple, GitHub, email)
 │       ├── Networking/     # ConnectionManager, WSProtocol, E2ECrypto
@@ -173,7 +174,7 @@ All packets and binary frames (including video) are encrypted using:
 - TOFU (Trust On First Use) key pinning
 - Per-packet authenticated encryption
 
-The relay server never sees plaintext — it forwards opaque blobs.
+The relay server never sees plaintext. It just forwards opaque blobs.
 
 ## Building for Distribution
 
@@ -186,19 +187,6 @@ export DEVID_PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles/YOUR
 # Build signed and notarized DMG
 ./scripts/build-dmg.sh
 ```
-
-## Pricing (Hosted Service)
-
-The following applies to the hosted service at [tarsy.dev](https://tarsy.dev). Self-hosted instances are free and unlimited.
-
-| | Free | Pro |
-|---|---|---|
-| Workspaces | 1 | Unlimited |
-| Remote Desktop | Yes | Yes |
-| AI Agent Control | Yes | Yes |
-| E2E Encryption | Yes | Yes |
-| OpenClaw (Local LLM) | — | Yes |
-| **Price** | $0 | $14.99/mo or $119.99/yr |
 
 ## Contributing
 
