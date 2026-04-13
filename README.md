@@ -1,57 +1,80 @@
 <p align="center">
-  <img src="logos/white-tarsy-logo.svg" alt="Tarsy" width="200" />
+  <img src="logos/white-tarsy-logo.svg" alt="Tarsy" width="180" />
 </p>
 
-<h3 align="center">Control your Mac. Steer your AI agents. From your iPhone.</h3>
+<h1 align="center">Tarsy</h1>
 
 <p align="center">
-  Tarsy is a remote desktop and AI coding agent platform for the Apple ecosystem.<br/>
-  Monitor, interact with, and steer AI agents working on your codebase — from anywhere.
+  <strong>Remote desktop + AI agent control for your Mac, from your iPhone.</strong>
 </p>
 
 <p align="center">
-  <a href="https://tarsy.dev">Website</a> &nbsp;·&nbsp;
-  <a href="#getting-started">Getting Started</a> &nbsp;·&nbsp;
-  <a href="#architecture">Architecture</a> &nbsp;·&nbsp;
-  <a href="#features">Features</a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+  <img src="https://img.shields.io/badge/platform-iOS%2017%20%7C%20macOS%2014-lightgrey.svg" alt="Platform" />
+  <img src="https://img.shields.io/badge/swift-5.9-orange.svg" alt="Swift 5.9" />
+</p>
+
+<p align="center">
+  <a href="https://tarsy.dev">Website</a> &nbsp;&middot;&nbsp;
+  <a href="#getting-started">Getting Started</a> &nbsp;&middot;&nbsp;
+  <a href="#architecture">Architecture</a> &nbsp;&middot;&nbsp;
+  <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 ---
 
-## Why Tarsy?
+## What is Tarsy?
 
 You kick off an AI coding agent on your Mac, close the lid, and walk away. From your iPhone, you can see exactly what it's doing — approve file changes, answer permission prompts, watch the screen in real-time, and course-correct when it goes off track.
 
 No VNC. No SSH. No browser tab left open. Just your phone.
 
+Tarsy works with **Claude Code**, **Gemini CLI**, **Codex CLI**, **Aider**, or any custom CLI agent.
+
 ## Features
 
-- **Remote Desktop Streaming** — Hardware-accelerated H.264 video from your Mac to your iPhone, over LAN or relay
-- **AI Agent Control** — Run and interact with Claude Code, Gemini CLI, Codex CLI, Aider, or any custom CLI agent
-- **End-to-End Encrypted** — All packets and video frames encrypted with TOFU key pinning
-- **Smart Connect** — Automatic LAN detection with seamless relay fallback
-- **Git Safety Net** — View diffs, browse history, rollback to checkpoints — all from your phone
-- **Live Activities** — Real-time agent status on your Lock Screen and Dynamic Island
-- **Voice Input** — Dictate messages to your agents in 9 languages
-- **Dev Server Preview** — Browse your running app through a proxied in-app browser
-- **File Explorer** — Browse your project tree and read files remotely
-- **MCP Store** — Detect and monitor MCP integrations across all installed agents
+| Feature | Description |
+|---------|-------------|
+| **Remote Desktop** | Hardware-accelerated H.264 streaming from Mac to iPhone, over LAN or relay |
+| **AI Agent Control** | Send messages, answer prompts, approve permissions — for any CLI agent |
+| **End-to-End Encrypted** | All packets and video frames encrypted with TOFU key pinning |
+| **Smart Connect** | Auto-detects LAN, falls back to relay seamlessly |
+| **Git Safety Net** | View diffs, browse history, rollback to checkpoints from your phone |
+| **Live Activities** | Agent status on Lock Screen and Dynamic Island |
+| **Voice Input** | Dictate to your agents in 9 languages |
+| **Dev Server Preview** | In-app browser proxied through WebSocket to your running dev server |
+| **File Explorer** | Browse project tree and read files remotely |
+| **MCP Store** | Detect and monitor MCP integrations across all installed agents |
 
 ## Architecture
 
-Tarsy is a monorepo with five components:
+Tarsy is a monorepo with five components that work together:
 
 <p align="center">
-  <img src="docs/architecture_diagram.png" alt="Tarsy Architecture Diagram" width="800" />
+  <img src="docs/architecture_diagram.png" alt="Architecture" width="720" />
 </p>
 
-| Component | Tech | Role |
-|-----------|------|------|
-| **TarsyShared** | Swift Package | Shared auth, networking, models, E2E crypto |
-| **TarsymacOS** | Swift, ScreenCaptureKit, VideoToolbox | Menu bar daemon — capture, input, AI engines |
-| **TarsyiOS** | SwiftUI, AVFoundation, StoreKit 2 | iPhone app — stream, chat, manage |
-| **Relay** | Bun, Hono, TypeScript | WebSocket bridge on Fly.io |
-| **Supabase** | PostgreSQL, Edge Functions | Auth, database, push notifications |
+| Component | Tech | What it does |
+|-----------|------|-------------|
+| [`TarsyShared`](TarsyShared/) | Swift Package | Auth, networking, models, E2E crypto — shared by both apps |
+| [`TarsymacOS`](TarsymacOS/) | Swift, ScreenCaptureKit, VideoToolbox | Menu bar daemon: screen capture, remote input, AI engine management |
+| [`TarsyiOS`](TarsyiOS/) | SwiftUI, AVFoundation, StoreKit 2 | iPhone app: stream viewer, AI chat, workspace management |
+| [`relay`](relay/) | Bun, Hono, TypeScript | WebSocket bridge deployed on Fly.io |
+| [`supabase`](supabase/) | PostgreSQL, Edge Functions | Auth, database, push notifications |
+
+### How it connects
+
+```
+iPhone (TarsyiOS)
+    │
+    ├── LAN direct ──── port 8642 ──── Mac (TarsymacOS)
+    │
+    └── Relay ────── wss://relay ────── Mac (TarsymacOS)
+                         │
+                      Fly.io
+```
+
+**Smart Connect** tries LAN first (3s timeout), then falls back to relay. All traffic is end-to-end encrypted regardless of path.
 
 ## Getting Started
 
@@ -62,43 +85,67 @@ Tarsy is a monorepo with five components:
 - [Bun](https://bun.sh) — for the relay server
 - [Supabase CLI](https://supabase.com/docs/guides/cli) — for local backend
 
-### Setup
+### Quick start
 
 ```bash
-# Clone the repo
+# 1. Clone
 git clone https://github.com/LeddoEngano/Tarsy.git
 cd Tarsy
 
-# Configure secrets (fill in your Supabase credentials and team ID)
+# 2. Configure (fill in your Supabase credentials and Apple team ID)
 cp Tarsy.xcconfig.template Tarsy.xcconfig
-# Edit Tarsy.xcconfig with your values
 
-# Generate Xcode projects
+# 3. Generate Xcode projects
 cd TarsyiOS && xcodegen generate && cd ..
 cd TarsymacOS && xcodegen generate && cd ..
 
-# Install relay dependencies
+# 4. Install dependencies and start relay
 npm install
-
-# Start the relay dev server
 npm run dev:relay
 
-# Start the website dev server
-npm run dev:website
-
-# Validate your setup
+# 5. Validate
 ./scripts/setup-check.sh
 ```
 
-Open `TarsymacOS/TarsymacOS.xcodeproj` and `TarsyiOS/TarsyiOS.xcodeproj` in Xcode, then build and run.
+Then open both `.xcodeproj` files in Xcode and build.
 
-### Environment
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions, including how to configure your own Supabase project.
 
-Create `.env` files with your Supabase credentials and other secrets. See the Supabase and relay directories for required variables. Never commit secrets.
+## Project Structure
 
-## AI Engines
+```
+Tarsy/
+├── TarsyShared/            # Swift Package — shared across apps
+│   └── Sources/
+│       ├── Auth/           # AuthManager (Apple, GitHub, email)
+│       ├── Networking/     # ConnectionManager, WSProtocol, E2ECrypto
+│       ├── Models/         # Workspace, Machine, ChatMessage, etc.
+│       └── Services/       # Workspace, Machine, Chat, Profile services
+├── TarsymacOS/             # macOS menu bar daemon
+│   └── Sources/
+│       ├── DaemonManager   # Central orchestrator
+│       ├── Capture/        # ScreenCaptureKit, H264 encoder
+│       ├── Input/          # Remote input dispatch
+│       ├── AI/             # Engine sessions, agent detection
+│       └── Networking/     # Relay client, local WebSocket server
+├── TarsyiOS/               # iOS app
+│   └── Sources/
+│       ├── Stream/         # H264 decoder, player, interactive view
+│       ├── Views/          # Dashboard, workspace, chat, settings
+│       ├── Git/            # Safety net, diff viewer
+│       └── Theme/          # TarsyTheme design system
+├── TarsyWindows/           # Windows client (C#)
+├── relay/                  # Bun + Hono WebSocket relay
+├── supabase/               # Migrations, edge functions
+├── website/                # Next.js landing page
+└── scripts/                # Build, deploy, setup validation
+```
 
-Tarsy supports multiple AI coding agents running as CLI processes on your Mac:
+## Key Concepts
+
+### AI Engines
+
+Tarsy supports multiple AI coding agents, each running as a CLI process on the Mac:
 
 | Engine | Integration | Notes |
 |--------|------------|-------|
@@ -106,19 +153,39 @@ Tarsy supports multiple AI coding agents running as CLI processes on your Mac:
 | Gemini CLI | Generic engine | Full chat support |
 | Codex CLI | Generic engine | Full chat support |
 | Aider | Generic engine | Full chat support |
-| Custom | Generic engine | Any CLI tool |
+| Custom | Generic engine | Any CLI tool you want |
 
 All engines conform to `AIEngineProtocol`. The macOS app auto-detects installed agents on startup via `AgentDetector`.
 
-## Networking
+### WebSocket Protocol
 
-Communication uses WebSocket with a custom binary packet protocol (`WSProtocol`, 60+ action types):
+Communication uses a custom binary packet protocol (`WSProtocol`) with 60+ action types covering:
 
-- **LAN mode** — Direct connection via `Network.framework` on port 8642
-- **Relay mode** — Through `wss://tarsy-relay.fly.dev/ws` with JWT auth
-- **Smart Connect** — Tries LAN first (3s timeout), falls back to relay
+- Workspace lifecycle, stream control, remote input
+- AI agent messaging, questions, and responses
+- Git operations, file browsing, dev server management
+- MCP health checks, sudo handling, browser automation
 
-All traffic is end-to-end encrypted. Video frames use binary WebSocket messages with a 4-byte `H264` prefix.
+### End-to-End Encryption
+
+All packets and binary frames (including video) are encrypted using:
+- ECDH key exchange bound to the TLS session
+- TOFU (Trust On First Use) key pinning
+- Per-packet authenticated encryption
+
+The relay server never sees plaintext — it forwards opaque blobs.
+
+## Building for Distribution
+
+```bash
+# Set required env vars
+export SIGN_IDENTITY="Developer ID Application: Your Name (TEAM_ID)"
+export DEVELOPMENT_TEAM="YOUR_TEAM_ID"
+export DEVID_PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles/YOUR_PROFILE.provisionprofile"
+
+# Build signed and notarized DMG
+./scripts/build-dmg.sh
+```
 
 ## Pricing (Hosted Service)
 
@@ -133,53 +200,9 @@ The following applies to the hosted service at [tarsy.dev](https://tarsy.dev). S
 | OpenClaw (Local LLM) | — | Yes |
 | **Price** | $0 | $14.99/mo or $119.99/yr |
 
-## Building for Distribution
-
-```bash
-# Build signed and notarized DMG
-./scripts/build-dmg.sh
-```
-
-Requires a Developer ID Application certificate and notarization credentials stored in Keychain as `tarsy-notarize`.
-
-## Project Structure
-
-<details>
-<summary>Expand full directory map</summary>
-
-```
-tarsy/
-├── TarsyShared/           # Swift Package — shared code
-│   └── Sources/
-│       ├── Auth/          # AuthManager (Apple, GitHub, email)
-│       ├── Networking/    # ConnectionManager, WSProtocol, E2ECrypto
-│       ├── Models/        # Workspace, Machine, ChatMessage, etc.
-│       └── Services/      # Workspace, Machine, Chat, Profile services
-├── TarsymacOS/            # macOS menu bar app
-│   └── Sources/
-│       ├── DaemonManager  # Central orchestrator
-│       ├── Capture/       # ScreenCaptureKit, H264 encoder
-│       ├── Input/         # Remote input dispatch
-│       ├── AI/            # Engine sessions, agent detection
-│       └── Networking/    # Relay client, local WebSocket server
-├── TarsyiOS/              # iOS app
-│   └── Sources/
-│       ├── Stream/        # H264 decoder, player, interactive view
-│       ├── Chat/          # AI chat interface
-│       ├── Dashboard/     # Machine & workspace management
-│       ├── Git/           # Safety net, diff viewer
-│       └── Theme/         # TarsyTheme design system
-├── relay/                 # Bun + Hono WebSocket relay
-├── supabase/              # Migrations, edge functions
-├── website/               # Next.js landing page
-└── scripts/               # Build & deployment scripts
-```
-
-</details>
-
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
+Contributions are welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
 
 For security vulnerabilities, please see [SECURITY.md](SECURITY.md).
 
@@ -190,5 +213,5 @@ MIT License. See [LICENSE](LICENSE).
 ---
 
 <p align="center">
-  Built for developers who let AI agents do the heavy lifting — and want to stay in control.
+  Built by <a href="https://github.com/LeddoEngano">Leddo</a>
 </p>
