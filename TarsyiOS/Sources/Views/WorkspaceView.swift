@@ -475,12 +475,12 @@ struct WorkspaceView: View {
                     }
 
                     Button(action: { addBuildRunTab() }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "hammer.fill")
-                            Text("Build & Run")
-                            Text("(Hot Reload)")
-                                .font(TarsyTheme.font(size: 11, weight: .regular))
+                        Label {
+                            Text("Build & Run ") + Text("(Hot Reload)")
+                                .font(.system(size: 13, weight: .regular, design: .monospaced))
                                 .foregroundColor(TarsyTheme.textSecondary)
+                        } icon: {
+                            Image(systemName: "hammer.fill")
                         }
                     }
 
