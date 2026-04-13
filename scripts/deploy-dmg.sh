@@ -139,6 +139,8 @@ VERSIONED_URL="https://${SUPABASE_PROJECT_ID}.supabase.co/storage/v1/object/publ
 
 echo "==> Uploading $VERSIONED_NAME to Supabase..."
 
+# Delete existing versioned DMG if re-deploying same version
+supabase storage rm "ss:///${BUCKET}/${VERSIONED_NAME}" --linked --experimental --yes 2>/dev/null || true
 # Upload versioned DMG (immutable, long cache)
 supabase storage cp "$DMG_PATH" "ss:///${BUCKET}/${VERSIONED_NAME}" \
     --cache-control "public, max-age=31536000, immutable" \
