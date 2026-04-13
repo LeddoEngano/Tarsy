@@ -92,20 +92,25 @@ iPhone (TarsyiOS)
 git clone https://github.com/LeddoEngano/Tarsy.git
 cd Tarsy
 
-# 2. Configure (fill in your Supabase credentials and Apple team ID)
+# 2. Configure the apps (Supabase credentials, Apple team ID)
 cp Tarsy.xcconfig.template Tarsy.xcconfig
 
-# 3. Generate Xcode projects
+# 3. Configure the relay server
+cp relay/.env.example relay/.env
+
+# 4. Generate Xcode projects
 cd TarsyiOS && xcodegen generate && cd ..
 cd TarsymacOS && xcodegen generate && cd ..
 
-# 4. Install dependencies and start relay
+# 5. Install dependencies and start relay
 npm install
 npm run dev:relay
 
-# 5. Validate
+# 6. Validate
 ./scripts/setup-check.sh
 ```
+
+Edit `Tarsy.xcconfig` and `relay/.env` with your Supabase credentials before building. See each `.env.example` file for the required variables.
 
 Then open both `.xcodeproj` files in Xcode and build.
 

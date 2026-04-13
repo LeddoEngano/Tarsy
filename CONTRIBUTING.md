@@ -60,6 +60,9 @@ Open `TarsymacOS/TarsymacOS.xcodeproj` and `TarsyiOS/TarsyiOS.xcodeproj` in Xcod
 ### 6. Run the relay locally (optional)
 
 ```bash
+cp relay/.env.example relay/.env
+# Edit relay/.env with your Supabase credentials
+
 npm install
 npm run dev:relay
 ```
