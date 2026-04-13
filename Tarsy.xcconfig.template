@@ -4,13 +4,15 @@
 // Tarsy.xcconfig is gitignored and should never be committed.
 //
 // See CONTRIBUTING.md for setup instructions.
+//
+// IMPORTANT: Use /$(/) instead of // in URLs — xcconfig treats // as a comment.
 
 // Supabase project credentials (get these from your Supabase dashboard)
-TARSY_SUPABASE_URL = https://YOUR_PROJECT.supabase.co
+TARSY_SUPABASE_URL = https:/$()/YOUR_PROJECT.supabase.co
 TARSY_SUPABASE_ANON_KEY = your_anon_key_here
 
 // WebSocket relay URL (use your own relay deployment or the default)
-TARSY_RELAY_URL = wss://your-relay.fly.dev/ws
+TARSY_RELAY_URL = wss:/$()/your-relay.fly.dev/ws
 
 // Apple Developer Team ID (find in developer.apple.com → Membership)
 DEVELOPMENT_TEAM = YOUR_TEAM_ID
