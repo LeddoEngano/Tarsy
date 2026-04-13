@@ -1,11 +1,6 @@
-<div align="center">
-  <a href="#what-is-tarsy">
-    <picture>
-      <source media="(prefers-color-scheme: light)" srcset="logos/logo-04-dark.png" />
-      <img src="logos/logo-04.png" alt="Tarsy" width="300" />
-    </picture>
-  </a>
-</div>
+<p align="center">
+  <img src="logos/logo-04-dark.png" alt="Tarsy" width="300" />
+</p>
 
 <p align="center">
   <strong>Remote desktop + AI agent control for your Mac, from your iPhone.</strong>
