@@ -224,6 +224,22 @@ public enum WSAction: String, Codable, Sendable {
     case e2eKeyExchange = "e2e:key_exchange"
     case e2eKeyExchangeResponse = "e2e:key_exchange_response"
 
+    // Build & Run
+    case buildStart = "build:start"
+    case buildProgress = "build:progress"
+    case buildComplete = "build:complete"
+    case buildError = "build:error"
+
+    // Hot Reload
+    case hotReloadStatus = "hotreload:status"
+    case hotReloadInjection = "hotreload:injection"
+    case hotReloadError = "hotreload:error"
+
+    // Simulator
+    case simulatorList = "simulator:list"
+    case simulatorListResult = "simulator:list_result"
+    case simulatorStatus = "simulator:status"
+
     // System
     case auth
     case authSuccess = "auth:success"

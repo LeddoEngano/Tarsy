@@ -31,9 +31,11 @@ class DaemonManager: ObservableObject {
     private var wakeObserver: Any?
     private var isReconnectingRelay = false
     private var portMonitor: PortMonitorService!
+    private var hotReloadService: HotReloadService!
     private var displaySleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var systemSleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var lastActiveClientId: String = "relay"
+    private var lastStreamStack: String?
     private var cachedAuthToken: String?
     private var detectedAgents: [AIEngineType] = []
     private var detectedSlashCommands: [[String: String]] = []
@@ -103,6 +105,16 @@ class DaemonManager: ObservableObject {
             },
             rewriteSudoCommand: { command, workingDirectory in
                 await SudoPasswordManager.shared.rewriteCommandIfSudo(command, workingDirectory: workingDirectory)
+            }
+        )
+
+        hotReloadService = HotReloadService(
+            sendPacket: { [weak self] packet, clientId in
+                guard let self else { return }
+                await self.sendToClientOrRelay(packet, to: clientId)
+            },
+            log: { [weak self] msg in
+                Task { @MainActor in self?.log(msg) }
             }
         )
 
@@ -430,14 +442,17 @@ class DaemonManager: ObservableObject {
             },
             onDisconnect: { [weak self] clientId in
                 Task { @MainActor in
-                    self?.connectedClients = max(0, (self?.connectedClients ?? 1) - 1)
-                    if self?.lastActiveClientId == clientId {
-                        self?.lastActiveClientId = "relay"
+                    guard let self else { return }
+                    self.connectedClients = max(0, self.connectedClients - 1)
+                    if self.lastActiveClientId == clientId {
+                        self.lastActiveClientId = "relay"
                     }
-                    // Stop stream when last LAN client disconnects
-                    if (self?.connectedClients ?? 0) == 0 && self?.h264Encoder != nil {
-                        self?.log("Last LAN client disconnected — stopping stream")
-                        await self?.stopStreamCleanup()
+                    // Stop stream when last LAN client disconnects,
+                    // but only if relay is also not connected (user might be watching via relay)
+                    let relayActive = await self.relayClient.connected
+                    if self.connectedClients == 0 && !relayActive && self.h264Encoder != nil {
+                        self.log("Last LAN client disconnected (no relay) — stopping stream")
+                        await self.stopStreamCleanup()
                     }
                 }
             },
@@ -946,6 +961,16 @@ class DaemonManager: ObservableObject {
             await handleHTTPRequest(clientId: clientId, packet: packet)
         case .systemResources:
             await handleSystemResources(clientId: clientId, packet: packet)
+        // Build & Run / Hot Reload
+        case .buildStart:
+            await handleBuildStart(clientId: clientId, packet: packet)
+        case .simulatorList:
+            await handleSimulatorList(clientId: clientId, packet: packet)
+        case .buildProgress, .buildComplete, .buildError,
+             .hotReloadStatus, .hotReloadInjection, .hotReloadError,
+             .simulatorListResult, .simulatorStatus:
+            break  // macOS→iOS only, no-op on macOS side
+
         case .relayNoClients:
             log("Relay reports no clients connected — stopping stream")
             await stopStreamCleanup()
@@ -1877,7 +1902,8 @@ class DaemonManager: ObservableObject {
     // MARK: - Stream
 
     private func handleStreamStart(clientId: String, packet: WSPacket) async {
-        let stack = packet.payload?["stack"] ?? "web"
+        let stack = packet.payload?["stack"] ?? lastStreamStack ?? "web"
+        lastStreamStack = stack
         // Stream URL only applies to web/fullstack workspaces. Mobile streams
         // the iOS Simulator window directly; backend has no UI. Ignore any
         // stray streamUrl for those stacks to avoid accidentally opening a
@@ -4768,6 +4794,41 @@ class DaemonManager: ObservableObject {
                 to: clientId
             )
         }
+    }
+
+    // MARK: - Build & Run / Hot Reload Handlers
+
+    private func handleBuildStart(clientId: String, packet: WSPacket) async {
+        log("[HotReload] handleBuildStart received: path=\(packet.payload?["path"] ?? "nil") scheme=\(packet.payload?["scheme"] ?? "nil")")
+        guard let path = packet.payload?["path"],
+              let scheme = packet.payload?["scheme"] else {
+            await sendToClientOrRelay(
+                WSPacket(action: .buildError, payload: ["message": "Missing path or scheme"], id: packet.id),
+                to: clientId
+            )
+            return
+        }
+        let simulatorUDID = packet.payload?["simulatorUDID"] ?? ""
+        let configuration = packet.payload?["configuration"] ?? "Debug"
+
+        await hotReloadService.buildAndRun(
+            clientId: clientId,
+            packetId: packet.id,
+            workspacePath: (path as NSString).expandingTildeInPath,
+            scheme: scheme,
+            simulatorUDID: simulatorUDID,
+            configuration: configuration
+        )
+    }
+
+    private func handleSimulatorList(clientId: String, packet: WSPacket) async {
+        let devices = await SimulatorController.listDevices()
+        let encoded = (try? JSONEncoder().encode(devices))
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
+        await sendToClientOrRelay(
+            WSPacket(action: .simulatorListResult, payload: ["devices": encoded], id: packet.id),
+            to: clientId
+        )
     }
 }
 

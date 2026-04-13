@@ -18,7 +18,32 @@ targets:
     type: application
     platform: macOS
     sources:
-      - Sources
+      - path: Sources
+        excludes:
+          - "HotReload/Dylib/**"
+    postCompileScripts:
+      - script: |
+          # Compile TarsyHotReload.dylib for iOS Simulator (arm64)
+          SDK_PATH=$(xcrun --sdk iphonesimulator --show-sdk-path)
+          DYLIB_OUT="$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH/Resources/TarsyHotReload.dylib"
+          xcrun clang -arch arm64 \
+            -target arm64-apple-ios17.0-simulator \
+            -isysroot "$SDK_PATH" \
+            -dynamiclib \
+            -framework Foundation \
+            -o "$DYLIB_OUT" \
+            "$SRCROOT/Sources/HotReload/Dylib/TarsyHotReload.c" \
+            "$SRCROOT/Sources/HotReload/Dylib/fishhook.c" \
+          && echo "Built TarsyHotReload.dylib" \
+          || echo "warning: Failed to build TarsyHotReload.dylib"
+        name: "Compile HotReload Dylib"
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/Sources/HotReload/Dylib/TarsyHotReload.c
+          - $(SRCROOT)/Sources/HotReload/Dylib/fishhook.c
+          - $(SRCROOT)/Sources/HotReload/Dylib/fishhook.h
+        outputFiles:
+          - $(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/TarsyHotReload.dylib
     info:
       path: Info.plist
       properties:
