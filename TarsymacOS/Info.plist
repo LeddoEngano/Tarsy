@@ -21,7 +21,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.1.0</string>
+	<string>1.1.1</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -32,7 +32,7 @@
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>21</string>
+	<string>22</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSApplicationCategoryType</key>
@@ -51,5 +51,11 @@
 	<string>Tarsy may need to access projects stored on network shares. Without this, agents will fail on network-volume projects and you will not be able to approve it remotely.</string>
 	<key>NSRemovableVolumesUsageDescription</key>
 	<string>Tarsy may need to access projects stored on external drives. Without this, agents will fail on removable-volume projects and you will not be able to approve it remotely.</string>
+	<key>TARSY_RELAY_URL</key>
+	<string>$(TARSY_RELAY_URL)</string>
+	<key>TARSY_SUPABASE_ANON_KEY</key>
+	<string>$(TARSY_SUPABASE_ANON_KEY)</string>
+	<key>TARSY_SUPABASE_URL</key>
+	<string>$(TARSY_SUPABASE_URL)</string>
 </dict>
 </plist>
