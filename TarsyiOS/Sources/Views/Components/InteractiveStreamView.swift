@@ -22,11 +22,13 @@ struct HiddenKeyboardField: UIViewRepresentable {
         tf.returnKeyType = .default
         tf.inputAssistantItem.leadingBarButtonGroups = []
         tf.inputAssistantItem.trailingBarButtonGroups = []
+        tf.text = " "
         return tf
     }
 
     func updateUIView(_ uiView: HiddenTextField, context: Context) {
         if isActive && !uiView.isFirstResponder {
+            uiView.text = " "
             uiView.becomeFirstResponder()
         } else if !isActive && uiView.isFirstResponder {
             uiView.resignFirstResponder()
@@ -548,21 +550,21 @@ struct InteractiveStreamView: View {
 
     private func requestHighQuality() {
 #if DEBUG
-        print("[InteractiveStream] requestHighQuality — sending stream:start quality=high")
+        print("[InteractiveStream] requestHighQuality — sending stream:start quality=high stack=\(workspaceStack.rawValue)")
 #endif
         connectionManager.send(WSPacket(
             action: .streamStart,
-            payload: ["quality": "high"]
+            payload: ["quality": "high", "stack": workspaceStack.rawValue]
         ))
     }
 
     private func requestNormalQuality() {
 #if DEBUG
-        print("[InteractiveStream] requestNormalQuality — sending stream:start quality=normal")
+        print("[InteractiveStream] requestNormalQuality — sending stream:start quality=normal stack=\(workspaceStack.rawValue)")
 #endif
         connectionManager.send(WSPacket(
             action: .streamStart,
-            payload: ["quality": "normal"]
+            payload: ["quality": "normal", "stack": workspaceStack.rawValue]
         ))
     }
 
