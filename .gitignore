@@ -56,6 +56,13 @@ supabase/.temp/
 Secrets.xcconfig
 Tarsy.xcconfig
 
+# Internal docs (not for public repo)
+PRD.md
+HANDOFF.md
+FEATURES.md
+docs/SECURITY_ROADMAP.md
+docs/PRD-*.md
+
 # Claude Code
 .agents/
 .claude/settings.local.json
