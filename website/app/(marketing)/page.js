@@ -100,44 +100,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* What is Tarsy */}
-      <section className="py-20 md:py-28">
-        <div className="max-w-4xl mx-auto px-6">
-          <ScrollReveal>
-            <span className="text-[11px] uppercase tracking-[0.2em] text-amber">
-              What is Tarsy
-            </span>
-            <h2 className="font-display text-3xl md:text-4xl font-bold tracking-tight text-cream mt-3">
-              Remote Mac control from your iPhone
-            </h2>
-          </ScrollReveal>
-          <ScrollReveal delay={0.1}>
-            <div className="mt-8 space-y-4 text-sm text-taupe leading-relaxed max-w-3xl">
-              <p>
-                Tarsy streams your Mac screen to your iPhone in real time using hardware-accelerated
-                H.264 encoding via ScreenCaptureKit and VideoToolbox. You get adaptive bitrate
-                streaming — 6 Mbps at 30 fps on your local network, and 2 Mbps at 20 fps over the
-                internet relay — with latency low enough to interact with your IDE, terminal, or
-                browser naturally.
-              </p>
-              <p>
-                Beyond screen streaming, Tarsy lets you run and interact with AI coding agents
-                directly from your iPhone. Send prompts, review output, approve or deny permission
-                requests, and monitor token usage for Claude Code, Gemini CLI, Codex CLI, Aider, or
-                any custom CLI tool. Each agent runs as a local process on your Mac — Tarsy never
-                sends your code to its own servers.
-              </p>
-              <p>
-                All communication between your iPhone and Mac is end-to-end encrypted using TOFU
-                (trust-on-first-use) key pinning. The relay server at Fly.io forwards encrypted
-                packets without the ability to read them. Screen frames are never stored or logged on
-                any server. Your code and your screen stay yours.
-              </p>
-            </div>
-          </ScrollReveal>
-        </div>
-      </section>
-
       {/* Features */}
       <section id="features" className="py-24 md:py-32">
         <div className="max-w-6xl mx-auto px-6">
