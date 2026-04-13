@@ -29,14 +29,18 @@ targets:
           # Compile TarsyHotReload.dylib for iOS Simulator (arm64)
           SDK_PATH=$(xcrun --sdk iphonesimulator --show-sdk-path)
           DYLIB_OUT="$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH/Resources/TarsyHotReload.dylib"
+          DYLIB_TMP="$TEMP_DIR/TarsyHotReload.dylib"
+          mkdir -p "$(dirname "$DYLIB_OUT")"
+          mkdir -p "$(dirname "$DYLIB_TMP")"
           xcrun clang -arch arm64 \
             -target arm64-apple-ios17.0-simulator \
             -isysroot "$SDK_PATH" \
             -dynamiclib \
             -framework Foundation \
-            -o "$DYLIB_OUT" \
+            -o "$DYLIB_TMP" \
             "$SRCROOT/Sources/HotReload/Dylib/TarsyHotReload.c" \
             "$SRCROOT/Sources/HotReload/Dylib/fishhook.c" \
+          && cp "$DYLIB_TMP" "$DYLIB_OUT" \
           && echo "Built TarsyHotReload.dylib" \
           || echo "warning: Failed to build TarsyHotReload.dylib"
         name: "Compile HotReload Dylib"
@@ -53,8 +57,8 @@ targets:
         CFBundleIconName: AppIcon
         CFBundleDisplayName: Tarsy
         CFBundleName: Tarsy
-        CFBundleShortVersionString: "1.1.1"
-        CFBundleVersion: "22"
+        CFBundleShortVersionString: "1.1.0"
+        CFBundleVersion: "21"
         LSUIElement: true
         LSApplicationCategoryType: "public.app-category.developer-tools"
         NSAppleEventsUsageDescription: "Tarsy needs to control your browser to manage tabs and navigate pages."

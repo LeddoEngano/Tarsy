@@ -68,21 +68,24 @@ echo "    Signature OK"
 # ─── Create DMG ──────────────────────────────────────────────────────
 echo "==> Creating DMG..."
 
-# Remove existing DMG if present (create-dmg fails otherwise)
+# Remove existing DMG if present
 rm -f "$DMG_PATH"
 
-create-dmg \
-    --volname "$APP_NAME" \
-    --volicon "$ROOT_DIR/TarsymacOS/Sources/Assets.xcassets/AppIcon.appiconset/icon_512.png" \
-    --background "$ROOT_DIR/scripts/dmg-background.png" \
-    --window-size 400 350 \
-    --icon-size 128 \
-    --text-size 14 \
-    --icon "$APP_NAME.app" 200 150 \
-    --no-internet-enable \
-    "$DMG_PATH" \
-    "$APP_PATH" \
-    || true  # create-dmg may exit non-zero even on success
+# Create DMG using hdiutil directly (avoids Finder AppleScript timeouts)
+DMG_TMP="$BUILD_DIR/tmp.dmg"
+DMG_VOL="/Volumes/$APP_NAME"
+
+# Detach any leftover mounts with same volume name
+hdiutil detach "$DMG_VOL" -force 2>/dev/null || true
+
+hdiutil create -size 200m -fs HFS+ -volname "$APP_NAME" "$DMG_TMP"
+ATTACH_OUTPUT=$(hdiutil attach "$DMG_TMP" -mountpoint "$DMG_VOL")
+DEVICE=$(echo "$ATTACH_OUTPUT" | head -1 | awk '{print $1}')
+cp -R "$APP_PATH" "$DMG_VOL/"
+ln -s /Applications "$DMG_VOL/Applications"
+hdiutil detach "$DEVICE"
+hdiutil convert "$DMG_TMP" -format UDZO -o "$DMG_PATH"
+rm -f "$DMG_TMP"
 
 # Verify DMG was created
 if [ ! -f "$DMG_PATH" ]; then
