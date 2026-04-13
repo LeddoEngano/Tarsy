@@ -20,15 +20,6 @@ const steps = [
   },
 ];
 
-const proFeatures = [
-  "Unlimited workspaces",
-  "Remote access via relay",
-  "All AI engines",
-  "Git checkpoints & rollback",
-  "File explorer",
-  "Voice to text",
-];
-
 export default function Home() {
   return (
     <>
@@ -136,94 +127,6 @@ export default function Home() {
                 </div>
               </ScrollReveal>
             ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Pricing */}
-      <section id="pricing" className="py-24 md:py-32">
-        <div className="max-w-5xl mx-auto px-6 text-center">
-          <ScrollReveal>
-            <span className="text-[11px] uppercase tracking-[0.2em] text-amber">
-              Pricing
-            </span>
-            <h2 className="font-display text-3xl md:text-4xl font-bold tracking-tight text-cream mt-3">
-              Start free, go Pro
-            </h2>
-            <p className="text-sm text-taupe mt-3">
-              One workspace is free, forever. Upgrade for the full toolkit.
-            </p>
-          </ScrollReveal>
-
-          <div className="mt-16 grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-[780px] mx-auto">
-            <ScrollReveal delay={0.1} className="h-full">
-              <div className="bg-surface-raised/80 border border-surface-overlay/40 rounded-2xl p-8 h-full flex flex-col text-left">
-                <div className="text-[11px] uppercase tracking-[0.15em] text-amber mb-6">
-                  Monthly
-                </div>
-                <div className="flex items-baseline gap-1">
-                  <span className="font-display text-4xl font-bold text-cream">
-                    $14.99
-                  </span>
-                  <span className="text-xs text-taupe">/month</span>
-                </div>
-                <p className="text-[11px] text-taupe/60 mt-1">
-                  Cancel anytime
-                </p>
-                <ul className="mt-8 space-y-0 flex-1">
-                  {proFeatures.map((f) => (
-                    <li
-                      key={f}
-                      className="flex items-center gap-3 py-2.5 border-b border-surface-overlay/30 last:border-0"
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber shrink-0" />
-                      <span className="text-[13px] text-cream">{f}</span>
-                    </li>
-                  ))}
-                </ul>
-                <span
-                  className="block text-center bg-surface-overlay/50 text-taupe text-sm font-semibold px-6 py-3 rounded-xl mt-8 cursor-not-allowed select-none"
-                >
-                  Coming Soon
-                </span>
-              </div>
-            </ScrollReveal>
-
-            <ScrollReveal delay={0.2} className="h-full">
-              <div className="relative bg-surface-raised border border-amber/20 rounded-2xl p-8 h-full flex flex-col text-left shadow-lg shadow-amber/[0.02]">
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber text-surface text-[10px] font-bold uppercase tracking-wider px-3.5 py-1 rounded-full whitespace-nowrap">
-                  Save 33%
-                </div>
-                <div className="text-[11px] uppercase tracking-[0.15em] text-amber mb-6">
-                  Annual
-                </div>
-                <div className="flex items-baseline gap-1">
-                  <span className="font-display text-4xl font-bold text-cream">
-                    $9.99
-                  </span>
-                  <span className="text-xs text-taupe">/month</span>
-                </div>
-                <p className="text-[11px] text-taupe/60 mt-1">
-                  $119.99 billed annually
-                </p>
-                <ul className="mt-8 space-y-0 flex-1">
-                  {proFeatures.map((f) => (
-                    <li
-                      key={f}
-                      className="flex items-center gap-3 py-2.5 border-b border-surface-overlay/30 last:border-0"
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber shrink-0" />
-                      <span className="text-[13px] text-cream">{f}</span>
-                    </li>
-                  ))}
-                </ul>
-                <span
-                  className="block text-center bg-amber/10 text-taupe text-sm font-semibold px-6 py-3 rounded-xl mt-8 cursor-not-allowed select-none border border-amber/10"
-                >
-                  Coming Soon
-                </span>
-              </div>
-            </ScrollReveal>
           </div>
         </div>
       </section>

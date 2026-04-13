@@ -57,7 +57,7 @@ function HeroDevices() {
         {/* MacBook base */}
         <div className="mx-auto w-[80%] h-2.5 bg-[#1a1a1a] rounded-b-lg border-x border-b border-surface-overlay/50" />
         <div className="mx-auto w-[20%] h-1 bg-[#222]/60 rounded-b-sm" />
-        <p className="text-center mt-3 text-[10px] text-taupe/30 uppercase tracking-[0.15em] select-none">
+        <p className="text-center mt-3 text-[10px] text-taupe/60 uppercase tracking-[0.15em] select-none">
           executes on your mac
         </p>
       </motion.div>
@@ -111,7 +111,7 @@ function HeroDevices() {
             </div>
           </div>
         </div>
-        <p className="text-center mt-2 text-[10px] text-taupe/30 uppercase tracking-[0.15em] select-none">
+        <p className="text-center mt-2 text-[10px] text-taupe/60 uppercase tracking-[0.15em] select-none">
           you send from here
         </p>
       </motion.div>

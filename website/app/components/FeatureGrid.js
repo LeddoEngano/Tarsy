@@ -4,30 +4,30 @@ import { useRef } from "react";
 import { motion, useInView } from "framer-motion";
 import {
   Monitor,
-  Camera,
   Globe,
   Brain,
   Microphone,
   Folders,
+  Lightning,
 } from "@phosphor-icons/react";
 
 const features = [
   {
-    icon: Monitor,
-    title: "Live screen streaming",
-    desc: "Stream your Mac screen to your iPhone in real time. See your IDE, terminal, and browser as you work.",
+    icon: Lightning,
+    title: "Swift hot reload",
+    desc: "Instantly preview SwiftUI changes without rebuilding. Edit code on your Mac and see updates on your iPhone in seconds.",
     colSpan: "md:col-span-3",
   },
   {
-    icon: Camera,
-    title: "Screenshot to AI",
-    desc: "Capture your screen and send it to Claude for vision-powered analysis and code suggestions.",
+    icon: Monitor,
+    title: "Live screen streaming",
+    desc: "Stream your Mac screen to your iPhone in real time. See your IDE, terminal, and browser as you work.",
     colSpan: "md:col-span-2",
   },
   {
     icon: Globe,
-    title: "Remote access via relay",
-    desc: "Access your Mac from anywhere. No port forwarding or VPN needed — our relay handles everything.",
+    title: "Remote access",
+    desc: "Access your Mac from anywhere with end-to-end encryption. No port forwarding or VPN needed.",
     colSpan: "md:col-span-2",
   },
   {

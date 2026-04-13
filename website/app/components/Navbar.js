@@ -18,12 +18,6 @@ export default function Navbar() {
             Features
           </Link>
           <Link
-            href="/#pricing"
-            className="text-[11px] uppercase tracking-wider text-taupe no-underline transition-colors duration-200 hover:text-amber hover:opacity-100"
-          >
-            Pricing
-          </Link>
-          <Link
             href="/contact"
             className="text-[11px] uppercase tracking-wider text-taupe no-underline transition-colors duration-200 hover:text-amber hover:opacity-100"
           >
