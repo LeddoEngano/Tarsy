@@ -1,13 +1,25 @@
+using System;
+
 namespace TarsyWindows.Models;
 
 /// <summary>
-/// Configuration constants — mirrors TarsyShared/Config.swift.
+/// Configuration — reads from environment variables.
+/// Copy .env.template to .env and fill in your values, or set environment variables directly.
 /// </summary>
 public static class TarsyConfig
 {
-    public const string SupabaseUrl = "https://xtblbghhlkroskzljqcl.supabase.co";
-    public const string SupabaseAnonKey = "sb_publishable_J_nOhA2NRFGtz7W1vd_ZaA_2St0Emzs";
-    public const string RelayUrl = "wss://tarsy-relay.fly.dev/ws";
+    public static string SupabaseUrl =>
+        Environment.GetEnvironmentVariable("TARSY_SUPABASE_URL")
+        ?? throw new InvalidOperationException("TARSY_SUPABASE_URL not set. See .env.template.");
+
+    public static string SupabaseAnonKey =>
+        Environment.GetEnvironmentVariable("TARSY_SUPABASE_ANON_KEY")
+        ?? throw new InvalidOperationException("TARSY_SUPABASE_ANON_KEY not set. See .env.template.");
+
+    public static string RelayUrl =>
+        Environment.GetEnvironmentVariable("TARSY_RELAY_URL")
+        ?? "wss://tarsy-relay.fly.dev/ws";
+
     public const string RelayDevUrl = "ws://localhost:8080/ws";
     public const int WebSocketPort = 8642;
 }

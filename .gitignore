@@ -53,6 +53,7 @@ supabase/.temp/
 
 # App secrets (xcconfig with API keys)
 Secrets.xcconfig
+Tarsy.xcconfig
 
 # Claude Code
 .agents/

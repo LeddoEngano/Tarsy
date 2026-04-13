@@ -6,8 +6,8 @@ APP_NAME="Tarsy"
 BUNDLE_ID="com.tarsy.macos"
 SCHEME="TarsymacOS"
 PROJECT="TarsymacOS/TarsymacOS.xcodeproj"
-SIGN_IDENTITY="Developer ID Application: OPALLOO INOVACOES LTDA (J2M334NJ3L)"
-NOTARIZE_PROFILE="tarsy-notarize"
+SIGN_IDENTITY="${SIGN_IDENTITY:?Set SIGN_IDENTITY env var (e.g. 'Developer ID Application: Your Name (TEAM_ID)')}"
+NOTARIZE_PROFILE="${NOTARIZE_PROFILE:-tarsy-notarize}"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
@@ -30,7 +30,7 @@ xcodebuild \
     -archivePath "$BUILD_DIR/$APP_NAME.xcarchive" \
     archive \
     CODE_SIGN_STYLE="Automatic" \
-    DEVELOPMENT_TEAM="J2M334NJ3L" \
+    DEVELOPMENT_TEAM="${DEVELOPMENT_TEAM:?Set DEVELOPMENT_TEAM env var}" \
     | tail -5
 
 # ─── Export and re-sign with Developer ID ────────────────────────────
@@ -39,7 +39,7 @@ ARCHIVE_APP="$BUILD_DIR/$APP_NAME.xcarchive/Products/Applications/$SCHEME.app"
 cp -R "$ARCHIVE_APP" "$APP_PATH"
 
 # Embed the Developer ID provisioning profile (macOS 26+ AMFI requires it)
-DEVID_PROFILE="$HOME/Library/MobileDevice/Provisioning Profiles/07789465-803c-4d02-8fd8-46d61a5480d9.provisionprofile"
+DEVID_PROFILE="${DEVID_PROFILE_PATH:?Set DEVID_PROFILE_PATH env var to your Developer ID provisioning profile}"
 cp "$DEVID_PROFILE" "$APP_PATH/Contents/embedded.provisionprofile"
 
 echo "==> Signing with Developer ID..."

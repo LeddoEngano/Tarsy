@@ -25,7 +25,7 @@ function HeroDevices() {
           {/* Screen area */}
           <div className="mx-1.5 mb-1.5 rounded-lg overflow-hidden bg-surface aspect-[16/10.5] relative">
             <video
-              src="https://xtblbghhlkroskzljqcl.supabase.co/storage/v1/object/public/website-media/mac.mp4"
+              src="/mac.mp4"
               autoPlay
               loop
               muted
@@ -82,7 +82,7 @@ function HeroDevices() {
               <div className="w-12 h-3 bg-[#000] rounded-full" />
             </div>
             <video
-              src="https://xtblbghhlkroskzljqcl.supabase.co/storage/v1/object/public/website-media/iphone.mp4"
+              src="/iphone.mp4"
               autoPlay
               loop
               muted

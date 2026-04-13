@@ -1,0 +1,19 @@
+// Tarsy.xcconfig — Local configuration for building Tarsy
+//
+// Copy this file to Tarsy.xcconfig and fill in your values.
+// Tarsy.xcconfig is gitignored and should never be committed.
+//
+// See CONTRIBUTING.md for setup instructions.
+
+// Supabase project credentials (get these from your Supabase dashboard)
+TARSY_SUPABASE_URL = https://YOUR_PROJECT.supabase.co
+TARSY_SUPABASE_ANON_KEY = your_anon_key_here
+
+// WebSocket relay URL (use your own relay deployment or the default)
+TARSY_RELAY_URL = wss://your-relay.fly.dev/ws
+
+// Apple Developer Team ID (find in developer.apple.com → Membership)
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+
+// UltraContext API key (optional, for UltraContext integration)
+ULTRACONTEXT_API_KEY = your_ultracontext_api_key_here

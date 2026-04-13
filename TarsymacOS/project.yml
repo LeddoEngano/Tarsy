@@ -4,6 +4,9 @@ options:
   deploymentTarget:
     macOS: "14.0"
   xcodeVersion: "16.0"
+configFiles:
+  Debug: ../Tarsy.xcconfig
+  Release: ../Tarsy.xcconfig
 settings:
   base:
     SWIFT_VERSION: "5.9"
@@ -61,6 +64,9 @@ targets:
         NSRemovableVolumesUsageDescription: "Tarsy may need to access projects stored on external drives. Without this, agents will fail on removable-volume projects and you will not be able to approve it remotely."
         NSNetworkVolumesUsageDescription: "Tarsy may need to access projects stored on network shares. Without this, agents will fail on network-volume projects and you will not be able to approve it remotely."
         ITSAppUsesNonExemptEncryption: false
+        TARSY_SUPABASE_URL: $(TARSY_SUPABASE_URL)
+        TARSY_SUPABASE_ANON_KEY: $(TARSY_SUPABASE_ANON_KEY)
+        TARSY_RELAY_URL: $(TARSY_RELAY_URL)
         ATSApplicationFontsPath: Fonts
         CFBundleURLTypes:
           - CFBundleURLSchemes:
@@ -79,7 +85,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tarsy.macos
-        DEVELOPMENT_TEAM: "J2M334NJ3L"
+        DEVELOPMENT_TEAM: "$(DEVELOPMENT_TEAM)"
         CODE_SIGN_IDENTITY: "Apple Development"
         CODE_SIGN_STYLE: "Automatic"
         ENABLE_HARDENED_RUNTIME: YES

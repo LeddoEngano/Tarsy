@@ -19,7 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
-SUPABASE_PROJECT_ID="xtblbghhlkroskzljqcl"
+SUPABASE_PROJECT_ID="${SUPABASE_PROJECT_ID:?Set SUPABASE_PROJECT_ID env var}"
 BUCKET="tarsy-releases"
 BUILD_DIR="$ROOT_DIR/build"
 DMG_PATH="$BUILD_DIR/Tarsy.dmg"

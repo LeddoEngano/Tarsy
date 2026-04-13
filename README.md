@@ -66,8 +66,12 @@ Tarsy is a monorepo with five components:
 
 ```bash
 # Clone the repo
-git clone https://github.com/anthropics/tarsy.git
-cd tarsy
+git clone https://github.com/LeddoEngano/Tarsy.git
+cd Tarsy
+
+# Configure secrets (fill in your Supabase credentials and team ID)
+cp Tarsy.xcconfig.template Tarsy.xcconfig
+# Edit Tarsy.xcconfig with your values
 
 # Generate Xcode projects
 cd TarsyiOS && xcodegen generate && cd ..
@@ -81,6 +85,9 @@ npm run dev:relay
 
 # Start the website dev server
 npm run dev:website
+
+# Validate your setup
+./scripts/setup-check.sh
 ```
 
 Open `TarsymacOS/TarsymacOS.xcodeproj` and `TarsyiOS/TarsyiOS.xcodeproj` in Xcode, then build and run.
@@ -113,7 +120,9 @@ Communication uses WebSocket with a custom binary packet protocol (`WSProtocol`,
 
 All traffic is end-to-end encrypted. Video frames use binary WebSocket messages with a 4-byte `H264` prefix.
 
-## Pricing
+## Pricing (Hosted Service)
+
+The following applies to the hosted service at [tarsy.dev](https://tarsy.dev). Self-hosted instances are free and unlimited.
 
 | | Free | Pro |
 |---|---|---|
@@ -168,9 +177,15 @@ tarsy/
 
 </details>
 
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
+
+For security vulnerabilities, please see [SECURITY.md](SECURITY.md).
+
 ## License
 
-Proprietary. All rights reserved.
+MIT License. See [LICENSE](LICENSE).
 
 ---
 
