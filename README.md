@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="logos/white-tarsy-logo.svg" alt="Tarsy" width="180" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="logos/white-tarsy-logo.svg" />
+    <source media="(prefers-color-scheme: light)" srcset="logos/tarsy-logo.png" />
+    <img src="logos/tarsy-logo.png" alt="Tarsy" width="120" />
+  </picture>
 </p>
 
 <h1 align="center">Tarsy</h1>
