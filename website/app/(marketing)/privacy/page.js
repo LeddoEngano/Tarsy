@@ -1,7 +1,12 @@
 import styles from "../../legal.module.css";
 
 export const metadata = {
-  title: "Privacy Policy - Tarsy",
+  title: "Privacy Policy",
+  description:
+    "How Tarsy handles your data. End-to-end encrypted screen streaming, no tracking, no third-party analytics. LGPD, GDPR, and CCPA compliant.",
+  alternates: {
+    canonical: "https://www.tarsy.dev/privacy",
+  },
 };
 
 export default function Privacy() {

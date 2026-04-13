@@ -12,8 +12,8 @@ function HeroDevices() {
       {/* MacBook */}
       <motion.div
         className="relative"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
+        initial={{ y: 12 }}
+        animate={{ y: 0 }}
         transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
       >
         {/* Screen bezel */}
@@ -26,6 +26,7 @@ function HeroDevices() {
           <div className="mx-1.5 mb-1.5 rounded-lg overflow-hidden bg-surface aspect-[16/10.5] relative">
             <video
               src="/mac.mp4"
+              poster="/mac-poster.jpg"
               autoPlay
               loop
               muted
@@ -65,8 +66,8 @@ function HeroDevices() {
       {/* iPhone */}
       <motion.div
         className="absolute bottom-2 left-0 z-10 w-[120px]"
-        initial={{ opacity: 0, y: 30, scale: 0.95 }}
-        animate={{ opacity: 1, y: 0, scale: 1 }}
+        initial={{ y: 16, scale: 0.95 }}
+        animate={{ y: 0, scale: 1 }}
         transition={{
           delay: 0.3,
           duration: 0.7,
@@ -77,12 +78,12 @@ function HeroDevices() {
           {/* Screen area — full bleed, Dynamic Island floats on top */}
           <div className="rounded-[1.1rem] overflow-hidden bg-surface aspect-[9/20] relative">
             {/* Dynamic Island */}
-            {/* Dynamic Island */}
             <div className="absolute top-0.5 left-0 right-0 flex justify-center z-10">
               <div className="w-12 h-3 bg-[#000] rounded-full" />
             </div>
             <video
               src="/iphone.mp4"
+              poster="/iphone-poster.jpg"
               autoPlay
               loop
               muted

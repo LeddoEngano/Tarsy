@@ -14,8 +14,8 @@ export default function ScrollReveal({
   return (
     <motion.div
       ref={ref}
-      initial={{ opacity: 0, y: 24 }}
-      animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 24 }}
+      initial={{ y: 16 }}
+      animate={isInView ? { y: 0 } : { y: 16 }}
       transition={{
         duration: 0.6,
         delay,

@@ -1,7 +1,12 @@
 import styles from "../../legal.module.css";
 
 export const metadata = {
-  title: "Terms of Use - Tarsy",
+  title: "Terms of Use",
+  description:
+    "Terms of Use for Tarsy remote dev environment platform. Covers usage rights, subscription terms, intellectual property, and liability limitations.",
+  alternates: {
+    canonical: "https://www.tarsy.dev/terms",
+  },
 };
 
 export default function Terms() {

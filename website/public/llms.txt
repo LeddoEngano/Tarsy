@@ -1,0 +1,49 @@
+# Tarsy
+
+> Tarsy is a remote desktop and AI coding agent platform for the Apple ecosystem. It lets developers control their Mac and run AI coding agents remotely from their iPhone.
+
+## What Tarsy Does
+
+Tarsy streams your Mac screen to your iPhone in real time using hardware-accelerated H.264 encoding (ScreenCaptureKit + VideoToolbox). You can tap, scroll, type, and interact with your Mac remotely — no VPN or port forwarding required. All communication is end-to-end encrypted with TOFU (trust-on-first-use) key pinning.
+
+Tarsy also lets you run and interact with AI coding agents (Claude Code, Gemini CLI, Codex CLI, Aider, or any custom CLI tool) directly from your iPhone. You can send prompts, review agent output, approve or deny permission requests, and monitor token usage — all while away from your desk.
+
+## Key Facts
+
+- Platforms: iOS 17.0+ (iPhone/iPad), macOS 14.0+ (Apple Silicon & Intel)
+- Connectivity: Smart connect (LAN first, relay fallback), direct LAN (port 8642), or relay (wss://tarsy-relay.fly.dev)
+- Security: End-to-end encryption on all packets and binary frames. Screen data is never stored or logged on any server.
+- AI Engines: Claude Code (Anthropic), Gemini CLI (Google), Codex CLI (OpenAI), Aider, Custom CLI
+- Voice Input: 9 languages, on-device processing when available (SFSpeechRecognizer)
+- Pricing: Free (1 workspace), Pro $14.99/month or $119.99/year (unlimited workspaces + OpenClaw local AI)
+- Company: OPALLOO INOVACOES LTDA, São Paulo, Brazil
+
+## Pages
+
+- Homepage: https://www.tarsy.dev
+- Contact: https://www.tarsy.dev/contact
+- Privacy Policy: https://www.tarsy.dev/privacy
+- Terms of Use: https://www.tarsy.dev/terms
+- Download for Mac: https://www.tarsy.dev/download/macos
+- App Store (iOS): https://apps.apple.com/us/app/tarsy/id6761079923
+- GitHub: https://github.com/LeddoEngano/Tarsy
+
+## Features
+
+- Live screen streaming (H.264, adaptive bitrate: 6Mbps/30fps LAN, 2Mbps/20fps relay)
+- Remote input (tap, scroll, keyboard, drag, pinch) on Mac and iOS Simulator
+- Multi AI engine support with interactive prompts, permission handling, and token tracking
+- Voice-to-text prompt input in 9 languages
+- Workspace management with git clone, stack detection, dependency install, dev server start
+- Git safety net with checkpoint, diff, rollback, branch management
+- File explorer with tree view and search
+- In-app web browser with dev server port detection and proxy
+- MCP store with health indicators for all installed agents
+- Push notifications for agent status changes
+- Live Activities on Lock Screen and Dynamic Island during active AI sessions
+
+## Contact
+
+- Support: support@tarsy.dev
+- Privacy: privacy@tarsy.dev
+- General: contact@tarsy.dev
