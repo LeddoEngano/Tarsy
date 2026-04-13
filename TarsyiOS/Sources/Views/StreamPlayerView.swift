@@ -183,6 +183,9 @@ struct StreamPlayerView: View {
                                 streamButton("square.stack.3d.up") {
                                     connectionManager.send(WSPacket(action: .remoteButton, payload: ["button": "app_switcher"]))
                                 }
+                                streamButton("rotate.right") {
+                                    connectionManager.send(WSPacket(action: .remoteButton, payload: ["button": "rotate_right"]))
+                                }
                             }
                             .padding(4)
                             .background(.black.opacity(0.4))
