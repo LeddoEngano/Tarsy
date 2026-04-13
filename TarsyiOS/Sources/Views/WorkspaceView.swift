@@ -107,6 +107,15 @@ struct WorkspaceView: View {
     /// commands with quiet stretches like `npx expo run:ios`).
     @State private var runningTerminals: Set<String> = []
 
+    // MARK: - Build & Hot Reload State
+    @State private var buildOutput: [String] = []
+    @State private var buildPhase: String = ""
+    @State private var buildPercent: Int = 0
+    @State private var hotReloadStatus: String = "idle"
+    @State private var lastInjectedFile: String = ""
+    @State private var hotReloadInjectionCount: Int = 0
+    @State private var isBuildRunning: Bool = false
+
     /// Returns true if the packet's sessionId matches the currently active tab
     private func isActiveTabSession(_ packet: WSPacket) -> Bool {
         let sid = packet.payload?["sessionId"] ?? ""
@@ -348,8 +357,15 @@ struct WorkspaceView: View {
         }
         .onDisappear {
             cleanupHandler()
-            // Don't end activities when navigating away — agent keeps running in background.
-            // Activities end naturally via engineComplete/engineError packets.
+        }
+        .onChange(of: viewMode) { newMode in
+            print("[HotReload-iOS] onChange viewMode: \(newMode) isFullscreenStream=\(isFullscreenStream) isFullscreenBrowser=\(isFullscreenBrowser)")
+        }
+        .onChange(of: isFullscreenStream) { val in
+            print("[HotReload-iOS] onChange isFullscreenStream: \(val) viewMode=\(viewMode)")
+        }
+        .onChange(of: isFullscreenBrowser) { val in
+            print("[HotReload-iOS] onChange isFullscreenBrowser: \(val) viewMode=\(viewMode)")
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
             guard isInputFocused || isTerminalInputActive else { return }
@@ -456,6 +472,10 @@ struct WorkspaceView: View {
 
                     Button(action: { addTerminalTab() }) {
                         Label("Terminal", systemImage: "chevron.left.forwardslash.chevron.right")
+                    }
+
+                    Button(action: { addBuildRunTab() }) {
+                        Label("Build & Run", systemImage: "hammer.fill")
                     }
 
                     if !detectedAgents.isEmpty {
@@ -810,7 +830,17 @@ struct WorkspaceView: View {
 
                     Divider().background(TarsyTheme.backgroundTertiary)
 
-                    if currentTab.type == .terminal {
+                    if currentTab.type == .buildAndRun {
+                        BuildRunView(
+                            workspace: workspace,
+                            buildOutput: $buildOutput,
+                            buildPhase: $buildPhase,
+                            buildPercent: $buildPercent,
+                            hotReloadStatus: $hotReloadStatus,
+                            hotReloadInjectionCount: $hotReloadInjectionCount,
+                            isBuildRunning: $isBuildRunning
+                        )
+                    } else if currentTab.type == .terminal {
                         TerminalContentView(
                             workspace: workspace,
                             chatService: chatService,
@@ -839,7 +869,7 @@ struct WorkspaceView: View {
                         chatArea
                     }
 
-                    if currentTab.type != .terminal {
+                    if currentTab.type != .terminal && currentTab.type != .buildAndRun {
                         inputBar
                     }
                 }
@@ -931,7 +961,17 @@ struct WorkspaceView: View {
 
             ZStack {
                 VStack(spacing: 0) {
-                    if currentTab.type == .terminal {
+                    if currentTab.type == .buildAndRun {
+                        BuildRunView(
+                            workspace: workspace,
+                            buildOutput: $buildOutput,
+                            buildPhase: $buildPhase,
+                            buildPercent: $buildPercent,
+                            hotReloadStatus: $hotReloadStatus,
+                            hotReloadInjectionCount: $hotReloadInjectionCount,
+                            isBuildRunning: $isBuildRunning
+                        )
+                    } else if currentTab.type == .terminal {
                         TerminalContentView(
                             workspace: workspace,
                             chatService: chatService,
@@ -968,7 +1008,7 @@ struct WorkspaceView: View {
                         }
                     }
 
-                    if currentTab.type != .terminal {
+                    if currentTab.type != .terminal && currentTab.type != .buildAndRun {
                         inputBar
                     }
                 }
@@ -1033,6 +1073,7 @@ struct WorkspaceView: View {
     private var viewModeSwitch: some View {
         HStack(spacing: 0) {
             Button(action: {
+                print("[HotReload-iOS] viewMode -> .stream (was \(viewMode))")
                 withAnimation(.easeInOut(duration: 0.2)) { viewMode = .stream }
                 // Signal StreamPlayerView to auto-start if not already running
                 if !isStreamActive {
@@ -1049,7 +1090,10 @@ struct WorkspaceView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 5)
             }
-            Button(action: { withAnimation(.easeInOut(duration: 0.2)) { viewMode = .browser } }) {
+            Button(action: {
+                print("[HotReload-iOS] viewMode -> .browser (was \(viewMode))")
+                withAnimation(.easeInOut(duration: 0.2)) { viewMode = .browser }
+            }) {
                 HStack(spacing: 4) {
                     Image(systemName: "iphone")
                         .font(TarsyTheme.font(size: 10))
@@ -1854,6 +1898,17 @@ struct WorkspaceView: View {
         connectionManager.send(createPacket)
     }
 
+    private func addBuildRunTab() {
+        // Only allow one Build & Run tab
+        if let existing = tabs.firstIndex(where: { $0.type == .buildAndRun }) {
+            selectedTabIndex = existing
+            return
+        }
+        let tab = TerminalTab(id: "build-run", title: "Build & Run", isFixed: false, type: .buildAndRun, sessionId: nil, engineType: nil)
+        tabs.append(tab)
+        selectedTabIndex = tabs.count - 1
+    }
+
     private func continueSessionInTab(_ session: UltraContextSession, engineType: AIEngineType? = nil) {
         let engineType = engineType ?? AIEngineType(rawValue: session.engineType ?? "claude") ?? .claude
         let uniqueId = "\(engineType.rawValue)-\(UUID().uuidString.prefix(8))"
@@ -2165,6 +2220,68 @@ struct WorkspaceView: View {
                         }
                     }
 
+                // Build & Run
+                case .buildProgress:
+                    print("[HotReload-iOS] buildProgress: phase=\(packet.payload?["phase"] ?? "?") percent=\(packet.payload?["percent"] ?? "?") viewMode=\(viewMode) isFullscreenStream=\(isFullscreenStream)")
+                    // Only update build log if the Build & Run tab is visible
+                    if let output = packet.payload?["output"], !output.isEmpty,
+                       currentTab.type == .buildAndRun || output.contains("error:") {
+                        buildOutput.append(output)
+                        if buildOutput.count > 200 { buildOutput.removeFirst(buildOutput.count - 200) }
+                    }
+                    if let phase = packet.payload?["phase"] { buildPhase = phase }
+                    if let pct = packet.payload?["percent"], let p = Int(pct) { buildPercent = p }
+
+                case .buildComplete:
+                    print("[HotReload-iOS] buildComplete viewMode=\(viewMode) isFullscreenStream=\(isFullscreenStream)")
+                    isBuildRunning = false
+                    buildPhase = "complete"
+                    buildPercent = 100
+                    hotReloadStatus = "watching"
+                    Haptics.success()
+
+                case .buildError:
+                    print("[HotReload-iOS] buildError: \(packet.payload?["message"] ?? "?") viewMode=\(viewMode)")
+                    isBuildRunning = false
+                    buildPhase = "error"
+                    if let msg = packet.payload?["message"] {
+                        buildOutput.append("ERROR: \(msg)")
+                    }
+                    Haptics.error()
+
+                case .hotReloadStatus:
+                    print("[HotReload-iOS] hotReloadStatus: \(packet.payload?["status"] ?? "?") viewMode=\(viewMode)")
+                    hotReloadStatus = packet.payload?["status"] ?? "idle"
+                    if let file = packet.payload?["file"] { lastInjectedFile = file }
+
+                case .hotReloadInjection:
+                    print("[HotReload-iOS] hotReloadInjection: \(packet.payload?["file"] ?? "?")")
+                    hotReloadInjectionCount += 1
+                    if let file = packet.payload?["file"],
+                       let duration = packet.payload?["durationMs"] {
+                        buildOutput.append("Hot reloaded \(file) in \(duration)ms")
+                    }
+                    Haptics.light()
+
+                case .hotReloadError:
+                    print("[HotReload-iOS] hotReloadError: \(packet.payload?["message"] ?? "?")")
+                    hotReloadStatus = "error"
+                    if let msg = packet.payload?["message"] {
+                        buildOutput.append("Hot reload: \(msg)")
+                    }
+                    if packet.payload?["recoverable"] == "false" {
+                        hotReloadStatus = "rebuild_needed"
+                    }
+
+                case .simulatorListResult:
+                    break
+
+                case .simulatorStatus:
+                    print("[HotReload-iOS] simulatorStatus: \(packet.payload?["status"] ?? "?") viewMode=\(viewMode)")
+                    if let status = packet.payload?["status"] {
+                        buildOutput.append("Simulator: \(status)")
+                    }
+
                 default:
                     break
                 }
@@ -2422,6 +2539,7 @@ struct TerminalTab: Identifiable {
         case claude
         case engine
         case terminal
+        case buildAndRun
     }
 }
 
@@ -2444,6 +2562,9 @@ struct TabButton: View {
                     AgentIcon(engineType: tab.engineType ?? .custom, size: 12)
                 case .terminal:
                     Image(systemName: "chevron.left.forwardslash.chevron.right")
+                        .font(.caption2)
+                case .buildAndRun:
+                    Image(systemName: "hammer.fill")
                         .font(.caption2)
                 }
 
