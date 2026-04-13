@@ -14,6 +14,7 @@
 
 <p align="center">
   <a href="https://tarsy.dev">Website</a> &nbsp;&middot;&nbsp;
+  <a href="https://x.com/tarsydev">Twitter/X</a> &nbsp;&middot;&nbsp;
   <a href="#getting-started">Getting Started</a> &nbsp;&middot;&nbsp;
   <a href="#architecture">Architecture</a> &nbsp;&middot;&nbsp;
   <a href="CONTRIBUTING.md">Contributing</a>
