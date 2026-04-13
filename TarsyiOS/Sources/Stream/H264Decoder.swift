@@ -11,6 +11,7 @@ import CoreImage
 class H264Decoder: ObservableObject {
     @Published var displayLayer: AVSampleBufferDisplayLayer?
     @Published var fps: Int = 0
+    @Published var videoSize: CGSize = .zero
 
     private var formatDescription: CMVideoFormatDescription?
     private var vps: Data? // HEVC only
@@ -68,10 +69,21 @@ class H264Decoder: ObservableObject {
         pps = nil
         fps = 0
         frameCount = 0
+        videoSize = .zero
         isHEVC = false
         codecDetected = false
         totalFramesReceived = 0
         totalFramesDecoded = 0
+    }
+
+    private func updateVideoSize(from desc: CMVideoFormatDescription) {
+        let dimensions = CMVideoFormatDescriptionGetDimensions(desc)
+        let newSize = CGSize(width: CGFloat(dimensions.width), height: CGFloat(dimensions.height))
+        if newSize != videoSize {
+            DispatchQueue.main.async { [weak self] in
+                self?.videoSize = newSize
+            }
+        }
     }
 
     /// Stops decoding and provisions a fresh AVSampleBufferDisplayLayer.
@@ -194,6 +206,7 @@ class H264Decoder: ObservableObject {
 
         if status == noErr, let desc {
             formatDescription = desc
+            updateVideoSize(from: desc)
         }
     }
 
@@ -263,6 +276,7 @@ class H264Decoder: ObservableObject {
 
         if status == noErr, let desc {
             formatDescription = desc
+            updateVideoSize(from: desc)
         }
     }
 

@@ -191,11 +191,9 @@ class RemoteInputService {
             // Long press on lock = Siri (Cmd+L held)
             sendSimulatorShortcut(virtualKey: 37, flags: .maskCommand, hold: true)
         case "rotate_left":
-            // Cmd+Left Arrow = Rotate Left
-            sendSimulatorShortcut(virtualKey: 123, flags: .maskCommand)
+            rotateSimulator(direction: "Rotate Left")
         case "rotate_right":
-            // Cmd+Right Arrow = Rotate Right
-            sendSimulatorShortcut(virtualKey: 124, flags: .maskCommand)
+            rotateSimulator(direction: "Rotate Right")
         case "app_switcher":
             // Double Cmd+Shift+H = App Switcher
             inputQueue.async { [self] in
@@ -217,6 +215,26 @@ class RemoteInputService {
             #if DEBUG
             print("[RemoteInput] Unknown button: \(button)")
             #endif
+        }
+    }
+
+    var onRotate: (() -> Void)?
+
+    private func rotateSimulator(direction: String) {
+        inputQueue.async { [self] in
+            ensureWindowFocused()
+            let key: CGKeyCode = direction == "Rotate Left" ? 123 : 124
+            let down = CGEvent(keyboardEventSource: eventSource, virtualKey: key, keyDown: true)
+            down?.flags = .maskCommand
+            down?.post(tap: .cghidEventTap)
+            let up = CGEvent(keyboardEventSource: eventSource, virtualKey: key, keyDown: false)
+            up?.flags = .maskCommand
+            up?.post(tap: .cghidEventTap)
+            // Give the Simulator time to resize its window, then restart capture
+            usleep(500_000)
+            DispatchQueue.main.async { [self] in
+                onRotate?()
+            }
         }
     }
 

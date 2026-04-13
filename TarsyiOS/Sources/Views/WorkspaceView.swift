@@ -475,7 +475,13 @@ struct WorkspaceView: View {
                     }
 
                     Button(action: { addBuildRunTab() }) {
-                        Label("Build & Run", systemImage: "hammer.fill")
+                        HStack(spacing: 4) {
+                            Image(systemName: "hammer.fill")
+                            Text("Build & Run")
+                            Text("(Hot Reload)")
+                                .font(TarsyTheme.font(size: 11, weight: .regular))
+                                .foregroundColor(TarsyTheme.textSecondary)
+                        }
                     }
 
                     if !detectedAgents.isEmpty {

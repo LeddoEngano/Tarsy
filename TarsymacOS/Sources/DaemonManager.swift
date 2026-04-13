@@ -124,6 +124,14 @@ class DaemonManager: ObservableObject {
             await self.sendToClientOrRelay(packet, to: self.lastActiveClientId)
         }
 
+        // Restart screen capture after simulator rotation so dimensions update
+        remoteInput.onRotate = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                await self.restartScreenCapture()
+            }
+        }
+
         // 1. Start WebSocket server
         await startWSServer()
 
@@ -2080,6 +2088,51 @@ class DaemonManager: ObservableObject {
                 WSPacket(action: .error, payload: ["message": "Stream failed: \(error.localizedDescription)"], id: packet.id),
                 to: clientId
             )
+        }
+    }
+
+    /// Restart screen capture to pick up new window dimensions (e.g. after simulator rotation)
+    private func restartScreenCapture() async {
+        guard screenCapture.isCapturing, let stack = lastStreamStack else { return }
+        log("restartScreenCapture: restarting for stack=\(stack)")
+
+        guard let window = await screenCapture.findWindow(forStack: stack) else {
+            log("restartScreenCapture: no window found")
+            return
+        }
+
+        let ownerApp = window.owningApplication?.applicationName ?? ""
+        let isSimulator = ownerApp == "Simulator"
+        let isRelay = lastActiveClientId == "relay"
+        let scale: CGFloat = isRelay ? 0.85 : 1.0
+        let fps = isRelay ? 24 : 30
+        let bitrate = isRelay ? 3_000_000 : 6_000_000
+
+        let captureWidth = Int(window.frame.width * scale)
+        let captureHeight = Int(window.frame.height * scale)
+
+        let encoder = H264Encoder()
+        encoder.configure(width: captureWidth, height: captureHeight, fps: fps, bitrate: bitrate, isRelay: isRelay)
+        self.h264Encoder = encoder
+
+        setupEncoderFrameRelay(encoder: encoder, isRelay: isRelay, clientId: lastActiveClientId)
+
+        screenCapture.onPixelBuffer = { [weak encoder] pixelBuffer in
+            encoder?.encode(pixelBuffer)
+        }
+
+        do {
+            try await screenCapture.startCapture(window: window, fps: fps, scale: scale, cropTitleBar: isSimulator)
+            remoteInput.setTargetWindow(
+                frame: window.frame,
+                windowId: CGWindowID(window.windowID),
+                pid: pid_t(window.owningApplication?.processID ?? 0),
+                isSimulator: isSimulator,
+                appName: ownerApp
+            )
+            log("restartScreenCapture: done (\(captureWidth)x\(captureHeight))")
+        } catch {
+            log("restartScreenCapture: FAILED — \(error)")
         }
     }
 

@@ -1,18 +1,28 @@
 import SwiftUI
 import TarsyShared
 import AVFoundation
+import Combine
 
 class StreamViewModel: ObservableObject {
     @Published var isConnected = false
     @Published var fps: Int = 0
+    @Published var videoSize: CGSize = .zero
 
     private var frameCount = 0
     private var fpsTimer: Timer?
     private var totalFramesReceived = 0
     private let h264Prefix = Data("H264".utf8)
+    private var videoSizeSub: AnyCancellable?
 
     /// H.264 hardware decoder
     let h264Decoder = H264Decoder()
+
+    init() {
+        videoSizeSub = h264Decoder.$videoSize
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .assign(to: \.videoSize, on: self)
+    }
 
     func disconnect() {
         fpsTimer?.invalidate()
@@ -133,6 +143,7 @@ struct StreamPlayerView: View {
             if isActive && viewModel.isConnected {
                 // Stream content — H.264 via WebSocket
                 VStack(spacing: 0) {
+                    Spacer(minLength: 0)
                     if let layer = viewModel.h264Decoder.displayLayer {
                         GeometryReader { geo in
                             H264PlayerView(displayLayer: layer)
@@ -145,7 +156,10 @@ struct StreamPlayerView: View {
                                 .gesture(miniScrollGesture(containerSize: geo.size))
                                 .gesture(miniLongPressGesture(containerSize: geo.size))
                         }
-                        .aspectRatio(16.0/13.0, contentMode: .fit)
+                        .aspectRatio(viewModel.videoSize.width > 0
+                            ? viewModel.videoSize.width / viewModel.videoSize.height
+                            : 16.0/13.0, contentMode: .fit)
+                        .animation(.easeInOut(duration: 0.3), value: viewModel.videoSize.width)
                         .clipped()
                     }
                     Spacer(minLength: 0)
