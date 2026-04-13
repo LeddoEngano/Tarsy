@@ -26,6 +26,7 @@ DMG_PATH="$BUILD_DIR/Tarsy.dmg"
 PROJECT_YML="$ROOT_DIR/TarsymacOS/project.yml"
 ROUTE_JS="$ROOT_DIR/website/app/api/latest-version/route.js"
 NEXT_CONFIG="$ROOT_DIR/website/next.config.mjs"
+DOWNLOAD_PAGE="$ROOT_DIR/website/app/(marketing)/download/macos/page.js"
 
 # ─── Helpers ────────────────────────────────────────────────────────
 
@@ -86,15 +87,15 @@ fi
 # ─── Snapshot for rollback ─────────────────────────────────────────
 cp "$PROJECT_YML" "$PROJECT_YML.bak"
 cp "$ROUTE_JS" "$ROUTE_JS.bak"
-cp "$NEXT_CONFIG" "$NEXT_CONFIG.bak"
+cp "$DOWNLOAD_PAGE" "$DOWNLOAD_PAGE.bak"
 
 rollback() {
     echo ""
     echo "==> ERROR: Deploy failed. Rolling back file changes..."
     mv -f "$PROJECT_YML.bak" "$PROJECT_YML"
     mv -f "$ROUTE_JS.bak" "$ROUTE_JS"
-    mv -f "$NEXT_CONFIG.bak" "$NEXT_CONFIG"
-    echo "    Rolled back project.yml, route.js, next.config.mjs"
+    mv -f "$DOWNLOAD_PAGE.bak" "$DOWNLOAD_PAGE"
+    echo "    Rolled back project.yml, route.js, download page"
     # Regenerate Xcode project with old version
     cd "$ROOT_DIR/TarsymacOS" && xcodegen generate 2>&1 | tail -1
     echo "    Regenerated Xcode project"
@@ -148,7 +149,7 @@ echo "    Uploaded: $VERSIONED_URL"
 
 # Update Tarsy.dmg (delete first to avoid 409, then re-upload with short cache)
 echo "==> Updating Tarsy.dmg (latest)..."
-echo "y" | supabase storage rm "ss:///${BUCKET}/Tarsy.dmg" --linked --experimental 2>/dev/null || true
+supabase storage rm "ss:///${BUCKET}/Tarsy.dmg" --linked --experimental --yes 2>/dev/null || true
 supabase storage cp "$DMG_PATH" "ss:///${BUCKET}/Tarsy.dmg" \
     --cache-control "public, max-age=60" \
     --content-type "application/x-apple-diskimage" \
@@ -213,28 +214,24 @@ ROUTEEOF
 
 echo "    API version -> $VERSION"
 
-# ─── Update download redirect ──────────────────────────────────────
-echo "==> Updating download redirect..."
+# ─── Update download page ──────────────────────────────────────────
+echo "==> Updating download page..."
 
-# Surgical replacement of just the Tarsy-*.dmg URL in the redirect destination.
-# Do NOT rewrite the whole file — it contains the security headers() block.
-if ! grep -q 'tarsy-releases/Tarsy-[0-9.]*\.dmg' "$NEXT_CONFIG"; then
-    echo "ERROR: Could not find Tarsy-*.dmg URL in $NEXT_CONFIG"
+# Update the versioned DMG URL in the download page
+if ! grep -q 'tarsy-releases/Tarsy-[0-9.]*\.dmg' "$DOWNLOAD_PAGE"; then
+    echo "ERROR: Could not find Tarsy-*.dmg URL in download page"
     exit 1
 fi
-sed -i '' -E "s|tarsy-releases/Tarsy-[0-9.]+\.dmg|tarsy-releases/${VERSIONED_NAME}|" "$NEXT_CONFIG"
+sed -i '' -E "s|tarsy-releases/Tarsy-[0-9.]+\.dmg|tarsy-releases/${VERSIONED_NAME}|" "$DOWNLOAD_PAGE"
 
-# Sanity check: make sure the headers() block is still there
-if ! grep -q 'async headers()' "$NEXT_CONFIG"; then
-    echo "ERROR: security headers() block missing from $NEXT_CONFIG after update"
-    exit 1
-fi
+# Update the displayed version number in the download page
+sed -i '' -E "s|<span className=\"text-cream/80\">[0-9]+\.[0-9]+\.[0-9]+</span>|<span className=\"text-cream/80\">$VERSION</span>|" "$DOWNLOAD_PAGE"
 
-echo "    /download/macos -> $VERSIONED_NAME"
+echo "    Download page -> $VERSIONED_NAME (v$VERSION)"
 
 # ─── Cleanup backups (success path) ────────────────────────────────
 trap - ERR
-rm -f "$PROJECT_YML.bak" "$ROUTE_JS.bak" "$NEXT_CONFIG.bak"
+rm -f "$PROJECT_YML.bak" "$ROUTE_JS.bak" "$DOWNLOAD_PAGE.bak"
 
 # ─── Summary ────────────────────────────────────────────────────────
 echo ""
