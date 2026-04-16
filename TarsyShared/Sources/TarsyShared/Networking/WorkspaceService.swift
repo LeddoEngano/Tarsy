@@ -12,6 +12,7 @@ public struct CreateWorkspaceRequest: Encodable {
     public let devServerCommand: String?
     public let streamUrl: String?
     public let aiContext: String?
+    public let config: [String: String]?
 
     enum CodingKeys: String, CodingKey {
         case userId = "user_id"
@@ -24,9 +25,10 @@ public struct CreateWorkspaceRequest: Encodable {
         case devServerCommand = "dev_server_command"
         case streamUrl = "stream_url"
         case aiContext = "ai_context"
+        case config
     }
 
-    public init(userId: String, machineId: String, name: String, repoUrl: String?, localPath: String, stack: String, workspaceType: String = "standard", devServerCommand: String?, streamUrl: String?, aiContext: String?) {
+    public init(userId: String, machineId: String, name: String, repoUrl: String?, localPath: String, stack: String, workspaceType: String = "standard", devServerCommand: String?, streamUrl: String?, aiContext: String?, config: [String: String]? = nil) {
         self.userId = userId
         self.machineId = machineId
         self.name = name
@@ -37,6 +39,7 @@ public struct CreateWorkspaceRequest: Encodable {
         self.devServerCommand = devServerCommand
         self.streamUrl = streamUrl
         self.aiContext = aiContext
+        self.config = config
     }
 }
 
@@ -50,6 +53,10 @@ public struct UpdateWorkspaceRequest: Encodable {
     public var aiContext: String?
     public var status: String?
     public var currentBranch: String?
+    /// Full replacement of the `config` jsonb. Supabase PATCH replaces the
+    /// entire column rather than deep-merging, so callers must build the
+    /// complete dict (existing keys + their edits) before assigning here.
+    public var config: [String: String]?
 
     enum CodingKeys: String, CodingKey {
         case name
@@ -61,6 +68,7 @@ public struct UpdateWorkspaceRequest: Encodable {
         case aiContext = "ai_context"
         case status
         case currentBranch = "current_branch"
+        case config
     }
 
     public init() {}
