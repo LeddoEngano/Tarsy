@@ -1,7 +1,7 @@
 import { WebPageJsonLd } from "../../../components/JsonLd";
 
 const DOWNLOAD_URL =
-  `${process.env.NEXT_PUBLIC_SUPABASE_URL || "https://xtblbghhlkroskzljqcl.supabase.co"}/storage/v1/object/public/tarsy-releases/Tarsy-1.1.3.dmg`;
+  `${process.env.NEXT_PUBLIC_SUPABASE_URL || "https://xtblbghhlkroskzljqcl.supabase.co"}/storage/v1/object/public/tarsy-releases/Tarsy-1.1.4.dmg`;
 
 export const metadata = {
   title: "Download Tarsy for Mac",
@@ -48,7 +48,7 @@ export default function DownloadMacOS() {
                 <div className="mt-3 space-y-1.5">
                   <p className="text-xs text-taupe">
                     <span className="text-taupe/60">Version:</span>{" "}
-                    <span className="text-cream/80">1.1.3</span>
+                    <span className="text-cream/80">1.1.4</span>
                   </p>
                   <p className="text-xs text-taupe">
                     <span className="text-taupe/60">Requires:</span>{" "}
