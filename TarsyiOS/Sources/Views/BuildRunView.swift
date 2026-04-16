@@ -11,6 +11,28 @@ struct BuildRunView: View {
     @Binding var hotReloadStatus: String
     @Binding var hotReloadInjectionCount: Int
     @Binding var isBuildRunning: Bool
+    /// Set true by the workspace's bottom-bar quick-action when it wants
+    /// the build to kick off automatically as soon as this view appears.
+    /// We reset it to false right after consuming so the same trigger can
+    /// be re-armed for the next click.
+    @Binding var autoStart: Bool
+
+    /// UDID of the simulator the user picked from the Build & Run menu,
+    /// or nil to let the macOS daemon auto-pick. Read on each build
+    /// submission — we don't cache it because the user may change
+    /// selection between builds.
+    var preferredSimulatorUDID: String?
+
+    /// Stack-aware verb so the in-tab CTA matches the runner the macOS
+    /// daemon will actually use. UX is identical across runners; the label
+    /// just stops being misleading for non-Xcode flows.
+    private var ctaLabel: String {
+        switch workspace.buildRunner {
+        case .expo: return "Run on Simulator (Expo)"
+        case .flutter: return "flutter run"
+        case .xcode, nil: return "Build & Run"
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,6 +59,24 @@ struct BuildRunView: View {
             buildLogSection
         }
         .background(TarsyTheme.backgroundPrimary)
+        // Auto-start trigger from the workspace bottom-bar quick action.
+        // Both .onAppear (covers the case where the tab was just created
+        // and this view appears with autoStart already true) and .onChange
+        // (covers the case where the tab already existed and the user
+        // re-clicked the button) are needed.
+        .onAppear {
+            consumeAutoStartIfNeeded()
+        }
+        .onChange(of: autoStart) { _, newValue in
+            if newValue { consumeAutoStartIfNeeded() }
+        }
+    }
+
+    private func consumeAutoStartIfNeeded() {
+        guard autoStart else { return }
+        autoStart = false
+        guard !isBuildRunning else { return }
+        startBuild()
     }
 
     // MARK: - Controls
@@ -53,7 +93,7 @@ struct BuildRunView: View {
                         Image(systemName: "hammer.fill")
                             .font(TarsyTheme.font(size: 12))
                     }
-                    Text(isBuildRunning ? "building..." : "Build & Run")
+                    Text(isBuildRunning ? "building..." : ctaLabel)
                         .font(TarsyTheme.monoFont)
                 }
                 .foregroundColor(isBuildRunning ? TarsyTheme.textSecondary : TarsyTheme.backgroundPrimary)
@@ -132,14 +172,23 @@ struct BuildRunView: View {
         hotReloadStatus = "idle"
         hotReloadInjectionCount = 0
 
-        // Send with empty scheme — macOS will auto-detect
+        // Send with empty scheme — macOS will auto-detect.
+        // `framework` and `language` let the macOS dispatcher pick the right
+        // runner (XcodeAppRunner / ExpoAppRunner / FlutterAppRunner) without
+        // re-running RepoAnalyzer on its side, AND survives the case where
+        // the workspace points at a sub-path whose contents would mis-detect
+        // (e.g. fitless-landing/ios looks like a native Swift project but
+        // belongs to an Expo monorepo).
         connectionManager.send(WSPacket(
             action: .buildStart,
             payload: [
-                "path": workspace.localPath,
+                "path": workspace.effectivePath,
                 "scheme": "",
-                "simulatorUDID": "",
-                "configuration": "Debug"
+                "simulatorUDID": preferredSimulatorUDID ?? "",
+                "configuration": "Debug",
+                "framework": workspace.framework ?? "",
+                "language": workspace.language ?? "",
+                "runner": (workspace.buildRunner ?? .xcode).rawValue
             ]
         ))
     }

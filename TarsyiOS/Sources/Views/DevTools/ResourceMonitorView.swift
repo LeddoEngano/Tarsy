@@ -4,6 +4,7 @@ import TarsyShared
 struct ResourceMonitorView: View {
     let workspace: Workspace
     @EnvironmentObject var connectionManager: ConnectionManager
+    @EnvironmentObject var machineService: MachineService
 
     @State private var cpuPercent: Double = 0
     @State private var memoryUsed: UInt64 = 0
@@ -16,6 +17,12 @@ struct ResourceMonitorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Device header — makes it unambiguous that these metrics
+            // are the Mac's, not the iPhone's. Users kept asking "is this
+            // my phone's CPU?" without the label. Mirrors the dashboard
+            // machine picker's icon+name+status-dot visual.
+            machineHeader
+
             if isLoading {
                 Spacer()
                 ProgressView()
@@ -53,6 +60,36 @@ struct ResourceMonitorView: View {
         .onAppear { setupListener(); requestResources() }
         .onDisappear { connectionManager.removeListener("resource-monitor") }
         .onReceive(pollTimer) { _ in requestResources() }
+    }
+
+    // MARK: - Device Header
+
+    private var machineHeader: some View {
+        HStack(spacing: 10) {
+            Image(systemName: machineService.selectedMachine?.deviceIcon ?? "desktopcomputer")
+                .font(TarsyTheme.font(size: 16))
+                .foregroundColor(TarsyTheme.accentAmber)
+                .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(machineService.selectedMachine?.name ?? "mac")
+                    .font(TarsyTheme.font(size: 13, weight: .semibold))
+                    .foregroundColor(TarsyTheme.textPrimary)
+                    .lineLimit(1)
+                Text("system resources")
+                    .font(TarsyTheme.font(size: 10))
+                    .foregroundColor(TarsyTheme.textSecondary)
+            }
+
+            Spacer()
+
+            Circle()
+                .fill(machineService.isOnline ? TarsyTheme.statusRunning : TarsyTheme.statusError)
+                .frame(width: 6, height: 6)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(TarsyTheme.backgroundSecondary)
     }
 
     // MARK: - Resource Card

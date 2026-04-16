@@ -38,9 +38,14 @@ struct ProcessPortsView: View {
         let port: String
         let processName: String
         let pid: String
+        /// TCP socket state (LISTEN / CLOSE_WAIT / TIME_WAIT / …) when
+        /// reported by the macOS daemon. Shown next to the port so the
+        /// user knows whether it's an active listener or an orphan
+        /// socket blocking rebinding.
+        let state: String
 
         var isDevPort: Bool {
-            let devPorts: Set<String> = ["3000", "8080", "5432", "4200", "8000", "5173", "4000", "8443", "5000"]
+            let devPorts: Set<String> = ["3000", "8080", "5432", "4200", "8000", "5173", "4000", "8443", "5000", "8081", "19000", "19001"]
             return devPorts.contains(port)
         }
     }
@@ -106,6 +111,11 @@ struct ProcessPortsView: View {
             HStack(spacing: 0) {
                 ForEach(Tab.allCases, id: \.self) { tab in
                     Button {
+                        // Reset the search when switching tabs so a port
+                        // filter ("8081") doesn't carry over into the
+                        // processes tab and hide everything — the
+                        // searchText state is shared across tabs.
+                        if selectedTab != tab { searchText = "" }
                         withAnimation(.easeInOut(duration: 0.15)) { selectedTab = tab }
                     } label: {
                         Text(tab.rawValue)
@@ -218,6 +228,19 @@ struct ProcessPortsView: View {
                         .background(TarsyTheme.backgroundSecondary)
                         .cornerRadius(8)
                 }
+
+                Button {
+                    isLoading = true
+                    requestData()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .padding(8)
+                        .background(TarsyTheme.backgroundSecondary)
+                        .cornerRadius(8)
+                }
+                .accessibilityLabel("Refresh processes")
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
@@ -308,9 +331,54 @@ struct ProcessPortsView: View {
 
     // MARK: - Ports Tab
 
+    /// Filters ports by `searchText` matching either the port number or
+    /// the process name (case-insensitive on the process; exact substring
+    /// on the port so `"80"` matches both `:80` and `:8080`).
+    private var filteredPorts: [PortItem] {
+        guard !searchText.isEmpty else { return ports }
+        let needle = searchText.trimmingCharacters(in: .whitespaces)
+        return ports.filter {
+            $0.port.contains(needle) ||
+            $0.processName.localizedCaseInsensitiveContains(needle)
+        }
+    }
+
     @ViewBuilder
     private var portsContent: some View {
         VStack(spacing: 0) {
+            // Search + refresh row
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .font(.system(size: 12))
+                    TextField("filter ports (e.g. 8081, metro)", text: $searchText)
+                        .font(TarsyTheme.font(size: 12))
+                        .foregroundColor(TarsyTheme.textPrimary)
+                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.never)
+                        .keyboardType(.asciiCapable)
+                }
+                .padding(8)
+                .background(TarsyTheme.backgroundSecondary)
+                .cornerRadius(8)
+
+                Button {
+                    isLoading = true
+                    requestData()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 12))
+                        .foregroundColor(TarsyTheme.textSecondary)
+                        .padding(8)
+                        .background(TarsyTheme.backgroundSecondary)
+                        .cornerRadius(8)
+                }
+                .accessibilityLabel("Refresh ports")
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+
             // Header
             HStack(spacing: 0) {
                 Text("PORT")
@@ -333,16 +401,16 @@ struct ProcessPortsView: View {
                 Spacer()
                 ProgressView().tint(TarsyTheme.textSecondary)
                 Spacer()
-            } else if ports.isEmpty {
+            } else if filteredPorts.isEmpty {
                 Spacer()
-                Text("no listening ports")
+                Text(searchText.isEmpty ? "no listening ports" : "no ports match '\(searchText)'")
                     .font(TarsyTheme.monoFontSmall)
                     .foregroundColor(TarsyTheme.textSecondary)
                 Spacer()
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(ports) { port in
+                        ForEach(filteredPorts) { port in
                             portRow(port)
                         }
                     }
@@ -377,11 +445,21 @@ struct ProcessPortsView: View {
             }
             .frame(width: 70, alignment: .leading)
 
-            Text(port.processName)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .foregroundColor(accentColor)
-                .fontWeight(isTarsy ? .semibold : .regular)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(port.processName)
+                    .lineLimit(1)
+                    .foregroundColor(accentColor)
+                    .fontWeight(isTarsy ? .semibold : .regular)
+                // Show state when present AND non-LISTEN (orphan/zombie
+                // sockets are the ones users care to see — a healthy
+                // LISTEN socket doesn't need a state label).
+                if !port.state.isEmpty && port.state != "LISTEN" {
+                    Text(port.state)
+                        .font(TarsyTheme.font(size: 9, weight: .semibold))
+                        .foregroundColor(TarsyTheme.accentTerracotta)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             Text(port.pid)
                 .frame(width: 60, alignment: .trailing)
@@ -443,7 +521,8 @@ struct ProcessPortsView: View {
                             PortItem(
                                 port: dict["port"] ?? "",
                                 processName: dict["process_name"] ?? "",
-                                pid: dict["pid"] ?? ""
+                                pid: dict["pid"] ?? "",
+                                state: dict["state"] ?? ""
                             )
                         }
                     }
@@ -458,7 +537,7 @@ struct ProcessPortsView: View {
     }
 
     private func requestData() {
-        let payload: [String: String]? = workspaceOnly ? ["path": workspace.localPath] : nil
+        let payload: [String: String]? = workspaceOnly ? ["path": workspace.effectivePath] : nil
         connectionManager.send(WSPacket(action: .processList, payload: payload))
         connectionManager.send(WSPacket(action: .portsList, payload: payload))
     }

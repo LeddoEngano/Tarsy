@@ -55,6 +55,12 @@
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
 	<true/>
+	<key>TARSY_RELAY_URL</key>
+	<string>$(TARSY_RELAY_URL)</string>
+	<key>TARSY_SUPABASE_ANON_KEY</key>
+	<string>$(TARSY_SUPABASE_ANON_KEY)</string>
+	<key>TARSY_SUPABASE_URL</key>
+	<string>$(TARSY_SUPABASE_URL)</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>InterVariable.ttf</string>
