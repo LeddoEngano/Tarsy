@@ -454,7 +454,7 @@ class RepoAnalyzer {
         // Supplementary root scan: catch top-level projects that aren't
         // declared as workspaces. Only runs for confirmed monorepos, so
         // this can't cause false positives on plain single-project repos.
-        let rootSkip: Set<String> = [
+        var rootSkip: Set<String> = [
             "node_modules", "build", "dist", "target", "out",
             ".git", ".github", ".gitlab", ".vscode", ".idea",
             ".next", ".nuxt", ".turbo", ".cache", ".parcel-cache",
@@ -463,6 +463,20 @@ class RepoAnalyzer {
             "scripts", "docs", "assets", "images", "logos",
             "supabase", "migrations"
         ]
+
+        // When the root is clearly a React Native / Expo / Flutter project,
+        // the conventional native-shell subdirectories (`ios`, `android`,
+        // `macos`, `windows`, `linux`, `web`) are NOT standalone sub-projects
+        // — they're built by the JS toolchain as part of the main app.
+        // Surfacing `ios/` as its own sub-project led users to pick it in
+        // the monorepo migration picker, which then pointed the workspace
+        // at the native Xcode shell. Build & Run would run xcodebuild
+        // directly instead of `expo run:ios`, producing an installed app
+        // with no Metro handshake and the infamous
+        // `unsanitizedScriptURLString = (null)` error.
+        if isJSMobileRoot(at: root) {
+            rootSkip.formUnion(["ios", "android", "macos", "windows", "linux", "web"])
+        }
         if let rootContents = try? fm.contentsOfDirectory(atPath: root) {
             for item in rootContents.sorted() {
                 if item.hasPrefix(".") || rootSkip.contains(item) { continue }
@@ -476,6 +490,24 @@ class RepoAnalyzer {
         }
 
         return results
+    }
+
+    /// True when the directory's root manifest marks it as a JS-based
+    /// mobile project (React Native, Expo) or Flutter — in which case the
+    /// conventional `ios/`, `android/`, `macos/`, `windows/`, `linux/`,
+    /// `web/` subdirectories are native shells owned by the JS/Dart
+    /// toolchain, not standalone sub-projects to surface in the picker.
+    private func isJSMobileRoot(at path: String) -> Bool {
+        let fm = FileManager.default
+        // Flutter — pubspec.yaml at root means ios/android are Flutter shells.
+        if fm.fileExists(atPath: "\(path)/pubspec.yaml") { return true }
+        // RN / Expo — package.json with react-native or expo in any dep section.
+        guard let pkg = readJSON(at: "\(path)/package.json") else { return false }
+        for section in ["dependencies", "devDependencies", "peerDependencies"] {
+            guard let deps = pkg[section] as? [String: Any] else { continue }
+            if deps["react-native"] != nil || deps["expo"] != nil { return true }
+        }
+        return false
     }
 
     private func hasProjectMarker(at path: String) -> Bool {

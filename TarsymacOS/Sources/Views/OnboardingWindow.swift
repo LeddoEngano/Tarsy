@@ -646,13 +646,36 @@ struct OnboardingWindow: View {
     /// Sets a transient "isRelaunching" flag so the hard-gate in
     /// `TarsymacOSApp.onDisappear` knows to skip the "permissions
     /// incomplete" alert during this intentional termination.
+    ///
+    /// The detached shell `while kill -0` loop is load-bearing: calling
+    /// `open -n` and `NSApp.terminate(nil)` back-to-back races with
+    /// LaunchServices. The XPC request to `launchservicesd` sometimes
+    /// arrives while the current process is still alive, and LS either
+    /// refuses to spawn the second instance (despite `-n`) or spawns one
+    /// that macOS immediately kills because it still considers the old
+    /// process canonical. The symptom is "app closes itself on reopen" —
+    /// the old Tarsy dies, no new Tarsy comes up, user has to launch
+    /// manually. Waiting for the old PID to actually exit before issuing
+    /// the relaunch fixes it.
     private func relaunchApp() {
         UserDefaults.standard.set(true, forKey: "isRelaunchingForPermissions")
+        UserDefaults.standard.synchronize()
         let path = Bundle.main.bundlePath
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let script = "while kill -0 \(pid) 2>/dev/null; do sleep 0.1; done; exec /usr/bin/open -n \"\(path)\""
         let task = Process()
-        task.launchPath = "/usr/bin/open"
-        task.arguments = ["-n", path]
-        try? task.run()
+        task.executableURL = URL(fileURLWithPath: "/bin/sh")
+        task.arguments = ["-c", script]
+        do {
+            try task.run()
+        } catch {
+            // Fall back to the old path if sh somehow isn't runnable — at
+            // least the user has a chance of getting the app back up.
+            let fallback = Process()
+            fallback.launchPath = "/usr/bin/open"
+            fallback.arguments = ["-n", path]
+            try? fallback.run()
+        }
         NSApp.terminate(nil)
     }
 
