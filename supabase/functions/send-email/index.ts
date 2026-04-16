@@ -274,6 +274,35 @@ async function sendEmail(to: string, content: EmailContent): Promise<{ success: 
   return { success: true };
 }
 
+async function sendTemplateEmail(
+  to: string,
+  templateId: string,
+  variables: Record<string, string>,
+): Promise<{ success: boolean; error?: string }> {
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${RESEND_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      to: [to],
+      template: {
+        id: templateId,
+        variables,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    console.error(`Resend template error: ${res.status} ${body}`);
+    return { success: false, error: body };
+  }
+
+  return { success: true };
+}
+
 // ---------------------------------------------------------------------------
 // Request types
 // ---------------------------------------------------------------------------
@@ -324,8 +353,9 @@ serve(async (req) => {
         return new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 });
       }
       const { record } = body as WebhookPayload;
-      const content = welcomeEmail(record.display_name || "");
-      const result = await sendEmail(record.email, content);
+      const firstName = (record.display_name || "").trim().split(/\s+/)[0] || "";
+      const variables: Record<string, string> = firstName ? { name: firstName } : {};
+      const result = await sendTemplateEmail(record.email, "signup-en", variables);
       console.log(`Welcome email to ${record.email}: ${result.success ? "sent" : result.error}`);
       return new Response(JSON.stringify(result), { status: result.success ? 200 : 500 });
     }
