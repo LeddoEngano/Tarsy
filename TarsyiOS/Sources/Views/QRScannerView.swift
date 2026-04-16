@@ -163,22 +163,15 @@ struct QRScannerView: View {
     }
 
     private func handleScan(_ code: String) {
-        guard !isProcessing, scannedCode == nil else {
-            print("[QRScanner] Ignoring scan — already processing or scanned")
-            return
-        }
-        print("[QRScanner] Scanned raw value: \(code)")
+        guard !isProcessing, scannedCode == nil else { return }
         scannedCode = code
 
         guard let url = URL(string: code),
               let params = PairingService.parsePairingURL(url) else {
-            print("[QRScanner] Failed to parse QR URL: \(code)")
             errorMessage = "invalid QR code — make sure you're scanning the Tarsy pairing code"
             scannedCode = nil
             return
         }
-
-        print("[QRScanner] Parsed machineId=\(params.machineId), token=\(params.token.prefix(8))...")
 
         let impact = UIImpactFeedbackGenerator(style: .medium)
         impact.impactOccurred()
@@ -191,14 +184,14 @@ struct QRScannerView: View {
     private func claimMachine(machineId: String, token: String) async {
         isProcessing = true
         errorMessage = nil
-        print("[QRScanner] Claiming machine \(machineId)...")
 
         do {
             _ = try await pairingService.claimMachine(machineId: machineId, pairingToken: token)
-            print("[QRScanner] Claim succeeded!")
             await handlePairSuccess()
         } catch {
+#if DEBUG
             print("[QRScanner] Claim failed: \(error)")
+#endif
             errorMessage = "expired or invalid code — generate a new one on your mac"
             isProcessing = false
             scannedCode = nil

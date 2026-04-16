@@ -30,8 +30,6 @@ public class PairingService: ObservableObject {
     /// RPC; only HMACs are persisted in machine_pairings (plaintext values are
     /// returned once to the caller and never stored). Returns the QR payload URL.
     public func generatePairingToken(machineId: UUID) async throws -> String {
-        print("[PairingService] Requesting pairing token for machine \(machineId)")
-
         let response: PairingResponse = try await supabase
             .rpc("create_machine_pairing", params: ["p_machine_id": machineId.uuidString])
             .execute()
@@ -49,9 +47,10 @@ public class PairingService: ObservableObject {
         currentConnectionCode = response.connection_code
         expiresAt = parsedExpiry
 
-        let qrURL = "tarsy://pair?m=\(machineId.uuidString)&t=\(response.pairing_token)"
-        print("[PairingService] QR URL generated for machine \(machineId), expires \(parsedExpiry)")
-        return qrURL
+        // Never log the pairing token or the full QR URL — the URL
+        // embeds the token as a query param and would compromise pairing
+        // if it leaked into crash logs or console archives.
+        return "tarsy://pair?m=\(machineId.uuidString)&t=\(response.pairing_token)"
     }
 
     /// Generates a fresh pairing token, replacing any previous one for the machine.
@@ -84,13 +83,10 @@ public class PairingService: ObservableObject {
         pairingError = nil
         defer { isPairing = false }
 
-        print("[PairingService] Claiming machine with \(body.count) fields")
-
         let session = try await supabase.auth.session
         let jsonData = try JSONSerialization.data(withJSONObject: body)
 
         let url = TarsyConfig.supabaseURL.appendingPathComponent("functions/v1/claim-machine")
-        print("[PairingService] POST \(url.absoluteString)")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
@@ -100,13 +96,10 @@ public class PairingService: ObservableObject {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         let httpResponse = response as? HTTPURLResponse
-        let responseBody = String(data: data, encoding: .utf8) ?? "<non-utf8>"
-        print("[PairingService] Response \(httpResponse?.statusCode ?? -1): \(responseBody)")
 
         guard let httpResponse, httpResponse.statusCode == 200 else {
             let errorResult = try? JSONDecoder().decode(ClaimResponse.self, from: data)
             let errorMsg = errorResult?.error ?? "Failed to claim machine"
-            print("[PairingService] Claim failed: \(errorMsg)")
             pairingError = errorMsg
             throw PairingError.claimFailed(errorMsg)
         }
@@ -132,12 +125,10 @@ public class PairingService: ObservableObject {
 
         guard result.success, let machine = result.machine else {
             let errorMsg = result.error ?? "Failed to claim machine"
-            print("[PairingService] Claim response not successful: \(errorMsg)")
             pairingError = errorMsg
             throw PairingError.claimFailed(errorMsg)
         }
 
-        print("[PairingService] Machine claimed successfully: \(machine.id)")
         return machine
     }
 
