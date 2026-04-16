@@ -32,6 +32,12 @@ class DaemonManager: ObservableObject {
     private var isReconnectingRelay = false
     private var portMonitor: PortMonitorService!
     private var hotReloadService: HotReloadService!
+    /// Stack-aware Build & Run runners. iOS sends a `runner` field in the
+    /// buildStart packet (see `Workspace.BuildRunner`) so DaemonManager
+    /// dispatches to the right backend without re-running RepoAnalyzer.
+    /// Each runner owns its own process / lifecycle.
+    private var expoRunner: ExpoAppRunner!
+    private var flutterRunner: FlutterAppRunner!
     private var displaySleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var systemSleepAssertionID: IOPMAssertionID = IOPMAssertionID(0)
     private var lastActiveClientId: String = "relay"
@@ -109,6 +115,25 @@ class DaemonManager: ObservableObject {
         )
 
         hotReloadService = HotReloadService(
+            sendPacket: { [weak self] packet, clientId in
+                guard let self else { return }
+                await self.sendToClientOrRelay(packet, to: clientId)
+            },
+            log: { [weak self] msg in
+                Task { @MainActor in self?.log(msg) }
+            }
+        )
+
+        expoRunner = ExpoAppRunner(
+            sendPacket: { [weak self] packet, clientId in
+                guard let self else { return }
+                await self.sendToClientOrRelay(packet, to: clientId)
+            },
+            log: { [weak self] msg in
+                Task { @MainActor in self?.log(msg) }
+            }
+        )
+        flutterRunner = FlutterAppRunner(
             sendPacket: { [weak self] packet, clientId in
                 guard let self else { return }
                 await self.sendToClientOrRelay(packet, to: clientId)
@@ -4551,15 +4576,29 @@ class DaemonManager: ObservableObject {
         )
     }
 
-    /// Returns PIDs that have open files under the given directory path.
-    /// Uses non-recursive `+d` to avoid slow scans on large trees (e.g. node_modules).
+    /// Returns PIDs whose **current working directory** is inside the
+    /// given workspace path. CWD matching catches processes launched
+    /// from the workspace (Metro, dev servers, agent processes) whose
+    /// open files live under `node_modules/…` or other nested subtrees
+    /// — the earlier `lsof +d` strategy only matched files opened
+    /// *directly* in the path and missed every dev server because node
+    /// dependency files are several levels deep.
+    ///
+    /// `lsof -a -d cwd -Fnp` emits one record per process:
+    ///   p<pid>
+    ///   n<cwd>
+    /// which is fast (one syscall per process, no tree walk) and gives
+    /// us exactly the signal we need: "was this process started from
+    /// inside my workspace?"
     private func pidsForWorkspace(path: String) async -> Set<String> {
-        // Race lsof against a 5-second timeout to avoid blocking on large directories
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).async {
+                let expanded = (path as NSString).expandingTildeInPath
+                let normalized = expanded.hasSuffix("/") ? expanded : expanded + "/"
+
                 let task = Process()
                 task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-                task.arguments = ["-t", "+d", (path as NSString).expandingTildeInPath]
+                task.arguments = ["-a", "-d", "cwd", "-Fnp"]
                 let pipe = Pipe()
                 task.standardOutput = pipe
                 task.standardError = Pipe()
@@ -4568,7 +4607,6 @@ class DaemonManager: ObservableObject {
                     return
                 }
 
-                // Timeout: kill lsof if it takes too long
                 let timer = DispatchSource.makeTimerSource(queue: .global())
                 timer.schedule(deadline: .now() + 5)
                 timer.setEventHandler {
@@ -4580,14 +4618,36 @@ class DaemonManager: ObservableObject {
                 task.waitUntilExit()
                 timer.cancel()
 
-                guard task.terminationStatus == 0,
-                      let output = String(data: data, encoding: .utf8) else {
+                guard let output = String(data: data, encoding: .utf8) else {
                     continuation.resume(returning: [])
                     return
                 }
-                let pids = Set(output.components(separatedBy: "\n")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty })
+
+                // Parse interleaved "p<pid>\nn<cwd>\n" pairs. A single pid
+                // can have multiple fd records in lsof -F output, so we
+                // track the most recent pid and accept any subsequent n<>
+                // line whose path prefix-matches the workspace.
+                var pids = Set<String>()
+                var currentPid: String? = nil
+                for line in output.components(separatedBy: "\n") {
+                    guard let first = line.first else { continue }
+                    let rest = String(line.dropFirst())
+                    switch first {
+                    case "p":
+                        currentPid = rest
+                    case "n":
+                        guard let pid = currentPid else { continue }
+                        // Prefix match against the normalized (trailing /)
+                        // path so `/repo/apps/mobile` doesn't match
+                        // `/repo/apps/mobile-shared`.
+                        let cwdWithSlash = rest.hasSuffix("/") ? rest : rest + "/"
+                        if cwdWithSlash == normalized || cwdWithSlash.hasPrefix(normalized) {
+                            pids.insert(pid)
+                        }
+                    default:
+                        continue
+                    }
+                }
                 continuation.resume(returning: pids)
             }
         }
@@ -4710,7 +4770,13 @@ class DaemonManager: ObservableObject {
 
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        task.arguments = ["-i", "-P", "-n", "-sTCP:LISTEN"]
+        // Drop the `-sTCP:LISTEN` state filter — it hides ports held by
+        // orphan/zombie sockets in CLOSE_WAIT or TIME_WAIT that can
+        // still block rebinding (e.g. a Metro process killed with
+        // SIGKILL leaving :8081 unbindable for 30–120 s even though
+        // nothing is formally "listening"). Filtering on IPv4+IPv6
+        // explicitly ensures both stacks are scanned consistently.
+        task.arguments = ["-iTCP", "-P", "-n"]
         let pipe = Pipe()
         task.standardOutput = pipe
         task.standardError = Pipe()
@@ -4732,7 +4798,7 @@ class DaemonManager: ObservableObject {
             var ports: [[String: String]] = []
             var seenPorts = Set<String>()
             for line in lines {
-                let cols = line.split(separator: " ", maxSplits: 8, omittingEmptySubsequences: true)
+                let cols = line.split(separator: " ", maxSplits: 9, omittingEmptySubsequences: true)
                 guard cols.count >= 9 else { continue }
                 let name = String(cols[0])
                 let pid = String(cols[1])
@@ -4740,18 +4806,31 @@ class DaemonManager: ObservableObject {
                 // If workspace filter is active, skip PIDs not in workspace
                 if let allowedPids = workspacePids, !allowedPids.contains(pid) { continue }
 
+                // Only include sockets in states that matter for "what's
+                // holding this port": LISTEN (active bind) + CLOSE_WAIT /
+                // TIME_WAIT (orphan sockets blocking rebinding). Skip
+                // ESTABLISHED / SYN_* noise — those are client
+                // connections, not interesting for the devtools use case.
+                let state = cols.count >= 10 ? String(cols[9]).trimmingCharacters(in: CharacterSet(charactersIn: "()")) : ""
+                let blockingStates: Set<String> = ["LISTEN", "CLOSE_WAIT", "TIME_WAIT", "FIN_WAIT_1", "FIN_WAIT_2"]
+                if !state.isEmpty, !blockingStates.contains(state) { continue }
+
                 let address = String(cols[8])
                 // Parse port from address like "*:3000" or "127.0.0.1:8080"
+                // or IPv6 "[::1]:8081". split(":") always leaves the port
+                // as the last component regardless of bracket notation.
                 if let portStr = address.split(separator: ":").last {
                     let port = String(portStr)
                     let key = "\(port)-\(pid)"
                     if !seenPorts.contains(key) {
                         seenPorts.insert(key)
-                        ports.append([
+                        var entry: [String: String] = [
                             "port": port,
                             "process_name": name,
                             "pid": pid,
-                        ])
+                        ]
+                        if !state.isEmpty { entry["state"] = state }
+                        ports.append(entry)
                     }
                 }
             }
@@ -4852,26 +4931,51 @@ class DaemonManager: ObservableObject {
     // MARK: - Build & Run / Hot Reload Handlers
 
     private func handleBuildStart(clientId: String, packet: WSPacket) async {
-        log("[HotReload] handleBuildStart received: path=\(packet.payload?["path"] ?? "nil") scheme=\(packet.payload?["scheme"] ?? "nil")")
-        guard let path = packet.payload?["path"],
-              let scheme = packet.payload?["scheme"] else {
+        log("[HotReload] handleBuildStart received: path=\(packet.payload?["path"] ?? "nil") scheme=\(packet.payload?["scheme"] ?? "nil") runner=\(packet.payload?["runner"] ?? "nil")")
+        guard let path = packet.payload?["path"] else {
             await sendToClientOrRelay(
-                WSPacket(action: .buildError, payload: ["message": "Missing path or scheme"], id: packet.id),
+                WSPacket(action: .buildError, payload: ["message": "Missing path"], id: packet.id),
                 to: clientId
             )
             return
         }
+        let scheme = packet.payload?["scheme"] ?? ""
         let simulatorUDID = packet.payload?["simulatorUDID"] ?? ""
         let configuration = packet.payload?["configuration"] ?? "Debug"
+        let workspacePath = (path as NSString).expandingTildeInPath
 
-        await hotReloadService.buildAndRun(
-            clientId: clientId,
-            packetId: packet.id,
-            workspacePath: (path as NSString).expandingTildeInPath,
-            scheme: scheme,
-            simulatorUDID: simulatorUDID,
-            configuration: configuration
-        )
+        // Pick runner based on what iOS announced. iOS knows the workspace
+        // framework from `config` saved at creation; trusting that avoids
+        // re-running RepoAnalyzer here AND handles the case where the
+        // workspace's effective path is a sub-folder whose contents would
+        // mis-detect (e.g. fitless-landing/ios looks Swift-native but
+        // belongs to an Expo monorepo).
+        let runnerKey = packet.payload?["runner"] ?? Workspace.BuildRunner.xcode.rawValue
+        switch Workspace.BuildRunner(rawValue: runnerKey) {
+        case .expo:
+            await expoRunner.run(
+                clientId: clientId,
+                packetId: packet.id,
+                workspacePath: workspacePath,
+                simulatorUDID: simulatorUDID
+            )
+        case .flutter:
+            await flutterRunner.run(
+                clientId: clientId,
+                packetId: packet.id,
+                workspacePath: workspacePath,
+                simulatorUDID: simulatorUDID
+            )
+        case .xcode, nil:
+            await hotReloadService.buildAndRun(
+                clientId: clientId,
+                packetId: packet.id,
+                workspacePath: workspacePath,
+                scheme: scheme,
+                simulatorUDID: simulatorUDID,
+                configuration: configuration
+            )
+        }
     }
 
     private func handleSimulatorList(clientId: String, packet: WSPacket) async {

@@ -130,11 +130,6 @@ actor HotReloadService {
 
         log("Build succeeded: \(result.appBundlePath), bundleId: \(result.appBundleId)")
 
-        guard !result.appBundlePath.isEmpty && !result.appBundleId.isEmpty else {
-            await sendError(clientId: clientId, packetId: packetId, message: "Build succeeded but could not locate app bundle")
-            return
-        }
-
         // Step 2: Install
         await sendPacket(
             WSPacket(action: .simulatorStatus, payload: ["status": "installing", "simulatorUDID": targetUDID]),

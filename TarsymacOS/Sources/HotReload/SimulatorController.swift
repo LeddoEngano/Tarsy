@@ -1,12 +1,5 @@
 import Foundation
-
-struct SimulatorDevice: Codable, Sendable {
-    let udid: String
-    let name: String
-    let runtime: String
-    let state: String
-    let isAvailable: Bool
-}
+import TarsyShared
 
 enum SimulatorController {
 
