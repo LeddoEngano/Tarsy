@@ -496,6 +496,16 @@ struct NewWorkspaceView: View {
 
         do {
             let session = try await supabase.auth.session
+            var config: [String: String] = [:]
+            if let sub = selectedProjectPath?.trimmingCharacters(in: CharacterSet(charactersIn: "/ ")), !sub.isEmpty {
+                config["subPath"] = sub
+            }
+            if let lang = detectedLanguage, !lang.isEmpty {
+                config["language"] = lang
+            }
+            if let fw = detectedFramework, !fw.isEmpty {
+                config["framework"] = fw
+            }
             let request = CreateWorkspaceRequest(
                 userId: session.user.id.uuidString,
                 machineId: machineId.uuidString,
@@ -508,7 +518,8 @@ struct NewWorkspaceView: View {
                 workspaceType: Workspace.WorkspaceType.standard.rawValue,
                 devServerCommand: devServerCommand.isEmpty ? nil : devServerCommand,
                 streamUrl: nil,
-                aiContext: nil
+                aiContext: nil,
+                config: config.isEmpty ? nil : config
             )
             let _ = try await workspaceService.createWorkspace(request)
             dismiss()
@@ -597,7 +608,20 @@ struct NewWorkspaceView: View {
         }
         // Always replace the command on sub-project change — the old one
         // belonged to the previous selection and would be wrong now.
-        devServerCommand = project.suggestedCommand ?? ""
+        // The persisted workspace already has `subPath` so the cwd will be
+        // correct; strip any `cd …  && ` wrapper from the suggested command.
+        devServerCommand = stripCdPrefix(project.suggestedCommand ?? "")
+    }
+
+    /// RepoAnalyzer suggests commands like `"cd apps/web && npm run dev"` so
+    /// they work from the repo root. Once the sub-project is persisted as
+    /// `subPath`, the terminal opens directly in that directory and the cd
+    /// becomes redundant (and breaks if the user later edits the path).
+    private func stripCdPrefix(_ command: String) -> String {
+        let trimmed = command.trimmingCharacters(in: .whitespaces)
+        guard trimmed.lowercased().hasPrefix("cd ") else { return trimmed }
+        guard let separatorRange = trimmed.range(of: "&&") else { return trimmed }
+        return trimmed[separatorRange.upperBound...].trimmingCharacters(in: .whitespaces)
     }
 
     // MARK: - Helpers

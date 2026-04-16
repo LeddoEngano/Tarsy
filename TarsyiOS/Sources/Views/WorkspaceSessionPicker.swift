@@ -24,12 +24,18 @@ struct WorkspaceSessionPicker: View {
             if let sessionWsId = session.workspaceId {
                 return sessionWsId.lowercased() == wsId.lowercased()
             }
-            // Fallback: match by path (for sessions created before workspaceId was added)
+            // Fallback: match by path (for sessions created before workspaceId was added).
+            // Match against both the effective path (used today) and the raw
+            // local path (older sessions may pre-date sub-path persistence).
             guard let path = session.projectPath else { return false }
-            return workspace.localPath == path
-                || path.hasPrefix(workspace.localPath)
-                || workspace.localPath.hasPrefix(path)
-                || workspace.localPath.components(separatedBy: "/").last == path.components(separatedBy: "/").last
+            let effective = workspace.effectivePath
+            let local = workspace.localPath
+            return effective == path
+                || local == path
+                || path.hasPrefix(effective) || effective.hasPrefix(path)
+                || path.hasPrefix(local) || local.hasPrefix(path)
+                || effective.components(separatedBy: "/").last == path.components(separatedBy: "/").last
+                || local.components(separatedBy: "/").last == path.components(separatedBy: "/").last
         }
     }
 

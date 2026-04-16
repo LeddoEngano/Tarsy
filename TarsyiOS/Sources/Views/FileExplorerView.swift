@@ -206,7 +206,7 @@ struct FileExplorerView: View {
                 }
             }
         }
-        connectionManager.send(WSPacket(action: .fileTree, payload: ["path": workspace.localPath]))
+        connectionManager.send(WSPacket(action: .fileTree, payload: ["path": workspace.effectivePath]))
     }
 
     private func toggleDir(_ path: String) {
@@ -218,7 +218,7 @@ struct FileExplorerView: View {
     }
 
     private func requestFileRead(_ path: String) {
-        connectionManager.send(WSPacket(action: .fileRead, payload: ["path": workspace.localPath, "file": path]))
+        connectionManager.send(WSPacket(action: .fileRead, payload: ["path": workspace.effectivePath, "file": path]))
     }
 
     // MARK: - File Icons

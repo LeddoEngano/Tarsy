@@ -341,7 +341,7 @@ struct WebBrowserView: View {
                 onClose: { isFullscreen = false },
                 engineSessionId: $activeSessionId,
                 engineType: activeEngineType,
-                workspacePath: workspace.localPath,
+                workspacePath: workspace.effectivePath,
                 workspaceId: workspace.id.uuidString,
                 workspaceName: workspace.name,
                 tabId: activeTabId,
@@ -401,7 +401,7 @@ struct WebBrowserView: View {
                             selectPort(port)
                         } else {
                             progressText = "Server running, detecting port..."
-                            connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.localPath]))
+                            connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.effectivePath]))
                         }
                     } else if status == "error" {
                         isDevServerRunning = false
@@ -424,7 +424,7 @@ struct WebBrowserView: View {
             if connectionManager.connectionMode == .relay {
                 // Relay: verify port via macOS daemon instead of direct HTTP (Bug #4 fix)
                 // The daemon checks locally and responds with running status + port
-                var payload: [String: String] = ["path": workspace.localPath]
+                var payload: [String: String] = ["path": workspace.effectivePath]
                 if let url = workspace.streamUrl, !url.isEmpty {
                     payload["streamUrl"] = url
                 }
@@ -433,7 +433,7 @@ struct WebBrowserView: View {
                 Task {
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     if state == .detecting {
-                        connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.localPath]))
+                        connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.effectivePath]))
                     }
                 }
                 return
@@ -461,7 +461,7 @@ struct WebBrowserView: View {
         }
 
         state = .detecting
-        connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.localPath]))
+        connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.effectivePath]))
 
         Task {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -528,7 +528,7 @@ struct WebBrowserView: View {
         isDevServerRunning = true
 
         connectionManager.send(WSPacket(action: .devServerStart, payload: [
-            "path": workspace.localPath,
+            "path": workspace.effectivePath,
             "command": cmd
         ]))
 
@@ -579,7 +579,7 @@ struct WebBrowserView: View {
 
     private func checkDevServerStatus() {
         guard connectionManager.isConnected else { return }
-        var payload: [String: String] = ["path": workspace.localPath]
+        var payload: [String: String] = ["path": workspace.effectivePath]
         if let url = workspace.streamUrl, !url.isEmpty {
             payload["streamUrl"] = url
         }
@@ -587,7 +587,7 @@ struct WebBrowserView: View {
     }
 
     private func stopDevServer() {
-        connectionManager.send(WSPacket(action: .devServerStop, payload: ["path": workspace.localPath]))
+        connectionManager.send(WSPacket(action: .devServerStop, payload: ["path": workspace.effectivePath]))
         isDevServerRunning = false
     }
 
@@ -611,7 +611,7 @@ struct WebBrowserView: View {
     private func forceScanPorts() {
         state = .detecting
         userRequestedScan = true
-        connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.localPath]))
+        connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.effectivePath]))
 
         Task {
             try? await Task.sleep(nanoseconds: 3_000_000_000)

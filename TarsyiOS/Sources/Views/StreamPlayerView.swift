@@ -335,7 +335,7 @@ struct StreamPlayerView: View {
                 onClose: { isFullscreen = false },
                 engineSessionId: $activeSessionId,
                 engineType: activeEngineType,
-                workspacePath: workspace.localPath,
+                workspacePath: workspace.effectivePath,
                 workspaceId: workspace.id.uuidString,
                 workspaceName: workspace.name,
                 tabId: activeTabId,
@@ -477,7 +477,7 @@ struct StreamPlayerView: View {
         isDevServerStarting = true
 
         var payload: [String: String] = [
-            "path": workspace.localPath,
+            "path": workspace.effectivePath,
             "command": command
         ]
         if let url = workspace.streamUrl, !url.isEmpty {
@@ -530,7 +530,7 @@ struct StreamPlayerView: View {
                 connectionManager.removeListener("devserver")
 
                 // Query actual dev server status from macOS before proceeding
-                var statusPayload: [String: String] = ["path": workspace.localPath]
+                var statusPayload: [String: String] = ["path": workspace.effectivePath]
                 if let url = workspace.streamUrl, !url.isEmpty {
                     statusPayload["streamUrl"] = url
                 }
@@ -566,7 +566,7 @@ struct StreamPlayerView: View {
 
     private func restartDevServer() {
         guard isDevServerRunning else { return }
-        connectionManager.send(WSPacket(action: .devServerStop, payload: ["path": workspace.localPath]))
+        connectionManager.send(WSPacket(action: .devServerStop, payload: ["path": workspace.effectivePath]))
 
         connectionManager.addListener("devserver-stop") { packet in
             if packet.action == .devServerStop {
@@ -581,7 +581,7 @@ struct StreamPlayerView: View {
 
     private func stopDevServer() {
         guard isDevServerRunning else { return }
-        connectionManager.send(WSPacket(action: .devServerStop, payload: ["path": workspace.localPath]))
+        connectionManager.send(WSPacket(action: .devServerStop, payload: ["path": workspace.effectivePath]))
 
         connectionManager.addListener("devserver-stop-only") { packet in
             if packet.action == .devServerStop {
@@ -603,7 +603,7 @@ struct StreamPlayerView: View {
             let ready = await connectionManager.waitUntilReadyToSendData(timeout: 12)
             guard ready else { return }
 
-            var payload: [String: String] = ["path": workspace.localPath]
+            var payload: [String: String] = ["path": workspace.effectivePath]
             if let url = workspace.streamUrl, !url.isEmpty {
                 payload["streamUrl"] = url
             }
@@ -770,7 +770,7 @@ struct StreamPlayerView: View {
             let ready = await connectionManager.waitUntilReadyToSendData(timeout: 12)
             guard ready else { return }
 
-            connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.localPath]))
+            connectionManager.send(WSPacket(action: .proxyDetectPorts, payload: ["path": workspace.effectivePath]))
 
             connectionManager.addListener("stream-ports-\(workspace.id)") { packet in
                 if packet.action == .proxyDetectPortsResult {

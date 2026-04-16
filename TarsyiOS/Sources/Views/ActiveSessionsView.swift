@@ -296,12 +296,15 @@ struct ActiveSessionsView: View {
             if !byId.isEmpty { return byId }
         }
 
-        // Fallback: match by path (for sessions created before workspaceId was added)
+        // Fallback: match by path (for sessions created before workspaceId was added).
+        // Sessions opened from monorepo workspaces are recorded against the
+        // sub-project path, so check both `effectivePath` and `localPath`.
         guard let path = session?.projectPath else { return [] }
-        let exact = workspaceService.workspaces.filter { $0.localPath == path }
+        let exact = workspaceService.workspaces.filter { $0.effectivePath == path || $0.localPath == path }
         if !exact.isEmpty { return exact }
 
         let prefix = workspaceService.workspaces.filter {
+            path.hasPrefix($0.effectivePath) || $0.effectivePath.hasPrefix(path) ||
             path.hasPrefix($0.localPath) || $0.localPath.hasPrefix(path)
         }
         if !prefix.isEmpty { return prefix }
@@ -309,6 +312,7 @@ struct ActiveSessionsView: View {
         let sessionDir = path.components(separatedBy: "/").last ?? ""
         guard !sessionDir.isEmpty else { return [] }
         return workspaceService.workspaces.filter {
+            $0.effectivePath.components(separatedBy: "/").last == sessionDir ||
             $0.localPath.components(separatedBy: "/").last == sessionDir
         }
     }
@@ -351,7 +355,7 @@ struct ActiveSessionsView: View {
         connectionManager.send(WSPacket(
             action: .engineCreate,
             payload: [
-                "workspacePath": workspace.localPath,
+                "workspacePath": workspace.effectivePath,
                 "workspaceId": workspace.id.uuidString,
                 "engineType": session.engineType ?? "claude",
                 "message": String(message.prefix(4000))

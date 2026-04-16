@@ -30,7 +30,24 @@ private struct RoundedCornerShape: Shape {
 }
 
 struct WorkspaceView: View {
-    let workspace: Workspace
+    /// The workspace passed in at navigation time. Kept as a fallback so the
+    /// view still renders if the workspaceService list hasn't been hydrated
+    /// yet (or the workspace was just deleted).
+    private let initialWorkspace: Workspace
+    private let workspaceId: UUID
+
+    init(workspace: Workspace) {
+        self.initialWorkspace = workspace
+        self.workspaceId = workspace.id
+    }
+
+    /// Live workspace lookup so changes persisted via `workspaceService`
+    /// (e.g. the monorepo migration sheet) propagate to this open view
+    /// without requiring the user to back out and re-navigate.
+    private var workspace: Workspace {
+        workspaceService.workspaces.first(where: { $0.id == workspaceId }) ?? initialWorkspace
+    }
+
     @EnvironmentObject var connectionManager: ConnectionManager
     @EnvironmentObject var machineService: MachineService
     @EnvironmentObject var workspaceService: WorkspaceService
@@ -50,6 +67,12 @@ struct WorkspaceView: View {
     @State private var showGitSheet = false
     @State private var showFileExplorer = false
     @State private var showMCPStore = false
+    /// Sub-projects detected by `repoAnalyze` for legacy workspaces missing
+    /// a saved `subPath`. Non-empty when the migration sheet should be shown.
+    @State private var pendingMonorepoProjects: [DetectedSubProject] = []
+    @State private var showMonorepoMigration = false
+    /// Guards against firing `repoAnalyze` more than once per appear.
+    @State private var didCheckSubPath = false
     @State private var showDevTools = false
     @State private var showPaywall = false
     @State private var importedSessionTabs: Set<String> = []
@@ -115,6 +138,20 @@ struct WorkspaceView: View {
     @State private var lastInjectedFile: String = ""
     @State private var hotReloadInjectionCount: Int = 0
     @State private var isBuildRunning: Bool = false
+    /// One-shot trigger consumed by `BuildRunView.onChange` to auto-start a
+    /// build immediately after the tab opens. Set to true by the bottom-bar
+    /// quick-action; reset to false by `BuildRunView` once the build kicks
+    /// off so the next openBuildAndRun click can re-fire it.
+    @State private var autoStartBuild: Bool = false
+    /// Simulator devices reported by the macOS daemon in response to
+    /// `simulatorList` requests. Populated on first workspace appear so
+    /// the Build & Run picker menu has something to show.
+    @State private var availableSimulators: [SimulatorDevice] = []
+    /// UDID of the simulator the user wants the next Build & Run to target.
+    /// Nil = "let macOS pick" (first booted, fall back to first available).
+    /// Persisted to `workspace.config["preferredSimulator"]` via the save
+    /// path so reopening the workspace restores the choice.
+    @State private var selectedSimulatorUDID: String? = nil
 
     /// Returns true if the packet's sessionId matches the currently active tab
     private func isActiveTabSession(_ packet: WSPacket) -> Bool {
@@ -220,7 +257,7 @@ struct WorkspaceView: View {
                 .environmentObject(connectionManager)
         }
         .sheet(isPresented: $showMCPStore) {
-            MCPStoreView(workspacePath: workspace.localPath)
+            MCPStoreView(workspacePath: workspace.effectivePath)
                 .environmentObject(connectionManager)
         }
         .sheet(isPresented: $showDevTools) {
@@ -236,6 +273,11 @@ struct WorkspaceView: View {
                 showSessionPicker = false
                 continueSessionInTab(session, engineType: engine)
             }
+        }
+        .sheet(isPresented: $showMonorepoMigration) {
+            MonorepoMigrationSheet(workspace: workspace, projects: pendingMonorepoProjects)
+                .environmentObject(workspaceService)
+                .environmentObject(connectionManager)
         }
         .alert("Create Checkpoint", isPresented: $showCommitConfirmation) {
             Button("Commit", role: nil) { createCheckpoint() }
@@ -302,6 +344,23 @@ struct WorkspaceView: View {
             configureVoiceRecorder()
             await badgeService.clearBadge(for: workspace.id)
 
+            // Legacy workspaces created before sub-path / framework
+            // persistence shipped need a one-time backfill on open. Two
+            // independent triggers:
+            //   1. `subPath` was never resolved → user might still need
+            //      to pick a sub-project for monorepo workspaces.
+            //   2. `framework` is missing → `isSwiftMobile` falls back to
+            //      `stack==.mobile` and falsely shows the Build & Run tab
+            //      for React Native / Expo projects whose stack was
+            //      tagged "mobile" but never got a framework string saved.
+            // Re-running `repoAnalyze` covers both cases — it returns
+            // root-level language/framework AND the sub-project list.
+            let needsBackfill = !workspace.subPathConfigured || workspace.framework == nil
+            if needsBackfill && !didCheckSubPath {
+                didCheckSubPath = true
+                await checkForMonorepoMigration()
+            }
+
             // Wait for agent detection before initializing tabs.
             // The macOS app sends .agentsDetected after WebSocket connects.
             // Use reactive wait: listen for the @Published change with a timeout.
@@ -340,15 +399,23 @@ struct WorkspaceView: View {
                 }
             }
             chatService.switchTab(tabId: currentTab.id)
-            await chatService.loadFromUltraContext(workspacePath: workspace.localPath, client: ultraContextClient)
+            await chatService.loadFromUltraContext(workspacePath: workspace.effectivePath, client: ultraContextClient)
             setupOutputHandler()
             await waitForConnectionAndStartClaude()
 
-            // Preload file tree for @ autocomplete
-            connectionManager.send(WSPacket(action: .fileTree, payload: ["path": workspace.localPath]))
+            // Preload file tree for @ autocomplete (scoped to sub-project for monorepos)
+            connectionManager.send(WSPacket(action: .fileTree, payload: ["path": workspace.effectivePath]))
+
+            // Preload simulators for the Build & Run menu. Only fetch for
+            // workspaces that actually support Build & Run so we don't
+            // spam `simctl list` for web/backend workspaces.
+            if workspace.supportsBuildAndRun {
+                connectionManager.send(WSPacket(action: .simulatorList))
+                selectedSimulatorUDID = workspace.config?["preferredSimulator"]
+            }
 
             // Request slash commands for this workspace
-            connectionManager.send(WSPacket(action: .slashCommandsRequest, payload: ["path": workspace.localPath]))
+            connectionManager.send(WSPacket(action: .slashCommandsRequest, payload: ["path": workspace.effectivePath]))
 
             // Auto-start stream since stream mode is default
             if viewMode == .stream {
@@ -357,15 +424,6 @@ struct WorkspaceView: View {
         }
         .onDisappear {
             cleanupHandler()
-        }
-        .onChange(of: viewMode) { newMode in
-            print("[HotReload-iOS] onChange viewMode: \(newMode) isFullscreenStream=\(isFullscreenStream) isFullscreenBrowser=\(isFullscreenBrowser)")
-        }
-        .onChange(of: isFullscreenStream) { val in
-            print("[HotReload-iOS] onChange isFullscreenStream: \(val) viewMode=\(viewMode)")
-        }
-        .onChange(of: isFullscreenBrowser) { val in
-            print("[HotReload-iOS] onChange isFullscreenBrowser: \(val) viewMode=\(viewMode)")
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
             guard isInputFocused || isTerminalInputActive else { return }
@@ -474,13 +532,18 @@ struct WorkspaceView: View {
                         Label("Terminal", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
 
-                    Button(action: { addBuildRunTab() }) {
-                        Label {
-                            Text("Build & Run ") + Text("(Hot Reload)")
-                                .font(.system(size: 13, weight: .regular, design: .monospaced))
-                                .foregroundColor(TarsyTheme.textSecondary)
-                        } icon: {
-                            Image(systemName: "hammer.fill")
+                    // Build & Run only makes sense for native Apple projects
+                    // (Xcode / Swift Package). Hide the entry point for web,
+                    // backend, and JS-based mobile (Expo / React Native) workspaces.
+                    if workspace.isSwiftMobile {
+                        Button(action: { addBuildRunTab() }) {
+                            Label {
+                                Text("Build & Run ") + Text("(Hot Reload)")
+                                    .font(.system(size: 13, weight: .regular, design: .monospaced))
+                                    .foregroundColor(TarsyTheme.textSecondary)
+                            } icon: {
+                                Image(systemName: "hammer.fill")
+                            }
                         }
                     }
 
@@ -844,7 +907,9 @@ struct WorkspaceView: View {
                             buildPercent: $buildPercent,
                             hotReloadStatus: $hotReloadStatus,
                             hotReloadInjectionCount: $hotReloadInjectionCount,
-                            isBuildRunning: $isBuildRunning
+                            isBuildRunning: $isBuildRunning,
+                            autoStart: $autoStartBuild,
+                            preferredSimulatorUDID: selectedSimulatorUDID
                         )
                     } else if currentTab.type == .terminal {
                         TerminalContentView(
@@ -975,7 +1040,9 @@ struct WorkspaceView: View {
                             buildPercent: $buildPercent,
                             hotReloadStatus: $hotReloadStatus,
                             hotReloadInjectionCount: $hotReloadInjectionCount,
-                            isBuildRunning: $isBuildRunning
+                            isBuildRunning: $isBuildRunning,
+                            autoStart: $autoStartBuild,
+                            preferredSimulatorUDID: selectedSimulatorUDID
                         )
                     } else if currentTab.type == .terminal {
                         TerminalContentView(
@@ -1079,7 +1146,6 @@ struct WorkspaceView: View {
     private var viewModeSwitch: some View {
         HStack(spacing: 0) {
             Button(action: {
-                print("[HotReload-iOS] viewMode -> .stream (was \(viewMode))")
                 withAnimation(.easeInOut(duration: 0.2)) { viewMode = .stream }
                 // Signal StreamPlayerView to auto-start if not already running
                 if !isStreamActive {
@@ -1097,7 +1163,6 @@ struct WorkspaceView: View {
                     .padding(.vertical, 5)
             }
             Button(action: {
-                print("[HotReload-iOS] viewMode -> .browser (was \(viewMode))")
                 withAnimation(.easeInOut(duration: 0.2)) { viewMode = .browser }
             }) {
                 HStack(spacing: 4) {
@@ -1177,6 +1242,16 @@ struct WorkspaceView: View {
                 }
 
                 Spacer()
+
+                // Build & Run quick action — primary tap runs with the
+                // last-used simulator; the menu exposes per-simulator
+                // choices and (for cross-platform stacks like Expo/Flutter)
+                // a "Run on Android in Terminal" escape hatch for platforms
+                // Tarsy can't stream natively. Only shown when the workspace
+                // has a supported runner.
+                if workspace.supportsBuildAndRun {
+                    buildAndRunMenu
+                }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 6)
@@ -1649,11 +1724,11 @@ struct WorkspaceView: View {
                     connectionManager.send(WSPacket(action: .engineMessage, payload: payload))
                 } else {
 #if DEBUG
-                    print("[Chat] Sending engineCreate type=\(engineType.rawValue) path=\(workspace.localPath)")
+                    print("[Chat] Sending engineCreate type=\(engineType.rawValue) path=\(workspace.effectivePath)")
 #endif
                     let permConfig = AgentPermissionConfig.load()
                     var payload = [
-                        "path": workspace.localPath,
+                        "path": workspace.effectivePath,
                         "engineType": engineType.rawValue,
                         "aiContext": workspace.aiContext ?? "",
                         "message": messageText,
@@ -1718,7 +1793,7 @@ struct WorkspaceView: View {
                 // Terminal session not yet created — create it and queue the command
                 let createPacket = WSPacket(
                     action: .terminalCreate,
-                    payload: ["path": workspace.localPath]
+                    payload: ["path": workspace.effectivePath]
                 )
                 pendingCreateRequests[createPacket.id] = currentTab.id
                 pendingTerminalCommands[currentTab.id] = command
@@ -1727,9 +1802,10 @@ struct WorkspaceView: View {
         }
     }
 
-    /// Resolved cwd for a terminal tab (falls back to the workspace root).
+    /// Resolved cwd for a terminal tab (falls back to the workspace effective path,
+    /// which honors `subPath` for monorepos).
     private func terminalCwd(for tabId: String) -> String {
-        terminalCwds[tabId] ?? workspace.localPath
+        terminalCwds[tabId] ?? workspace.effectivePath
     }
 
     /// Parses a shell command and returns the new absolute cwd if it's a `cd`.
@@ -1836,7 +1912,7 @@ struct WorkspaceView: View {
             let createPacket = WSPacket(
                 action: .engineCreate,
                 payload: [
-                    "path": workspace.localPath,
+                    "path": workspace.effectivePath,
                     "engineType": engineType.rawValue,
                     "aiContext": workspace.aiContext ?? "",
                     "workspaceId": workspace.id.uuidString
@@ -1845,7 +1921,7 @@ struct WorkspaceView: View {
             pendingCreateRequests[createPacket.id] = tabs[tabIndex].id
             connectionManager.send(createPacket)
 #if DEBUG
-            print("[Workspace] Sent engineCreate type=\(engineType.rawValue) for path=\(workspace.localPath)")
+            print("[Workspace] Sent engineCreate type=\(engineType.rawValue) for path=\(workspace.effectivePath)")
 #endif
         }
 
@@ -1853,7 +1929,7 @@ struct WorkspaceView: View {
         if let tabIndex = tabs.firstIndex(where: { $0.type == .terminal && $0.sessionId == nil }) {
             let createPacket = WSPacket(
                 action: .terminalCreate,
-                payload: ["path": workspace.localPath]
+                payload: ["path": workspace.effectivePath]
             )
             pendingCreateRequests[createPacket.id] = tabs[tabIndex].id
             connectionManager.send(createPacket)
@@ -1875,7 +1951,7 @@ struct WorkspaceView: View {
         let createPacket = WSPacket(
             action: .engineCreate,
             payload: [
-                "path": workspace.localPath,
+                "path": workspace.effectivePath,
                 "engineType": engineType.rawValue,
                 "aiContext": workspace.aiContext ?? "",
                 "permissionMode": permConfig.mode(for: engineType).rawValue,
@@ -1895,13 +1971,100 @@ struct WorkspaceView: View {
         selectedTabIndex = tabs.count - 1
         chatService.switchTab(tabId: uniqueId)
 
-        // Create terminal session on Mac
+        // Create terminal session on Mac (in sub-project dir for monorepos)
         let createPacket = WSPacket(
             action: .terminalCreate,
-            payload: ["path": workspace.localPath]
+            payload: ["path": workspace.effectivePath]
         )
         pendingCreateRequests[createPacket.id] = uniqueId
         connectionManager.send(createPacket)
+    }
+
+    /// One-shot: ask the macOS daemon to re-analyze the workspace's
+    /// `localPath`. If multiple sub-projects come back, surface the
+    /// migration sheet so the user can pick one. If the response shows a
+    /// single project (or none), persist `subPathConfigured=true` so we
+    /// don't ask again.
+    ///
+    /// Awaits up to 5 s for the response (matching the timeout used by the
+    /// new-workspace analysis path), then either presents the sheet or
+    /// silently records that the check ran.
+    private func checkForMonorepoMigration() async {
+        // Need a connection to talk to the macOS daemon. If we're not yet
+        // connected, give it up to 3 s — the .task block right after this
+        // also waits on connection state, so this small grace window keeps
+        // the migration logic from racing the WebSocket handshake.
+        if !connectionManager.isConnected {
+            for _ in 0..<30 {
+                if connectionManager.isConnected { break }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            guard connectionManager.isConnected else { return }
+        }
+
+        struct Analysis: Codable {
+            let language: String?
+            let framework: String?
+            let stack: String?
+            let suggestedCommand: String?
+            let isMonorepo: Bool?
+            let projects: [DetectedSubProject]?
+        }
+
+        let analysis: Analysis? = await withCheckedContinuation { continuation in
+            var didResume = false
+            let listenerKey = "monorepo-migration-\(workspaceId.uuidString)"
+
+            connectionManager.addListener(listenerKey) { packet in
+                guard packet.action == .repoAnalysis,
+                      let json = packet.payload?["analysis"],
+                      let data = json.data(using: .utf8),
+                      let analysis = try? JSONDecoder().decode(Analysis.self, from: data) else { return }
+                guard !didResume else { return }
+                didResume = true
+                connectionManager.removeListener(listenerKey)
+                continuation.resume(returning: analysis)
+            }
+
+            connectionManager.send(WSPacket(action: .repoAnalyze, payload: ["path": workspace.localPath]))
+
+            Task {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !didResume else { return }
+                didResume = true
+                connectionManager.removeListener(listenerKey)
+                continuation.resume(returning: nil)
+            }
+        }
+
+        await MainActor.run {
+            let projects = analysis?.projects ?? []
+            if projects.count > 1 {
+                pendingMonorepoProjects = projects
+                showMonorepoMigration = true
+            } else {
+                // Single-project repo (or analysis failed). Mark configured
+                // so we never re-prompt — there's nothing to choose. Also
+                // backfill language/framework while we're at it: legacy
+                // workspaces with no `config` would otherwise stay
+                // mis-classified by `isSwiftMobile` (e.g. an Expo project
+                // with `stack=mobile` falsely shows the Build & Run tab
+                // because the language=Swift signal is missing).
+                Task {
+                    var merged = workspace.config ?? [:]
+                    merged["subPathConfigured"] = "true"
+                    if let lang = analysis?.language, !lang.isEmpty {
+                        merged["language"] = lang
+                    }
+                    if let fw = analysis?.framework, !fw.isEmpty {
+                        merged["framework"] = fw
+                    }
+                    var req = UpdateWorkspaceRequest()
+                    req.config = merged
+                    try? await workspaceService.updateWorkspace(id: workspaceId, req)
+                }
+            }
+        }
     }
 
     private func addBuildRunTab() {
@@ -1913,6 +2076,140 @@ struct WorkspaceView: View {
         let tab = TerminalTab(id: "build-run", title: "Build & Run", isFixed: false, type: .buildAndRun, sessionId: nil, engineType: nil)
         tabs.append(tab)
         selectedTabIndex = tabs.count - 1
+    }
+
+    /// Bottom-bar entry point: jump straight into Build & Run from anywhere
+    /// in the workspace. Opens or focuses the tab AND auto-starts the build
+    /// — without this the user has to (a) open the menu, (b) tap Build &
+    /// Run, (c) tap the in-tab Build & Run button. Three-tap workflow for
+    /// what should be one tap.
+    private func openBuildAndRun() {
+        addBuildRunTab()
+        autoStartBuild = true
+    }
+
+    /// Picker menu backing the bottom-bar Build & Run button. Primary tap
+    /// label reflects the currently selected simulator; menu items let the
+    /// user switch simulator or (for Expo/Flutter) punt Android to the
+    /// terminal since Tarsy can't stream Android emulators.
+    @ViewBuilder
+    private var buildAndRunMenu: some View {
+        let runnerIsCrossPlatform = workspace.buildRunner == .expo || workspace.buildRunner == .flutter
+        let defaultSim = availableSimulators.first(where: { $0.udid == selectedSimulatorUDID })
+            ?? availableSimulators.first(where: { $0.isBooted })
+            ?? availableSimulators.first
+
+        Menu {
+            // Primary action — run with the currently selected simulator.
+            Button(action: { runBuildOnIOS(udid: selectedSimulatorUDID) }) {
+                Label(
+                    defaultSim.map { "Run on \($0.name)" } ?? "Build & Run (auto-pick simulator)",
+                    systemImage: "play.fill"
+                )
+            }
+
+            // Explicit per-simulator picker. Hidden when there's zero/one
+            // simulator — a picker with one item is just noise.
+            if availableSimulators.count > 1 {
+                Divider()
+                Section("iOS Simulator") {
+                    ForEach(availableSimulators) { sim in
+                        Button(action: {
+                            selectedSimulatorUDID = sim.udid
+                            Task { await persistPreferredSimulator(sim.udid) }
+                            runBuildOnIOS(udid: sim.udid)
+                        }) {
+                            if sim.udid == selectedSimulatorUDID {
+                                Label("\(sim.name) — \(sim.runtimeShortName)", systemImage: "checkmark")
+                            } else if sim.isBooted {
+                                Label("\(sim.name) — \(sim.runtimeShortName) (booted)", systemImage: "iphone")
+                            } else {
+                                Label("\(sim.name) — \(sim.runtimeShortName)", systemImage: "iphone")
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Android escape hatch. Tarsy has no Android streaming/input
+            // integration so we opt out of the native Build & Run tab and
+            // drop the user into a terminal with the right command — they
+            // still have to watch the emulator window physically on the
+            // Mac, but they can at least kick the build off from iOS.
+            if runnerIsCrossPlatform {
+                Divider()
+                Button(action: { runAndroidInTerminal() }) {
+                    Label("Run on Android (in terminal)", systemImage: "terminal")
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                if isBuildRunning {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .tint(TarsyTheme.backgroundPrimary)
+                } else {
+                    Image(systemName: "play.fill")
+                        .font(TarsyTheme.font(size: 9))
+                }
+                Text(isBuildRunning ? "building..." : "Build & Run")
+                    .font(TarsyTheme.font(size: 11, weight: .medium))
+                Image(systemName: "chevron.down")
+                    .font(TarsyTheme.font(size: 8))
+                    .opacity(0.7)
+            }
+            .foregroundColor(TarsyTheme.backgroundPrimary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(isBuildRunning ? TarsyTheme.backgroundTertiary : TarsyTheme.accentAmber)
+            .cornerRadius(6)
+        }
+        .disabled(isBuildRunning)
+    }
+
+    /// Kicks off an iOS Build & Run with an optional specific simulator.
+    /// Passing nil lets the macOS daemon auto-pick (first booted, fall
+    /// back to first available + boot it).
+    private func runBuildOnIOS(udid: String?) {
+        selectedSimulatorUDID = udid
+        openBuildAndRun()
+    }
+
+    /// Opens a terminal tab pre-populated with the Android equivalent of
+    /// the current workspace's runner command. Not integrated with stream
+    /// or input — this is the "we told you we can't do Android natively
+    /// but here's the command" honest-middle-ground UX.
+    private func runAndroidInTerminal() {
+        let command: String
+        switch workspace.buildRunner {
+        case .expo:
+            command = "npx expo run:android"
+        case .flutter:
+            // Flutter doesn't auto-pick between multiple emulators like
+            // simctl does for us; leave -d off so the CLI prints its own
+            // picker to the terminal, which the user can respond to.
+            command = "flutter run"
+        default:
+            return
+        }
+        addTerminalTab()
+        // After addTerminalTab(), currentTab is the newly-created terminal.
+        // Queue the command for after the session is created so it runs
+        // once macOS finishes spawning the shell.
+        if let newTabId = tabs.last?.id {
+            pendingTerminalCommands[newTabId] = command
+        }
+    }
+
+    /// Persists the user's simulator choice into the workspace `config`
+    /// jsonb. Merges into the existing dict so language/framework/subPath
+    /// keys are preserved — Supabase PATCH replaces the whole column.
+    private func persistPreferredSimulator(_ udid: String) async {
+        var merged = workspace.config ?? [:]
+        merged["preferredSimulator"] = udid
+        var req = UpdateWorkspaceRequest()
+        req.config = merged
+        try? await workspaceService.updateWorkspace(id: workspaceId, req)
     }
 
     private func continueSessionInTab(_ session: UltraContextSession, engineType: AIEngineType? = nil) {
@@ -1956,7 +2253,7 @@ struct WorkspaceView: View {
         let createPacket = WSPacket(
             action: .engineCreate,
             payload: [
-                "workspacePath": workspace.localPath,
+                "workspacePath": workspace.effectivePath,
                 "workspaceId": workspace.id.uuidString,
                 "engineType": engineType.rawValue,
                 "message": String(message.prefix(4000)),
@@ -2209,7 +2506,8 @@ struct WorkspaceView: View {
                        let json = packet.payload?["tree"],
                        let data = json.data(using: .utf8),
                        let parsed = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-                        let basePath = workspace.localPath.hasSuffix("/") ? workspace.localPath : workspace.localPath + "/"
+                        let root = workspace.effectivePath
+                        let basePath = root.hasSuffix("/") ? root : root + "/"
                         cachedFileEntries = parsed.compactMap { dict -> AutocompleteItem? in
                             guard let name = dict["name"] as? String,
                                   let path = dict["path"] as? String,
@@ -2228,7 +2526,6 @@ struct WorkspaceView: View {
 
                 // Build & Run
                 case .buildProgress:
-                    print("[HotReload-iOS] buildProgress: phase=\(packet.payload?["phase"] ?? "?") percent=\(packet.payload?["percent"] ?? "?") viewMode=\(viewMode) isFullscreenStream=\(isFullscreenStream)")
                     // Only update build log if the Build & Run tab is visible
                     if let output = packet.payload?["output"], !output.isEmpty,
                        currentTab.type == .buildAndRun || output.contains("error:") {
@@ -2239,7 +2536,6 @@ struct WorkspaceView: View {
                     if let pct = packet.payload?["percent"], let p = Int(pct) { buildPercent = p }
 
                 case .buildComplete:
-                    print("[HotReload-iOS] buildComplete viewMode=\(viewMode) isFullscreenStream=\(isFullscreenStream)")
                     isBuildRunning = false
                     buildPhase = "complete"
                     buildPercent = 100
@@ -2247,7 +2543,6 @@ struct WorkspaceView: View {
                     Haptics.success()
 
                 case .buildError:
-                    print("[HotReload-iOS] buildError: \(packet.payload?["message"] ?? "?") viewMode=\(viewMode)")
                     isBuildRunning = false
                     buildPhase = "error"
                     if let msg = packet.payload?["message"] {
@@ -2256,12 +2551,10 @@ struct WorkspaceView: View {
                     Haptics.error()
 
                 case .hotReloadStatus:
-                    print("[HotReload-iOS] hotReloadStatus: \(packet.payload?["status"] ?? "?") viewMode=\(viewMode)")
                     hotReloadStatus = packet.payload?["status"] ?? "idle"
                     if let file = packet.payload?["file"] { lastInjectedFile = file }
 
                 case .hotReloadInjection:
-                    print("[HotReload-iOS] hotReloadInjection: \(packet.payload?["file"] ?? "?")")
                     hotReloadInjectionCount += 1
                     if let file = packet.payload?["file"],
                        let duration = packet.payload?["durationMs"] {
@@ -2270,7 +2563,6 @@ struct WorkspaceView: View {
                     Haptics.light()
 
                 case .hotReloadError:
-                    print("[HotReload-iOS] hotReloadError: \(packet.payload?["message"] ?? "?")")
                     hotReloadStatus = "error"
                     if let msg = packet.payload?["message"] {
                         buildOutput.append("Hot reload: \(msg)")
@@ -2280,10 +2572,13 @@ struct WorkspaceView: View {
                     }
 
                 case .simulatorListResult:
-                    break
+                    if let json = packet.payload?["devices"],
+                       let data = json.data(using: .utf8),
+                       let list = try? JSONDecoder().decode([SimulatorDevice].self, from: data) {
+                        availableSimulators = list
+                    }
 
                 case .simulatorStatus:
-                    print("[HotReload-iOS] simulatorStatus: \(packet.payload?["status"] ?? "?") viewMode=\(viewMode)")
                     if let status = packet.payload?["status"] {
                         buildOutput.append("Simulator: \(status)")
                     }
